@@ -1,0 +1,117 @@
+company,ticker
+Apple,AAPL
+Microsoft,MSFT
+Alphabet,GOOGL
+Google,GOOGL
+Amazon,AMZN
+Meta,META
+Facebook,META
+Tesla,TSLA
+Nvidia,NVDA
+Berkshire Hathaway,BRK.B
+JPMorgan Chase,JPM
+JPMorgan,JPM
+Johnson & Johnson,JNJ
+Visa,V
+Procter & Gamble,PG
+UnitedHealth,UNH
+Home Depot,HD
+Mastercard,MA
+Bank of America,BAC
+Walt Disney,DIS
+Disney,DIS
+Pfizer,PFE
+Netflix,NFLX
+Coca-Cola,KO
+PepsiCo,PEP
+Intel,INTC
+Cisco,CSCO
+Verizon,VZ
+AT&T,T
+Chevron,CVX
+Exxon Mobil,XOM
+ExxonMobil,XOM
+Walmart,WMT
+Costco,COST
+McDonald's,MCD
+Nike,NKE
+Boeing,BA
+Goldman Sachs,GS
+Morgan Stanley,MS
+IBM,IBM
+Salesforce,CRM
+Adobe,ADBE
+Oracle,ORCL
+Qualcomm,QCOM
+Advanced Micro Devices,AMD
+AMD,AMD
+Starbucks,SBUX
+Ford Motor,F
+Ford,F
+General Motors,GM
+Uber,UBER
+Airbnb,ABNB
+PayPal,PYPL
+Spotify,SPOT
+Snap,SNAP
+Rivian,RIVN
+Lucid,LCID
+Palantir,PLTR
+Shopify,SHOP
+Block,SQ
+Square,SQ
+Zoom,ZM
+Roku,ROKU
+Moderna,MRNA
+Eli Lilly,LLY
+AbbVie,ABBV
+Merck,MRK
+Bristol Myers Squibb,BMY
+3M,MMM
+Caterpillar,CAT
+Honeywell,HON
+Lockheed Martin,LMT
+Raytheon,RTX
+General Electric,GE
+FedEx,FDX
+UPS,UPS
+Delta Air Lines,DAL
+United Airlines,UAL
+American Airlines,AAL
+Southwest Airlines,LUV
+Target,TGT
+Lowe's,LOW
+Kroger,KR
+CVS Health,CVS
+Comcast,CMCSA
+Charter Communications,CHTR
+T-Mobile,TMUS
+American Express,AXP
+Wells Fargo,WFC
+Citigroup,C
+US Bancorp,USB
+Charles Schwab,SCHW
+BlackRock,BLK
+Booking Holdings,BKNG
+Marriott,MAR
+Hilton,HLT
+eBay,EBAY
+Etsy,ETSY
+Micron,MU
+Texas Instruments,TXN
+Applied Materials,AMAT
+Broadcom,AVGO
+ServiceNow,NOW
+Snowflake,SNOW
+Datadog,DDOG
+CrowdStrike,CRWD
+Palo Alto Networks,PANW
+Fortinet,FTNT
+Twilio,TWLO
+DocuSign,DOCU
+Peloton,PTON
+GameStop,GME
+AMC Entertainment,AMC
+Coinbase,COIN
+MicroStrategy,MSTR
+Robinhood,HOOD

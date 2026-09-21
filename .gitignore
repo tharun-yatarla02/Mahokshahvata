@@ -1,0 +1,26 @@
+# Environments
+venv/
+env/
+.venv/
+__pycache__/
+*.pyc
+
+# Secrets
+.env
+*.key
+
+# Databases (generated at runtime)
+*.db
+*.sqlite3
+
+# Trained model artifacts (large binary files — don't commit to git)
+news_sentiment/model/sentiment_model/
+news_sentiment/model/training_checkpoints/
+
+# Scraper output
+news_sentiment/news_sentiment_output.csv
+
+# OS / editor cruft
+.DS_Store
+.vscode/
+.idea/
