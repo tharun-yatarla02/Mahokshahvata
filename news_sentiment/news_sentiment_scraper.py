@@ -63,6 +63,30 @@ RSS_FEEDS = {
 TICKER_CSV = Path(__file__).parent / "company_tickers.csv"
 OUTPUT_CSV = Path(__file__).parent / "news_sentiment_output.csv"
 
+# Macro/geopolitical themes that move whole sectors even when no specific
+# company is named in the headline — e.g. "Oil prices surge amid Russia-
+# Ukraine tensions" never says "Exxon," but every Energy stock is affected.
+# This catches what company-name matching alone would miss.
+MACRO_THEMES = {
+    "war": ["Energy", "Defense", "Financials"],
+    "invasion": ["Energy", "Defense"],
+    "sanctions": ["Energy", "Financials"],
+    "oil price": ["Energy"],
+    "opec": ["Energy"],
+    "crude": ["Energy"],
+    "interest rate": ["Financials", "Real Estate"],
+    "federal reserve": ["Financials"],
+    "rate cut": ["Financials", "Real Estate", "Technology"],
+    "rate hike": ["Financials", "Real Estate"],
+    "inflation": ["Consumer Discretionary", "Financials"],
+    "recession": ["Financials", "Consumer Discretionary"],
+    "tariff": ["Industrials", "Technology", "Consumer Discretionary"],
+    "trade war": ["Industrials", "Technology"],
+    "supply chain": ["Industrials", "Technology"],
+    "chip shortage": ["Technology"],
+    "election": ["Financials", "Healthcare", "Energy"],
+}
+
 # Which sentiment backend to use: "claude" (Anthropic API) or "local" (your
 # own trained model via model/local_sentiment_model.py). Override with:
 #   export SENTIMENT_BACKEND=local
@@ -98,6 +122,19 @@ def find_tickers(text, company_map):
     return found
 
 
+def find_macro_themes(text):
+    """Detects broad macro/geopolitical themes and the sectors they affect,
+    even when no specific company is named."""
+    lower_text = text.lower()
+    matched_themes = []
+    affected_sectors = set()
+    for theme, sectors in MACRO_THEMES.items():
+        if theme in lower_text:
+            matched_themes.append(theme)
+            affected_sectors.update(sectors)
+    return matched_themes, sorted(affected_sectors)
+
+
 # ---------------------------------------------------------------------------
 # LLM sentiment classification
 # ---------------------------------------------------------------------------
@@ -118,12 +155,14 @@ No prose, no markdown fences, just the JSON array."""
 
 
 def classify_batch(client, batch):
-    """batch: list of dicts with 'title', 'summary', 'tickers' (comma string)"""
+    """batch: list of dicts with 'title', 'summary', and either 'tickers' or 'sectors_affected'"""
     lines = []
     for i, a in enumerate(batch, start=1):
-        lines.append(
-            f"{i}. [Tickers: {a['tickers']}] {a['title']} — {a['summary'][:300]}"
-        )
+        if a.get("tickers"):
+            tag = f"Tickers: {a['tickers']}"
+        else:
+            tag = f"Macro theme affecting sectors: {a.get('sectors_affected', 'Unknown')}"
+        lines.append(f"{i}. [{tag}] {a['title']} — {a['summary'][:300]}")
     user_prompt = "\n".join(lines)
 
     response = client.messages.create(
@@ -219,20 +258,35 @@ def match_tickers(articles, company_map):
     for a in articles:
         text = f"{a['title']}. {a['summary']}"
         tickers = find_tickers(text, company_map)
-        if not tickers:
-            continue  # keep only articles that mention a tracked stock
-        matched.append({
-            **a,
-            "tickers": ", ".join(sorted(tickers.keys())),
-            "companies": ", ".join(sorted(set(tickers.values()))),
-        })
+        themes, sectors = find_macro_themes(text)
+
+        if tickers:
+            matched.append({
+                **a,
+                "tickers": ", ".join(sorted(tickers.keys())),
+                "companies": ", ".join(sorted(set(tickers.values()))),
+                "match_type": "company",
+                "sectors_affected": "",
+                "themes": "",
+            })
+        elif sectors:
+            # No specific company named, but a macro theme affects whole sectors
+            matched.append({
+                **a,
+                "tickers": "",
+                "companies": "",
+                "match_type": "macro",
+                "sectors_affected": ", ".join(sectors),
+                "themes": ", ".join(themes),
+            })
+        # else: no company or macro theme match — skip, not relevant to tracked stocks
     return matched
 
 
 def summarize_by_ticker(results):
     summary = {}
     for r in results:
-        if r["sentiment"] == "Unknown":
+        if r["sentiment"] == "Unknown" or not r.get("tickers"):
             continue
         for ticker in r["tickers"].split(", "):
             if not ticker:
@@ -244,32 +298,67 @@ def summarize_by_ticker(results):
     return summary
 
 
-def print_report(results, summary):
+def summarize_by_sector(results):
+    """Aggregates macro-theme articles (no specific company named) by affected sector."""
+    summary = {}
+    for r in results:
+        if r["sentiment"] == "Unknown" or not r.get("sectors_affected"):
+            continue
+        for sector in r["sectors_affected"].split(", "):
+            if not sector:
+                continue
+            s = summary.setdefault(sector, {"count": 0, "pos": 0, "neg": 0, "neu": 0})
+            s["count"] += 1
+            key = {"Positive": "pos", "Negative": "neg", "Neutral": "neu"}.get(r["sentiment"], "neu")
+            s[key] += 1
+    return summary
+
+
+def print_report(results, summary, sector_summary=None):
+    sector_summary = sector_summary or {}
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     print(f"\n{'='*90}\nLIVE STOCK NEWS SENTIMENT (LLM-scored) — {stamp}\n{'='*90}\n")
 
     if not results:
-        print("No articles matched known tickers in this run.")
+        print("No articles matched known tickers or macro themes in this run.")
         return
 
-    print(f"{len(results)} article(s) mentioned tracked stocks:\n")
-    for r in results:
+    company_results = [r for r in results if r.get("tickers")]
+    macro_results = [r for r in results if r.get("sectors_affected")]
+
+    print(f"{len(company_results)} article(s) mentioned tracked companies directly:\n")
+    for r in company_results:
         conf = f"{r.get('confidence', 0):.0%}"
         print(f"[{r['sentiment']:8}] (conf {conf:5})  {r['tickers']:20}  {r['title']}")
         print(f"           why: {r.get('reasoning', '')}")
         print(f"           source: {r['source']}   {r['link']}\n")
+
+    if macro_results:
+        print(f"{'-'*90}\nMACRO / GEOPOLITICAL NEWS (no company named, whole sectors affected)\n{'-'*90}\n")
+        for r in macro_results:
+            conf = f"{r.get('confidence', 0):.0%}"
+            print(f"[{r['sentiment']:8}] (conf {conf:5})  sectors: {r['sectors_affected']:30}  {r['title']}")
+            print(f"           why: {r.get('reasoning', '')}")
+            print(f"           source: {r['source']}   {r['link']}\n")
 
     print(f"{'-'*90}\nPER-TICKER SUMMARY (sorted by article volume)\n{'-'*90}")
     print(f"{'Ticker':8}{'Articles':10}{'Pos':6}{'Neu':6}{'Neg':6}")
     for ticker, s in sorted(summary.items(), key=lambda x: -x[1]["count"]):
         print(f"{ticker:8}{s['count']:<10}{s['pos']:<6}{s['neu']:<6}{s['neg']:<6}")
 
+    if sector_summary:
+        print(f"\n{'-'*90}\nPER-SECTOR MACRO IMPACT (sorted by article volume)\n{'-'*90}")
+        print(f"{'Sector':22}{'Articles':10}{'Pos':6}{'Neu':6}{'Neg':6}")
+        for sector, s in sorted(sector_summary.items(), key=lambda x: -x[1]["count"]):
+            print(f"{sector:22}{s['count']:<10}{s['pos']:<6}{s['neu']:<6}{s['neg']:<6}")
+
 
 def save_csv(results):
     if not results:
         return
-    fieldnames = ["source", "title", "summary", "link", "published", "tickers",
-                  "companies", "sentiment", "confidence", "reasoning"]
+    fieldnames = ["source", "title", "summary", "link", "published", "match_type",
+                  "tickers", "companies", "sectors_affected", "themes",
+                  "sentiment", "confidence", "reasoning"]
     with open(OUTPUT_CSV, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
@@ -302,7 +391,8 @@ def main():
         results.append({**article, **sentiment})
 
     summary = summarize_by_ticker(results)
-    print_report(results, summary)
+    sector_summary = summarize_by_sector(results)
+    print_report(results, summary, sector_summary)
     save_csv(results)
 
 

@@ -33,9 +33,11 @@ from pydantic import BaseModel
 # Make sibling modules importable
 sys.path.append(str(Path(__file__).parent.parent / "momentum"))
 sys.path.append(str(Path(__file__).parent.parent / "paper_trading"))
+sys.path.append(str(Path(__file__).parent.parent / "politician_trades"))
 
 from momentum_engine import rank_momentum, DEFAULT_UNIVERSE
 from paper_trading_engine import PaperTradingEngine, RiskRules
+from politician_trades import list_politicians, get_trades_for_politician, refresh_cache
 
 app = FastAPI(title="AI Stock Platform API", version="0.1.0")
 engine = PaperTradingEngine(str(Path(__file__).parent.parent / "paper_trading" / "paper_trading.db"))
@@ -123,3 +125,32 @@ def get_history(portfolio_id: int):
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# Politician trading endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/politicians")
+def get_politicians():
+    """List every politician with at least one disclosed trade."""
+    return {"politicians": list_politicians()}
+
+
+@app.get("/politicians/{name}/trades")
+def get_politician_trades(name: str):
+    """All trades for one politician, newest transaction date first."""
+    trades = get_trades_for_politician(name)
+    if not trades:
+        raise HTTPException(status_code=404, detail=f"No trades found for '{name}'")
+    return {"politician": name, "count": len(trades), "trades": trades}
+
+
+@app.post("/politicians/refresh")
+def refresh_politician_data():
+    """Pulls fresh data from Quiver Quantitative into the local cache."""
+    try:
+        count = refresh_cache()
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Could not refresh from Quiver API: {e}")
+    return {"refreshed": count}
