@@ -247,9 +247,9 @@
 
           const items = headlineMatches.length ? headlineMatches.slice(0, 3) : (data?.results || []).slice(0, 3);
           const newsHtml = items.map((item) => {
-            const source = item.source || 'News Feed';
-            const title = item.title || 'Market update';
-            const summary = item.summary || 'No summary available.';
+            const source = escapeHtml(item.source || 'News Feed');
+            const title = escapeHtml(item.title || 'Market update');
+            const summary = escapeHtml(item.summary || 'No summary available.');
             return `
               <div class="news-item">
                 <div class="news-source">${source}</div>
@@ -330,7 +330,7 @@
           renderMarket(data.results || []);
           setStatus('Market data loaded successfully.', 'success');
         } catch (err) {
-          marketTableBody.innerHTML = `<tr><td colspan="5" class="negative">${String(err)}</td></tr>`;
+          marketTableBody.innerHTML = `<tr><td colspan="5" class="negative">${escapeHtml(String(err))}</td></tr>`;
           setStatus(err.message, 'error');
         }
       }

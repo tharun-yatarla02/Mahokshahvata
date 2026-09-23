@@ -45,7 +45,7 @@ This project has reached a working multi-page investment dashboard with live sen
 
 ### 6. Validation coverage
 - Automated regression tests for sentiment and paper-trading flows are in place.
-- Latest verification run: 29 tests passed (2026-09-23).
+- Latest verification run: 31 tests passed (2026-09-23).
 
 ## Current halt / release checkpoint
 
@@ -68,18 +68,29 @@ Driven in headless Chrome against a running app, with demo auth, on a copy of an
 3. **Trade history and balances:** pass. Buy, sell and add-funds balances matched expected values exactly in the UI and the API.
 4. **Scraping load:** fixed (2026-09-23). `/news-sentiment` is cached for 5 minutes and Claude classifications are cached per headline, so Claude runs at most 12 times an hour regardless of open tabs. Without `ANTHROPIC_API_KEY`, labels still come from a keyword heuristic and are often wrong.
 
+### Fixed after the browser check (2026-09-23)
+
+Architecture review:
+- Concurrent trades could overspend cash (shared SQLite connection, check-then-write). Engine methods now run under one lock.
+- The client set the trade price. Stock trades are now rejected if more than 5% from the latest market close.
+- Stock buys stored sector "Unknown" (AAPL showed "Unknown"). The real sector is recorded and tickers are uppercased; existing Unknown holdings update on the next buy.
+- `sentiment_history.json` is runtime data: gitignored, and tests write to a temp file instead of the real one.
+- The six copies of the frontend fetch helper are one shared `frontend/api.js`.
+- `api/main.py` uses package imports instead of `sys.path` hacks.
+- Cash balances are rounded to cents on every write, so float error can't accumulate.
+
+UI and security:
+- Redesigned UI: token-based light/dark themes, mobile nav strip, reduced-motion/transparency/contrast support. This fixed the low-contrast BUY/SELL badges in light mode.
+- The billing page profile menu had no click handler; it opens now.
+- The market page inserted RSS headlines as raw HTML (XSS from a malicious feed). Feed text is now escaped everywhere, and "Read article" links only allow http(s) URLs.
+- Headlines showed HTML entities raw (e.g. `S&amp;P`). The scraper now strips tags and decodes entities before the frontend escapes them.
+
 Other things seen, not yet fixed:
-- The frontend always sends `demo-token`, so real Firebase sign-in isn't wired into the pages.
-- The trade history panel on the portfolio page has low-contrast BUY/SELL badges on a grey background in light mode.
+- The frontend always sends `demo-token`, so real Firebase sign-in isn't wired into the pages. `getAuthToken()` in `frontend/api.js` is the one place to change.
 - Some older option trades in existing databases have an empty ticker (shown as "N/A").
-- Headlines with HTML entities show them raw (e.g. `S&amp;P`).
-
-### Architecture review fixes (2026-09-23)
-
-- Concurrent trades could overspend cash (shared SQLite connection, check-then-write). Engine methods now run under one lock. Only safe with a single server process.
-- The client set the trade price. Stock trades are now rejected if more than 5% from the latest market close. Option premiums are still not validated.
-- Stock buys stored sector "Unknown" (fixes AAPL). Real sector is recorded and tickers are uppercased; existing Unknown holdings update on the next buy.
-- Running the tests writes to the real `news_sentiment/sentiment_history.json`; tests should use a temp file.
+- Option premiums are not validated against a market price (stock prices are).
+- The trade lock only works with a single server process; multiple uvicorn workers would need per-request connections or Postgres.
+- Money is stored as `REAL` rounded to cents; switch to integer cents before adding fees, tax lots, or fractional shares.
 
 ## Next major items to complete
 

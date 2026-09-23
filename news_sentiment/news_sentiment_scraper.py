@@ -35,6 +35,7 @@ Extend later:
 """
 
 import csv
+import html
 import json
 import os
 import re
@@ -282,6 +283,12 @@ def _get_entry_timestamp(entry):
         return None
 
 
+def _clean_text(value):
+    """Feed text as plain text: drop HTML tags, decode entities (S&amp;P -> S&P).
+    The frontend escapes it again before rendering."""
+    return " ".join(html.unescape(re.sub(r"<[^>]+>", " ", value or "")).split())
+
+
 def fetch_articles():
     articles = []
     for source, feed_urls in RSS_FEEDS.items():
@@ -321,8 +328,8 @@ def fetch_articles():
             best_timestamp = feed_latest
 
         for entry in best_entries:
-            title = (entry.get("title") or "").strip()
-            summary = (entry.get("summary") or entry.get("description") or "").strip()
+            title = _clean_text(entry.get("title"))
+            summary = _clean_text(entry.get("summary") or entry.get("description"))
             link = (entry.get("link") or entry.get("url") or "").strip()
             published = entry.get("published") or entry.get("updated") or entry.get("pubDate") or ""
             if not title and not summary:

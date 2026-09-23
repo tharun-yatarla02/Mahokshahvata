@@ -111,15 +111,6 @@
         pageSize: 25,
       };
 
-      function escapeHtml(value) {
-        return String(value ?? '')
-          .replace(/&/g, '&amp;')
-          .replace(/</g, '&lt;')
-          .replace(/>/g, '&gt;')
-          .replace(/"/g, '&quot;')
-          .replace(/'/g, '&#039;');
-      }
-
       function formatPublished(value) {
         if (!value) return 'Just now';
         const date = new Date(value);
@@ -232,14 +223,14 @@
         }
 
         sentimentOutput.innerHTML = pageItems.map((item) => {
-          const sentiment = (item.sentiment || 'Neutral').toLowerCase();
+          const sentimentLabel = escapeHtml(item.sentiment || 'Neutral');
+          const sentiment = sentimentLabel.toLowerCase();
           const title = escapeHtml(item.title || 'Market update');
           const summary = escapeHtml(item.summary || 'No summary available.');
           const source = escapeHtml(item.source || 'News feed');
           const published = formatPublished(item.published || item.generated_at);
           const tickers = escapeHtml(item.tickers || item.companies || item.sectors_affected || 'Market');
-          const link = item.link ? `target="_blank" rel="noopener noreferrer"` : '';
-          const href = item.link ? `href="${escapeHtml(item.link)}"` : '';
+          const link = safeUrl(item.link);
 
           return `
             <article class="sentiment-item">
@@ -252,12 +243,12 @@
                     <span>${published}</span>
                   </div>
                 </div>
-                <span class="sentiment-badge ${sentiment}">${item.sentiment || 'Neutral'}</span>
+                <span class="sentiment-badge ${sentiment}">${sentimentLabel}</span>
               </div>
               <p class="sentiment-summary">${summary}</p>
               <div class="sentiment-footer">
                 <span>${tickers}</span>
-                ${item.link ? `<a ${href} ${link}>Read article</a>` : '<span>Market note</span>'}
+                ${link ? `<a href="${escapeHtml(link)}" target="_blank" rel="noopener noreferrer">Read article</a>` : '<span>Market note</span>'}
               </div>
             </article>
           `;

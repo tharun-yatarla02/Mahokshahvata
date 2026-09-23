@@ -133,3 +133,9 @@ def test_classify_all_only_sends_new_headlines(monkeypatch):
 
     assert sent == ["https://example.com/a", "https://example.com/b"]
     assert [r["sentiment"] for r in results] == ["Positive", "Positive"]
+
+
+def test_feed_text_is_plain_text():
+    assert scraper._clean_text("S&amp;P 500 hits record") == "S&P 500 hits record"
+    assert scraper._clean_text("<p>Stocks <b>rally</b></p>\n after CPI") == "Stocks rally after CPI"
+    assert scraper._clean_text(None) == ""
