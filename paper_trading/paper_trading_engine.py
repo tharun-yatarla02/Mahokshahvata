@@ -46,8 +46,17 @@ class RiskRules:
 # ---------------------------------------------------------------------------
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    google_sub TEXT UNIQUE NOT NULL,
+    email TEXT,
+    name TEXT,
+    created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS portfolios (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id),
     name TEXT NOT NULL,
     starting_capital REAL NOT NULL,
     cash_balance REAL NOT NULL,
@@ -101,13 +110,52 @@ class PaperTradingEngine:
         self.conn.commit()
 
     # -----------------------------------------------------------------
+    # Users
+    # -----------------------------------------------------------------
+
+    def get_or_create_user(self, google_sub, email=None, name=None):
+        """Looks up a user by their stable Google id, creating them on
+        first sign-in. Returns the internal user_id (ours, not Google's)."""
+        row = self.conn.execute(
+            "SELECT id FROM users WHERE google_sub = ?", (google_sub,)
+        ).fetchone()
+        if row:
+            return row["id"]
+
+        cur = self.conn.execute(
+            "INSERT INTO users (google_sub, email, name, created_at) VALUES (?, ?, ?, ?)",
+            (google_sub, email, name, datetime.now(timezone.utc).isoformat()),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def _assert_owner(self, portfolio_id, user_id):
+        """Raises PermissionError if this portfolio doesn't belong to this user.
+        Every portfolio-touching method below calls this first — a user should
+        never be able to view or modify someone else's simulated money."""
+        row = self.conn.execute(
+            "SELECT user_id FROM portfolios WHERE id = ?", (portfolio_id,)
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"No portfolio with id {portfolio_id}")
+        if row["user_id"] != user_id:
+            raise PermissionError(f"Portfolio {portfolio_id} does not belong to this user")
+
+    def list_portfolios_for_user(self, user_id):
+        rows = self.conn.execute(
+            "SELECT id, name, starting_capital, cash_balance, created_at FROM portfolios WHERE user_id = ? ORDER BY created_at DESC",
+            (user_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    # -----------------------------------------------------------------
     # Portfolio creation
     # -----------------------------------------------------------------
 
-    def create_portfolio(self, name, starting_capital):
+    def create_portfolio(self, user_id, name, starting_capital):
         cur = self.conn.execute(
-            "INSERT INTO portfolios (name, starting_capital, cash_balance, created_at) VALUES (?, ?, ?, ?)",
-            (name, starting_capital, starting_capital, datetime.now(timezone.utc).isoformat()),
+            "INSERT INTO portfolios (user_id, name, starting_capital, cash_balance, created_at) VALUES (?, ?, ?, ?, ?)",
+            (user_id, name, starting_capital, starting_capital, datetime.now(timezone.utc).isoformat()),
         )
         self.conn.commit()
         return cur.lastrowid
@@ -117,8 +165,9 @@ class PaperTradingEngine:
     # decide what to buy and how much.
     # -----------------------------------------------------------------
 
-    def build_portfolio_from_momentum(self, portfolio_id, momentum_list, rules=None, as_of=None):
+    def build_portfolio_from_momentum(self, portfolio_id, user_id, momentum_list, rules=None, as_of=None):
         """
+        portfolio_id, user_id: the portfolio must belong to this user, or this raises PermissionError
         momentum_list: list of dicts, ranked best-first, each with at least
             {"ticker": str, "sector": str, "price": float}
         rules: RiskRules instance (defaults used if omitted)
@@ -133,6 +182,7 @@ class PaperTradingEngine:
         """
         rules = rules or RiskRules()
         as_of = as_of or datetime.now(timezone.utc).isoformat()
+        self._assert_owner(portfolio_id, user_id)
 
         portfolio = self.conn.execute(
             "SELECT * FROM portfolios WHERE id = ?", (portfolio_id,)
@@ -203,9 +253,10 @@ class PaperTradingEngine:
     # Mark-to-market: recompute portfolio value against current prices
     # -----------------------------------------------------------------
 
-    def mark_to_market(self, portfolio_id, current_prices, as_of=None):
-        """current_prices: dict {ticker: price}"""
+    def mark_to_market(self, portfolio_id, user_id, current_prices, as_of=None):
+        """current_prices: dict {ticker: price}. Portfolio must belong to user_id."""
         as_of = as_of or datetime.now(timezone.utc).isoformat()
+        self._assert_owner(portfolio_id, user_id)
 
         portfolio = self.conn.execute(
             "SELECT * FROM portfolios WHERE id = ?", (portfolio_id,)
@@ -250,7 +301,8 @@ class PaperTradingEngine:
     # Reporting
     # -----------------------------------------------------------------
 
-    def get_portfolio_summary(self, portfolio_id):
+    def get_portfolio_summary(self, portfolio_id, user_id):
+        self._assert_owner(portfolio_id, user_id)
         portfolio = self.conn.execute(
             "SELECT * FROM portfolios WHERE id = ?", (portfolio_id,)
         ).fetchone()
@@ -271,7 +323,8 @@ class PaperTradingEngine:
             "latest": dict(latest_snapshot) if latest_snapshot else None,
         }
 
-    def get_history(self, portfolio_id):
+    def get_history(self, portfolio_id, user_id):
+        self._assert_owner(portfolio_id, user_id)
         rows = self.conn.execute(
             "SELECT * FROM daily_snapshots WHERE portfolio_id = ? ORDER BY as_of ASC",
             (portfolio_id,),

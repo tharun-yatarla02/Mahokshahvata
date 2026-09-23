@@ -27,25 +27,50 @@ Endpoints:
 import sys
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends, Header
 from pydantic import BaseModel
 
 # Make sibling modules importable
 sys.path.append(str(Path(__file__).parent.parent / "momentum"))
 sys.path.append(str(Path(__file__).parent.parent / "paper_trading"))
 sys.path.append(str(Path(__file__).parent.parent / "politician_trades"))
+sys.path.append(str(Path(__file__).parent.parent / "auth"))
 
 from momentum_engine import rank_momentum, DEFAULT_UNIVERSE
 from paper_trading_engine import PaperTradingEngine, RiskRules
 from politician_trades import list_politicians, get_trades_for_politician, refresh_cache
+from google_auth import verify_google_id_token, issue_session_token, verify_session_token
 
 app = FastAPI(title="AI Stock Platform API", version="0.1.0")
 engine = PaperTradingEngine(str(Path(__file__).parent.parent / "paper_trading" / "paper_trading.db"))
 
 
 # ---------------------------------------------------------------------------
+# Auth dependency — every portfolio endpoint requires a valid session token
+# ---------------------------------------------------------------------------
+
+def get_current_user(authorization: str = Header(None)):
+    """Reads 'Authorization: Bearer <session token>', verifies it, and
+    returns the internal user_id. Raises 401 if missing or invalid —
+    FastAPI's Depends() runs this before the endpoint body, so an
+    endpoint that declares this dependency can assume the caller is
+    already authenticated by the time its own code runs."""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or malformed Authorization header")
+    token = authorization.removeprefix("Bearer ").strip()
+    try:
+        return verify_session_token(token)
+    except ValueError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
 # Request/response models
 # ---------------------------------------------------------------------------
+
+class GoogleSignInRequest(BaseModel):
+    id_token: str  # the ID token Google Identity Services gave the frontend
+
 
 class CreatePortfolioRequest(BaseModel):
     name: str
@@ -63,28 +88,63 @@ class MarkToMarketRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Auth endpoint
+# ---------------------------------------------------------------------------
+
+@app.post("/auth/google")
+def sign_in_with_google(req: GoogleSignInRequest):
+    """Frontend sends the ID token Google gave it after the user signed in.
+    We verify it really came from Google and for this app, then issue our
+    own session token for the frontend to use on every subsequent call."""
+    try:
+        google_user = verify_google_id_token(req.id_token)
+    except ValueError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    user_id = engine.get_or_create_user(
+        google_sub=google_user["google_sub"],
+        email=google_user["email"],
+        name=google_user["name"],
+    )
+    session_token = issue_session_token(user_id)
+    return {
+        "session_token": session_token,
+        "user": {"name": google_user["name"], "email": google_user["email"], "picture": google_user["picture"]},
+    }
+
+
+# ---------------------------------------------------------------------------
 # Momentum endpoints
 # ---------------------------------------------------------------------------
 
 @app.get("/momentum")
 def get_momentum(top: int = 10, lookback_days: int = 90):
-    """Returns the top-N ranked momentum stocks from the default universe."""
+    """Returns the top-N ranked momentum stocks from the default universe.
+    No sign-in required — momentum data isn't tied to any one user."""
     ranked = rank_momentum(DEFAULT_UNIVERSE, lookback_days=lookback_days)
     return {"count": len(ranked[:top]), "results": ranked[:top]}
 
 
 # ---------------------------------------------------------------------------
-# Portfolio (paper trading) endpoints
+# Portfolio (paper trading) endpoints — every one requires sign-in, and every
+# one is scoped to the signed-in user's own portfolios only.
 # ---------------------------------------------------------------------------
 
+@app.get("/portfolio")
+def list_my_portfolios(user_id: int = Depends(get_current_user)):
+    return {"portfolios": engine.list_portfolios_for_user(user_id)}
+
+
 @app.post("/portfolio")
-def create_portfolio(req: CreatePortfolioRequest):
-    portfolio_id = engine.create_portfolio(req.name, req.starting_capital)
+def create_portfolio(req: CreatePortfolioRequest, user_id: int = Depends(get_current_user)):
+    portfolio_id = engine.create_portfolio(user_id, req.name, req.starting_capital)
     return {"portfolio_id": portfolio_id}
 
 
 @app.post("/portfolio/{portfolio_id}/build")
-def build_portfolio(portfolio_id: int, req: BuildPortfolioRequest):
+def build_portfolio(portfolio_id: int, req: BuildPortfolioRequest, user_id: int = Depends(get_current_user)):
     """Builds the portfolio from the current momentum ranking."""
     momentum_list = rank_momentum(DEFAULT_UNIVERSE, lookback_days=90)
     if not momentum_list:
@@ -96,7 +156,9 @@ def build_portfolio(portfolio_id: int, req: BuildPortfolioRequest):
         max_allocation_per_sector=req.max_allocation_per_sector,
     )
     try:
-        purchases = engine.build_portfolio_from_momentum(portfolio_id, momentum_list, rules)
+        purchases = engine.build_portfolio_from_momentum(portfolio_id, user_id, momentum_list, rules)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="This portfolio doesn't belong to you")
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -104,22 +166,36 @@ def build_portfolio(portfolio_id: int, req: BuildPortfolioRequest):
 
 
 @app.get("/portfolio/{portfolio_id}")
-def get_portfolio(portfolio_id: int):
-    summary = engine.get_portfolio_summary(portfolio_id)
+def get_portfolio(portfolio_id: int, user_id: int = Depends(get_current_user)):
+    try:
+        summary = engine.get_portfolio_summary(portfolio_id, user_id)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="This portfolio doesn't belong to you")
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Portfolio not found")
     if summary["latest"] is None and not summary["holdings"]:
         raise HTTPException(status_code=404, detail="Portfolio not found or empty")
     return summary
 
 
 @app.post("/portfolio/{portfolio_id}/mark-to-market")
-def mark_to_market(portfolio_id: int, req: MarkToMarketRequest):
-    snapshot = engine.mark_to_market(portfolio_id, req.prices)
-    return snapshot
+def mark_to_market(portfolio_id: int, req: MarkToMarketRequest, user_id: int = Depends(get_current_user)):
+    try:
+        return engine.mark_to_market(portfolio_id, user_id, req.prices)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="This portfolio doesn't belong to you")
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 @app.get("/portfolio/{portfolio_id}/history")
-def get_history(portfolio_id: int):
-    return {"history": engine.get_history(portfolio_id)}
+def get_history(portfolio_id: int, user_id: int = Depends(get_current_user)):
+    try:
+        return {"history": engine.get_history(portfolio_id, user_id)}
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="This portfolio doesn't belong to you")
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 @app.get("/health")
