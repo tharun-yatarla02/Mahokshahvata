@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mahokshahvata | Billing</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <nav class="navbar">
+      <div class="nav-inner">
+        <div class="brand">
+          <div class="brand-mark">M</div>
+          <span>Mahokshahvata</span>
+        </div>
+        <div class="nav-links">
+          <a href="/">Overview</a>
+          <a href="/market.html">Market</a>
+          <a href="/portfolio.html">Portfolio</a>
+          <a href="/sentiment.html">Sentiment</a>
+          <a href="/options.html">Options</a>
+          <a href="/billing.html" class="active">Billing</a>
+        </div>
+        <div class="nav-actions">
+          <button id="themeToggle" class="theme-toggle" type="button" aria-label="Switch color mode">Light mode</button>
+          <div style="position: relative;">
+            <button id="profileButton" class="profile-button" type="button" aria-label="Open profile">
+              <span class="profile-avatar">U</span>
+              <span id="profileLabel">Profile</span>
+            </button>
+            <div id="profileMenu" class="profile-menu" aria-live="polite">
+              <div class="profile-card">
+                <span id="profileMenuAvatar" class="profile-avatar">U</span>
+                <div>
+                  <p id="profileName" class="profile-name">Demo User</p>
+                  <p id="profileEmail" class="profile-email">demo@mahokshahvata.ai</p>
+                </div>
+              </div>
+              <div class="profile-menu-actions">
+                <button type="button" class="secondary">Account</button>
+                <button id="logoutButton" type="button" class="logout-btn">Logout</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </nav>
+
+    <div class="page">
+      <div class="hero premium-hero">
+        <div class="hero-top hero-top-extended">
+          <div class="hero-copy">
+            <span class="eyebrow">Cash management</span>
+            <h1>Billing & funding</h1>
+            <p>Track the funds available in your trading account and add capital whenever you are ready to deploy it.</p>
+          </div>
+          <div class="hero-metric-box">
+            <span>Account status</span>
+            <strong id="billingStatusBadge">Ready</strong>
+            <small>Funding available</small>
+          </div>
+        </div>
+        <div class="hero-bottom-row">
+          <div class="hero-pill-row">
+            <button class="sector-pill active" type="button">Cash</button>
+            <button class="sector-pill" type="button">Portfolio</button>
+            <button class="sector-pill" type="button">Risk</button>
+          </div>
+          <span class="badge">Live</span>
+        </div>
+      </div>
+
+      <div class="stats">
+        <div class="stat accent-card">
+          <div class="stat-label">Remaining funds</div>
+          <div class="stat-value" id="remainingCashValue">$0.00</div>
+          <div class="stat-sub">Available to trade</div>
+        </div>
+        <div class="stat success-card">
+          <div class="stat-label">Invested capital</div>
+          <div class="stat-value" id="investedCapitalValue">$0.00</div>
+          <div class="stat-sub">Currently allocated</div>
+        </div>
+        <div class="stat warning-card">
+          <div class="stat-label">Account value</div>
+          <div class="stat-value" id="accountValue">$0.00</div>
+          <div class="stat-sub">Portfolio + cash</div>
+        </div>
+        <div class="stat neutral-card">
+          <div class="stat-label">P/L</div>
+          <div class="stat-value" id="pnlValue">+$0.00</div>
+          <div class="stat-sub">Net performance</div>
+        </div>
+      </div>
+
+      <div class="grid">
+        <div class="card premium-card">
+          <h2>Add funds</h2>
+          <div class="inline-add-cash" style="margin-top: 8px;">
+            <input id="addCashAmount" type="number" min="0" step="50" value="250" placeholder="Amount to add" />
+            <button id="addCashBtn" class="secondary">Add funds</button>
+          </div>
+          <div class="status" id="billingStatus" style="margin-top: 18px;">Ready to fund your account.</div>
+        </div>
+
+        <div class="card premium-card">
+          <h2>Funding summary</h2>
+          <ul class="list">
+            <li><span>Available cash</span> <strong id="summaryCash">$0.00</strong></li>
+            <li><span>Invested</span> <strong id="summaryInvested">$0.00</strong></li>
+            <li><span>Account total</span> <strong id="summaryAccount">$0.00</strong></li>
+            <li><span>Net P/L</span> <strong id="summaryPnl">+$0.00</strong></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const API_BASE = window.location.origin;
+      const billingStatus = document.getElementById('billingStatus');
+      const billingStatusBadge = document.getElementById('billingStatusBadge');
+      const remainingCashValue = document.getElementById('remainingCashValue');
+      const investedCapitalValue = document.getElementById('investedCapitalValue');
+      const accountValue = document.getElementById('accountValue');
+      const pnlValue = document.getElementById('pnlValue');
+      const summaryCash = document.getElementById('summaryCash');
+      const summaryInvested = document.getElementById('summaryInvested');
+      const summaryAccount = document.getElementById('summaryAccount');
+      const summaryPnl = document.getElementById('summaryPnl');
+      let currentPortfolioId = null;
+
+      function formatCurrency(value) {
+        const amount = Number(value || 0);
+        return new Intl.NumberFormat('en-US', {
+          style: 'currency',
+          currency: 'USD',
+          maximumFractionDigits: 2,
+        }).format(amount);
+      }
+
+      function formatSignedCurrency(value) {
+        const amount = Number(value || 0);
+        return `${amount >= 0 ? '+' : '-'}${formatCurrency(Math.abs(amount))}`;
+      }
+
+      function setStatus(message, kind = 'success') {
+        if (!billingStatus) return;
+        billingStatus.textContent = message;
+        billingStatus.className = 'status';
+        if (kind) billingStatus.classList.add(kind);
+      }
+
+      async function apiFetch(path, options = {}) {
+        const res = await fetch(`${API_BASE}${path}`, {
+          ...options,
+          headers: {
+            Authorization: 'Bearer demo-token',
+            'Content-Type': 'application/json',
+            ...(options.headers || {}),
+          },
+        });
+        const text = await res.text();
+        let payload = null;
+        try { payload = text ? JSON.parse(text) : null; } catch { payload = text; }
+        if (!res.ok) throw new Error(payload?.detail || payload || `HTTP ${res.status}`);
+        return payload;
+      }
+
+      async function ensurePortfolio() {
+        const list = await apiFetch('/portfolio');
+        if (list.portfolios && list.portfolios.length) {
+          currentPortfolioId = list.portfolios[0].id;
+          return;
+        }
+
+        const created = await apiFetch('/portfolio', {
+          method: 'POST',
+          body: JSON.stringify({
+            name: 'Demo Portfolio',
+            starting_capital: 100000,
+          }),
+        });
+
+        currentPortfolioId = created.portfolio_id;
+      }
+
+      function renderBilling(summary) {
+        const cashBalance = Number(summary.remaining_balance_to_invest ?? summary.cash_balance ?? 0);
+        const totalInvested = Number(summary.total_invested ?? 0);
+        const holdingsValue = Number(summary.holdings_value ?? 0);
+        const latest = summary.latest || {};
+        const totalPortfolioValue = Number(latest.total_value ?? (holdingsValue + cashBalance) ?? 0);
+        const pnl = Number(latest.total_pl ?? (totalPortfolioValue - (totalInvested + cashBalance)) ?? 0);
+
+        remainingCashValue.textContent = formatCurrency(cashBalance);
+        investedCapitalValue.textContent = formatCurrency(totalInvested);
+        accountValue.textContent = formatCurrency(totalPortfolioValue);
+        pnlValue.textContent = formatSignedCurrency(pnl);
+        pnlValue.classList.toggle('positive', pnl >= 0);
+        pnlValue.classList.toggle('negative', pnl < 0);
+
+        summaryCash.textContent = formatCurrency(cashBalance);
+        summaryInvested.textContent = formatCurrency(totalInvested);
+        summaryAccount.textContent = formatCurrency(totalPortfolioValue);
+        summaryPnl.textContent = formatSignedCurrency(pnl);
+
+        billingStatusBadge.textContent = cashBalance > 0 ? 'Funded' : 'Low cash';
+      }
+
+      async function refreshBillingData() {
+        if (!currentPortfolioId) {
+          remainingCashValue.textContent = '$0.00';
+          investedCapitalValue.textContent = '$0.00';
+          accountValue.textContent = '$0.00';
+          pnlValue.textContent = '+$0.00';
+          return;
+        }
+
+        try {
+          const data = await apiFetch(`/portfolio/${currentPortfolioId}`);
+          renderBilling(data);
+        } catch (err) {
+          setStatus(String(err), 'error');
+        }
+      }
+
+      document.getElementById('addCashBtn').addEventListener('click', async () => {
+        if (!currentPortfolioId) {
+          setStatus('Create or load a portfolio first.', 'error');
+          return;
+        }
+
+        const amount = Number(document.getElementById('addCashAmount').value || 0);
+        if (!amount || amount <= 0) {
+          setStatus('Enter a valid amount to add.', 'error');
+          return;
+        }
+
+        try {
+          await apiFetch(`/portfolio/${currentPortfolioId}/cash`, {
+            method: 'POST',
+            body: JSON.stringify({ amount }),
+          });
+          setStatus(`Added ${formatCurrency(amount)} to the account.`, 'success');
+          await refreshBillingData();
+        } catch (err) {
+          setStatus(String(err), 'error');
+        }
+      });
+
+      async function initializeBilling() {
+        try {
+          await ensurePortfolio();
+          await refreshBillingData();
+        } catch (err) {
+          setStatus(String(err), 'error');
+        }
+      }
+
+      initializeBilling();
+      renderProfile();
+      applyTheme();
+
+      function getInitials(name) {
+        const clean = (name || 'Demo User').trim();
+        if (!clean) return 'DU';
+        const parts = clean.split(/\s+/).filter(Boolean);
+        return parts.length >= 2 ? `${parts[0][0]}${parts[1][0]}`.toUpperCase() : clean.slice(0, 2).toUpperCase();
+      }
+
+      function getUserProfile() {
+        const fallback = { name: 'Demo User', email: 'demo@mahokshahvata.ai', image: '' };
+        const stored = JSON.parse(localStorage.getItem('mahokshahvata_user') || 'null');
+        const user = stored || fallback;
+        const finalUser = { name: user.name || fallback.name, email: user.email || fallback.email, image: user.image || '' };
+        localStorage.setItem('mahokshahvata_user', JSON.stringify(finalUser));
+        return finalUser;
+      }
+
+      function renderProfile() {
+        const user = getUserProfile();
+        const avatarText = getInitials(user.name);
+        const buttonAvatar = document.querySelector('#profileButton .profile-avatar');
+        const profileLabel = document.getElementById('profileLabel');
+        const profileMenuAvatar = document.getElementById('profileMenuAvatar');
+        const profileName = document.getElementById('profileName');
+        const profileEmail = document.getElementById('profileEmail');
+
+        if (buttonAvatar) buttonAvatar.textContent = avatarText;
+        if (profileLabel) profileLabel.textContent = user.name.split(' ')[0] || 'Profile';
+        if (profileMenuAvatar) profileMenuAvatar.textContent = avatarText;
+        if (profileName) profileName.textContent = user.name;
+        if (profileEmail) profileEmail.textContent = user.email;
+      }
+
+      function setTheme(nextTheme) {
+        document.body.setAttribute('data-theme', nextTheme);
+        localStorage.setItem('theme', nextTheme);
+        const toggle = document.getElementById('themeToggle');
+        if (toggle) toggle.textContent = nextTheme === 'dark' ? 'Light mode' : 'Dark mode';
+      }
+
+      function applyTheme() {
+        const saved = localStorage.getItem('theme');
+        const prefersLight = window.matchMedia('(prefers-color-scheme: light)').matches;
+        const nextTheme = saved || (prefersLight ? 'light' : 'dark');
+        setTheme(nextTheme);
+      }
+
+      document.getElementById('themeToggle').addEventListener('click', () => {
+        const current = document.body.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+        setTheme(current === 'dark' ? 'light' : 'dark');
+      });
+
+      document.getElementById('logoutButton').addEventListener('click', () => {
+        localStorage.removeItem('mahokshahvata_user');
+        renderProfile();
+      });
+    </script>
+  </body>
+</html>

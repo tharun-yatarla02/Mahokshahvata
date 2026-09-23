@@ -358,6 +358,14 @@ def options_page():
     raise HTTPException(status_code=404, detail="Options page not found")
 
 
+@app.get("/billing.html")
+def billing_page():
+    page = frontend_dir / "billing.html"
+    if page.exists():
+        return FileResponse(page, headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"})
+    raise HTTPException(status_code=404, detail="Billing page not found")
+
+
 @app.get("/styles.css")
 def styles_css():
     css_path = frontend_dir / "styles.css"

@@ -805,6 +805,63 @@ body[data-theme="light"] .mini-chip {
   margin-top: 10px;
 }
 
+.history-table-wrap {
+  overflow: auto;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: rgba(3, 6, 12, 0.22);
+}
+
+.history-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.74rem;
+}
+
+.history-table th,
+.history-table td {
+  padding: 10px 10px;
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+
+.history-table th {
+  color: var(--muted);
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 700;
+}
+
+.history-table td small {
+  color: var(--muted);
+}
+
+.trade-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 52px;
+  padding: 5px 8px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.trade-buy {
+  background: rgba(28, 201, 131, 0.12);
+  color: #79fbc3;
+  border: 1px solid rgba(28, 201, 131, 0.28);
+}
+
+.trade-sell {
+  background: rgba(255, 118, 118, 0.12);
+  color: #ff9d9d;
+  border: 1px solid rgba(255, 118, 118, 0.24);
+}
+
 .row {
   display: flex;
   align-items: center;

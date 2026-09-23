@@ -19,6 +19,7 @@
           <a href="/portfolio.html" class="active">Portfolio</a>
           <a href="/sentiment.html">Sentiment</a>
           <a href="/options.html">Options</a>
+          <a href="/billing.html">Billing</a>
         </div>
         <div class="nav-actions">
           <button id="themeToggle" class="theme-toggle" type="button" aria-label="Switch color mode">Light mode</button>
@@ -227,15 +228,6 @@
               <button id="tradeStockBtn">Execute trade</button>
               <button id="useLivePriceBtn" class="secondary" type="button">Use live market price</button>
             </div>
-            <label class="label" for="portfolioName">Portfolio name</label>
-            <input id="portfolioName" type="text" value="Demo Portfolio" placeholder="Portfolio name" />
-            <label class="label" for="startingCapital">Starting capital</label>
-            <input id="startingCapital" type="number" min="0" step="100" value="100000" placeholder="Starting capital" />
-            <div class="button-row stacked-actions">
-              <button id="createPortfolioBtn">Create portfolio</button>
-              <button id="getPortfolioBtn" class="secondary">Load current</button>
-              <button id="buildPortfolioBtn" class="secondary">Build from momentum</button>
-            </div>
           </div>
 
           <div class="output-panel">
@@ -244,7 +236,23 @@
               <button id="tradeHistoryBtn" class="secondary small-btn" type="button">History</button>
             </div>
             <pre id="portfolioOutput">No portfolio yet.</pre>
-            <pre id="historyOutput" class="history-output">No trade history yet.</pre>
+            <div class="history-table-wrap">
+              <table class="history-table">
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>Side</th>
+                    <th>Symbol</th>
+                    <th>Details</th>
+                  </tr>
+                </thead>
+                <tbody id="historyTableBody">
+                  <tr>
+                    <td colspan="4" class="empty-table-row">No trade history yet.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       </div>
@@ -253,7 +261,7 @@
     <script>
       const API_BASE = window.location.origin;
       const portfolioOutput = document.getElementById('portfolioOutput');
-      const historyOutput = document.getElementById('historyOutput');
+      const historyTableBody = document.getElementById('historyTableBody');
       const remainingBalanceValue = document.getElementById('remainingBalanceValue');
       const totalInvestedValue = document.getElementById('totalInvestedValue');
       const stockCountValue = document.getElementById('stockCountValue');
@@ -532,7 +540,7 @@
         try {
           const data = await apiFetch(`/portfolio/${currentPortfolioId}`);
           renderPortfolioSummary(data);
-          portfolioOutput.textContent = JSON.stringify(data, null, 2);
+          renderPortfolioStatus(data);
         } catch (err) {
           portfolioOutput.textContent = String(err);
         }
@@ -600,15 +608,7 @@
         }
 
         if (triggerPrice > 0) {
-          portfolioOutput.textContent = JSON.stringify({
-            status: 'Trigger order created',
-            ticker: payload.ticker,
-            side: payload.side,
-            quantity: payload.quantity,
-            trigger_price: triggerPrice,
-            live_price: payload.price,
-            note: `Order will be executed when ${payload.ticker} reaches $${triggerPrice.toFixed(2)}.`
-          }, null, 2);
+          portfolioOutput.textContent = `${payload.side} ${payload.ticker} trigger set for ${formatCurrency(triggerPrice)} • Qty ${payload.quantity} • Live price ${formatCurrency(payload.price)}`;
           await refreshPortfolioData();
           return;
         }
@@ -618,7 +618,7 @@
             method: 'POST',
             body: JSON.stringify(payload),
           });
-          portfolioOutput.textContent = JSON.stringify(data, null, 2);
+          portfolioOutput.textContent = `${data?.summary || `${payload.side} ${payload.ticker}` } • ${payload.quantity} shares @ ${formatCurrency(payload.price)}`;
           await refreshPortfolioData();
         } catch (err) {
           portfolioOutput.textContent = String(err);
@@ -640,73 +640,7 @@
             method: 'POST',
             body: JSON.stringify({ amount }),
           });
-          portfolioOutput.textContent = JSON.stringify({
-            billing: 'Funds added to portfolio',
-            amount,
-            portfolio: data,
-          }, null, 2);
-          await refreshPortfolioData();
-        } catch (err) {
-          portfolioOutput.textContent = String(err);
-        }
-      });
-
-      document.getElementById('createPortfolioBtn').addEventListener('click', async () => {
-        try {
-          const name = document.getElementById('portfolioName').value.trim() || 'Demo Portfolio';
-          const capital = Number(document.getElementById('startingCapital').value || 1000);
-          const data = await apiFetch('/portfolio', {
-            method: 'POST',
-            body: JSON.stringify({ name, starting_capital: capital }),
-          });
-          currentPortfolioId = data.portfolio_id;
-          await refreshPortfolioData();
-        } catch (err) {
-          portfolioOutput.textContent = String(err);
-        }
-      });
-
-      document.getElementById('getPortfolioBtn').addEventListener('click', async () => {
-        if (!currentPortfolioId) {
-          portfolioOutput.textContent = 'Create a portfolio first.';
-          return;
-        }
-        await refreshPortfolioData();
-      });
-
-      document.getElementById('buildPortfolioBtn').addEventListener('click', async () => {
-        if (!currentPortfolioId) {
-          portfolioOutput.textContent = 'Create a portfolio first.';
-          return;
-        }
-        try {
-          const data = await apiFetch(`/portfolio/${currentPortfolioId}/build`, {
-            method: 'POST',
-            body: JSON.stringify({ max_positions: 5, max_allocation_per_stock: 0.3, max_allocation_per_sector: 0.5 }),
-          });
-          portfolioOutput.textContent = JSON.stringify(data, null, 2);
-          await refreshPortfolioData();
-        } catch (err) {
-          portfolioOutput.textContent = String(err);
-        }
-      });
-
-      document.getElementById('addCashBtn').addEventListener('click', async () => {
-        if (!currentPortfolioId) {
-          portfolioOutput.textContent = 'Create a portfolio first.';
-          return;
-        }
-        const amount = Number(document.getElementById('addCashAmount').value || 0);
-        if (!amount || amount <= 0) {
-          portfolioOutput.textContent = 'Enter a valid top-up amount.';
-          return;
-        }
-        try {
-          const data = await apiFetch(`/portfolio/${currentPortfolioId}/cash`, {
-            method: 'POST',
-            body: JSON.stringify({ amount }),
-          });
-          portfolioOutput.textContent = JSON.stringify(data, null, 2);
+          portfolioOutput.textContent = `Funds added successfully • ${formatCurrency(amount)} credited to the account`;
           await refreshPortfolioData();
         } catch (err) {
           portfolioOutput.textContent = String(err);
@@ -786,13 +720,74 @@
         }
       });
 
+      function renderTradeHistory(data) {
+        const trades = Array.isArray(data?.trades) ? data.trades : [];
+
+        if (!trades.length) {
+          historyTableBody.innerHTML = '<tr><td colspan="4" class="empty-table-row">No trade history yet.</td></tr>';
+          return;
+        }
+
+        historyTableBody.innerHTML = trades.map((trade) => {
+          const timestamp = trade.timestamp ? new Date(trade.timestamp).toLocaleString([], {
+            month: 'short',
+            day: 'numeric',
+            hour: 'numeric',
+            minute: '2-digit',
+          }) : '—';
+          const symbol = trade.ticker || 'N/A';
+          const side = trade.type || 'TRADE';
+          const quantity = Number(trade.quantity || 0);
+          const price = Number(trade.price || 0);
+          const sideClass = side === 'BUY' ? 'trade-buy' : 'trade-sell';
+
+          if (trade.instrument_type === 'OPTION') {
+            const optionType = trade.option_type || 'OPT';
+            const strike = trade.strike ? ` @ ${formatCurrency(Number(trade.strike))}` : '';
+            const expiry = trade.expiry ? ` exp ${trade.expiry}` : '';
+            return `
+              <tr>
+                <td>${timestamp}</td>
+                <td><span class="trade-pill ${sideClass}">${side}</span></td>
+                <td>${symbol}</td>
+                <td>${optionType}${strike}${expiry}<br><small>${quantity} contracts • ${formatCurrency(price)}</small></td>
+              </tr>
+            `;
+          }
+
+          return `
+            <tr>
+              <td>${timestamp}</td>
+              <td><span class="trade-pill ${sideClass}">${side}</span></td>
+              <td>${symbol}</td>
+              <td>${quantity} shares<br><small>${formatCurrency(price)}</small></td>
+            </tr>
+          `;
+        }).join('');
+      }
+
+      function renderPortfolioStatus(data) {
+        if (!data) {
+          portfolioOutput.textContent = 'No portfolio yet.';
+          return;
+        }
+
+        const summary = data || {};
+        const cash = Number(summary.remaining_balance_to_invest ?? summary.cash_balance ?? 0);
+        const invested = Number(summary.total_invested ?? 0);
+        const value = Number(summary.latest?.total_value ?? (cash + invested) ?? 0);
+        const pnl = Number(summary.latest?.total_pl ?? 0);
+
+        portfolioOutput.textContent = `Portfolio summary • Cash ${formatCurrency(cash)} • Invested ${formatCurrency(invested)} • Value ${formatCurrency(value)} • P/L ${formatSignedCurrency(pnl)}`;
+      }
+
       document.getElementById('tradeHistoryBtn').addEventListener('click', async () => {
         if (!currentPortfolioId) {
-          historyOutput.textContent = 'Create a portfolio first.';
+          historyTableBody.innerHTML = '<tr><td colspan="4" class="empty-table-row">Create a portfolio first.</td></tr>';
           return;
         }
         const data = await apiFetch(`/portfolio/${currentPortfolioId}/trade-history`);
-        historyOutput.textContent = JSON.stringify(data, null, 2);
+        renderTradeHistory(data);
       });
 
       document.addEventListener('click', (event) => {
