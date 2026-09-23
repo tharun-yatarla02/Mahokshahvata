@@ -8,6 +8,8 @@ __pycache__/
 # Secrets
 .env
 *.key
+*serviceAccountKey*.json
+firebase-adminsdk-*.json
 
 # Databases (generated at runtime)
 *.db

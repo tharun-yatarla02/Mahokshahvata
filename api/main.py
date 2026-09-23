@@ -7,17 +7,22 @@ architecture doc (step 9), the piece that connects data, analytics, AI
 and portfolio services to a frontend.
 
 Setup:
-    pip install fastapi uvicorn yfinance pandas anthropic feedparser
+    pip install fastapi uvicorn yfinance pandas anthropic feedparser firebase-admin
 
 Run:
-    export ANTHROPIC_API_KEY="your-key-here"
+    export GOOGLE_APPLICATION_CREDENTIALS="/path/to/firebase-service-account.json"
     uvicorn api.main:app --reload
 
 Then visit http://localhost:8000/docs for interactive API docs (FastAPI
 generates this automatically).
 
+Auth: every /portfolio/* endpoint requires "Authorization: Bearer <Firebase
+ID token>" — see auth/README.md for the Firebase project setup and the
+frontend sign-in snippet. /momentum and /politicians/* don't require sign-in.
+
 Endpoints:
     GET  /momentum?top=10                     ranked momentum stocks
+    GET  /portfolio                            list the signed-in user's portfolios
     POST /portfolio                            create a portfolio
     POST /portfolio/{id}/build                 build it from a momentum list
     GET  /portfolio/{id}                       get portfolio summary
@@ -41,7 +46,7 @@ sys.path.append(str(Path(__file__).parent.parent / "auth"))
 from momentum_engine import rank_momentum, DEFAULT_UNIVERSE
 from paper_trading_engine import PaperTradingEngine, RiskRules
 from politician_trades import list_politicians, get_trades_for_politician, refresh_cache
-from google_auth import verify_google_id_token, issue_session_token, verify_session_token
+from firebase_auth import verify_firebase_token
 
 app = FastAPI(title="AI Stock Platform API", version="0.1.0")
 engine = PaperTradingEngine(str(Path(__file__).parent.parent / "paper_trading" / "paper_trading.db"))
@@ -69,27 +74,35 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 
 def get_current_user(authorization: str = Header(None)):
-    """Reads 'Authorization: Bearer <session token>', verifies it, and
-    returns the internal user_id. Raises 401 if missing or invalid —
-    FastAPI's Depends() runs this before the endpoint body, so an
-    endpoint that declares this dependency can assume the caller is
-    already authenticated by the time its own code runs."""
+    """Reads 'Authorization: Bearer <Firebase ID token>', verifies it with
+    Firebase, and returns our internal user_id — creating the user record
+    on their very first authenticated call if this is a new sign-in.
+    Raises 401 if missing or invalid. FastAPI's Depends() runs this before
+    the endpoint body, so an endpoint that declares this dependency can
+    assume the caller is already authenticated by the time its own code
+    runs.
+
+    Unlike the earlier raw-Google-OAuth version, there is no separate
+    /auth/google exchange step — the Firebase token the frontend already
+    holds (from the Firebase SDK sign-in) is checked directly, every call."""
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing or malformed Authorization header")
     token = authorization.removeprefix("Bearer ").strip()
     try:
-        return verify_session_token(token)
+        firebase_user = verify_firebase_token(token)
     except ValueError as e:
         raise HTTPException(status_code=401, detail=str(e))
+
+    return engine.get_or_create_user(
+        firebase_uid=firebase_user["firebase_uid"],
+        email=firebase_user["email"],
+        name=firebase_user["name"],
+    )
 
 
 # ---------------------------------------------------------------------------
 # Request/response models
 # ---------------------------------------------------------------------------
-
-class GoogleSignInRequest(BaseModel):
-    id_token: str  # the ID token Google Identity Services gave the frontend
-
 
 class CreatePortfolioRequest(BaseModel):
     name: str = Field(min_length=1, max_length=100)
@@ -104,34 +117,6 @@ class BuildPortfolioRequest(BaseModel):
 
 class MarkToMarketRequest(BaseModel):
     prices: dict  # {"NVDA": 190.12, "PLTR": 42.5, ...}
-
-
-# ---------------------------------------------------------------------------
-# Auth endpoint
-# ---------------------------------------------------------------------------
-
-@app.post("/auth/google")
-def sign_in_with_google(req: GoogleSignInRequest):
-    """Frontend sends the ID token Google gave it after the user signed in.
-    We verify it really came from Google and for this app, then issue our
-    own session token for the frontend to use on every subsequent call."""
-    try:
-        google_user = verify_google_id_token(req.id_token)
-    except ValueError as e:
-        raise HTTPException(status_code=401, detail=str(e))
-    except RuntimeError as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-    user_id = engine.get_or_create_user(
-        google_sub=google_user["google_sub"],
-        email=google_user["email"],
-        name=google_user["name"],
-    )
-    session_token = issue_session_token(user_id)
-    return {
-        "session_token": session_token,
-        "user": {"name": google_user["name"], "email": google_user["email"], "picture": google_user["picture"]},
-    }
 
 
 # ---------------------------------------------------------------------------

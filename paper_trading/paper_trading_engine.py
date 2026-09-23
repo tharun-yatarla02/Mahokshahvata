@@ -48,7 +48,7 @@ class RiskRules:
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    google_sub TEXT UNIQUE NOT NULL,
+    firebase_uid TEXT UNIQUE NOT NULL,
     email TEXT,
     name TEXT,
     created_at TEXT NOT NULL
@@ -113,18 +113,18 @@ class PaperTradingEngine:
     # Users
     # -----------------------------------------------------------------
 
-    def get_or_create_user(self, google_sub, email=None, name=None):
-        """Looks up a user by their stable Google id, creating them on
-        first sign-in. Returns the internal user_id (ours, not Google's)."""
+    def get_or_create_user(self, firebase_uid, email=None, name=None):
+        """Looks up a user by their stable Firebase id, creating them on
+        first sign-in. Returns the internal user_id (ours, not Firebase's)."""
         row = self.conn.execute(
-            "SELECT id FROM users WHERE google_sub = ?", (google_sub,)
+            "SELECT id FROM users WHERE firebase_uid = ?", (firebase_uid,)
         ).fetchone()
         if row:
             return row["id"]
 
         cur = self.conn.execute(
-            "INSERT INTO users (google_sub, email, name, created_at) VALUES (?, ?, ?, ?)",
-            (google_sub, email, name, datetime.now(timezone.utc).isoformat()),
+            "INSERT INTO users (firebase_uid, email, name, created_at) VALUES (?, ?, ?, ?)",
+            (firebase_uid, email, name, datetime.now(timezone.utc).isoformat()),
         )
         self.conn.commit()
         return cur.lastrowid

@@ -6,9 +6,8 @@ pandas>=2.0
 feedparser>=6.0
 anthropic>=0.40
 
-# Auth
-google-auth>=2.34
-pyjwt>=2.9
+# Auth (Firebase)
+firebase-admin>=6.5
 
 # Backend API
 fastapi>=0.115
