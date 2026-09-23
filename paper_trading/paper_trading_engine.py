@@ -348,6 +348,83 @@ class PaperTradingEngine:
         self.conn.commit()
         return purchases
 
+    def trade_stock(self, portfolio_id, user_id, ticker, quantity, price, side="BUY", timestamp=None):
+        self._assert_owner(portfolio_id, user_id)
+        if not ticker:
+            raise ValueError("Ticker is required")
+        if quantity <= 0:
+            raise ValueError("Stock quantity must be positive")
+        if side not in {"BUY", "SELL"}:
+            raise ValueError("side must be BUY or SELL")
+
+        trade_price = float(price)
+        if trade_price <= 0:
+            raise ValueError("Stock price must be positive")
+
+        ts = _normalize_timestamp(timestamp)
+        portfolio = self.conn.execute(
+            "SELECT * FROM portfolios WHERE id = ?", (portfolio_id,)
+        ).fetchone()
+        if portfolio is None:
+            raise ValueError(f"No portfolio with id {portfolio_id}")
+
+        trade_value = quantity * trade_price
+        position_key = self._get_position_key(ticker, instrument_type="STOCK")
+        existing = self.conn.execute(
+            "SELECT * FROM holdings WHERE portfolio_id = ? AND position_key = ?",
+            (portfolio_id, position_key),
+        ).fetchone()
+
+        if side == "BUY":
+            if portfolio["cash_balance"] < trade_value:
+                raise ValueError("Insufficient cash to buy this stock")
+            self.conn.execute(
+                """INSERT INTO holdings (portfolio_id, ticker, sector, instrument_type, position_key, quantity, avg_buy_price)
+                   VALUES (?, ?, 'Unknown', 'STOCK', ?, ?, ?)
+                   ON CONFLICT(portfolio_id, position_key) DO UPDATE SET
+                     quantity = quantity + excluded.quantity,
+                     avg_buy_price = ((avg_buy_price * quantity) + (excluded.avg_buy_price * excluded.quantity))
+                                     / (quantity + excluded.quantity)""",
+                (portfolio_id, ticker, position_key, quantity, trade_price),
+            )
+            self.conn.execute(
+                "UPDATE portfolios SET cash_balance = cash_balance - ? WHERE id = ?",
+                (trade_value, portfolio_id),
+            )
+        else:
+            if existing is None or existing["quantity"] < quantity:
+                raise ValueError("Not enough shares to sell")
+            remaining_qty = existing["quantity"] - quantity
+            if remaining_qty <= 0:
+                self.conn.execute("DELETE FROM holdings WHERE portfolio_id = ? AND position_key = ?", (portfolio_id, position_key))
+            else:
+                self.conn.execute(
+                    "UPDATE holdings SET quantity = ? WHERE portfolio_id = ? AND position_key = ?",
+                    (remaining_qty, portfolio_id, position_key),
+                )
+            self.conn.execute(
+                "UPDATE portfolios SET cash_balance = cash_balance + ? WHERE id = ?",
+                (trade_value, portfolio_id),
+            )
+
+        self.conn.execute(
+            "INSERT INTO transactions (portfolio_id, ticker, instrument_type, type, quantity, price, timestamp) VALUES (?, ?, 'STOCK', ?, ?, ?, ?)",
+            (portfolio_id, ticker, side, quantity, trade_price, ts),
+        )
+        self.conn.commit()
+
+        cash_after = round(float(self.conn.execute("SELECT cash_balance FROM portfolios WHERE id = ?", (portfolio_id,)).fetchone()[0]), 2)
+        return {
+            "portfolio_id": portfolio_id,
+            "ticker": ticker,
+            "instrument_type": "STOCK",
+            "quantity": quantity,
+            "price": round(float(trade_price), 2),
+            "side": side,
+            "timestamp": ts,
+            "cash_balance": cash_after,
+        }
+
     def trade_option(self, portfolio_id, user_id, ticker, option_type, strike, expiry, quantity, premium, side="BUY", timestamp=None):
         self._assert_owner(portfolio_id, user_id)
         if quantity <= 0:
@@ -531,17 +608,22 @@ class PaperTradingEngine:
             sector = row.get("sector") or "Unassigned"
             sector_totals[sector] = sector_totals.get(sector, 0.0) + invested
 
-        investable_cash = round(float(portfolio["cash_balance"]), 2)
-        total_holdings_value = 0.0
-        if latest_snapshot:
-            total_holdings_value = float(latest_snapshot.get("holdings_value") or 0.0)
+        cash_balance = float(portfolio["cash_balance"])
+        total_holdings_value = float(latest_snapshot.get("holdings_value") or 0.0) if latest_snapshot else total_invested
+        total_portfolio_value = total_holdings_value + cash_balance
+        total_contributed_capital = total_invested + cash_balance
+        total_pl = total_portfolio_value - total_contributed_capital
+        total_pl_pct = (total_pl / total_contributed_capital) * 100 if total_contributed_capital else 0.0
 
         return {
             "name": portfolio["name"],
             "starting_capital": portfolio["starting_capital"],
-            "cash_balance": round(float(portfolio["cash_balance"]), 2),
-            "remaining_balance_to_invest": round(float(portfolio["cash_balance"]), 2),
+            "cash_balance": round(cash_balance, 2),
+            "remaining_balance_to_invest": round(cash_balance, 2),
             "total_invested": round(total_invested, 2),
+            "total_portfolio_value": round(total_portfolio_value, 2),
+            "total_pl": round(total_pl, 2),
+            "total_pl_pct": round(total_pl_pct, 2),
             "sector_breakdown": {sector: round(value, 2) for sector, value in sorted(sector_totals.items())},
             "sector_count": len(sector_totals),
             "stock_count": len(unique_tickers),

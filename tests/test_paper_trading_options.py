@@ -134,3 +134,40 @@ def test_option_trade_cost_scales_with_quantity_and_premium(tmp_path):
     assert trade["premium"] == 8.5
     assert summary["cash_balance"] == 2483.0
     assert summary["remaining_balance_to_invest"] == 2483.0
+
+
+def test_trade_stock_buy_sell_updates_cash_and_summary(tmp_path):
+    db_path = tmp_path / "paper_trading.db"
+    engine = PaperTradingEngine(str(db_path))
+    user_id = engine.get_or_create_user("stock-trade-user", "stock@example.com", "Stock Trade User")
+    portfolio_id = engine.create_portfolio(user_id, "Stock Trading Portfolio", 10000)
+
+    buy = engine.trade_stock(
+        portfolio_id,
+        user_id,
+        ticker="AAPL",
+        quantity=10,
+        price=150.0,
+        side="BUY",
+    )
+    assert buy["quantity"] == 10
+    assert buy["cash_balance"] == 8500.0
+
+    sell = engine.trade_stock(
+        portfolio_id,
+        user_id,
+        ticker="AAPL",
+        quantity=4,
+        price=170.0,
+        side="SELL",
+    )
+    assert sell["quantity"] == 4
+    assert sell["cash_balance"] == 9180.0
+
+    summary = engine.get_portfolio_summary(portfolio_id, user_id)
+    assert summary["cash_balance"] == 9180.0
+    assert summary["remaining_balance_to_invest"] == 9180.0
+    assert summary["total_invested"] == 900.0
+    assert summary["stock_count"] == 1
+    assert summary["total_portfolio_value"] == 10080.0
+    assert summary["total_pl"] == 0.0

@@ -130,6 +130,13 @@ class MarkToMarketRequest(BaseModel):
     option_prices: dict | None = None
 
 
+class TradeStockRequest(BaseModel):
+    ticker: str
+    quantity: int = Field(gt=0)
+    price: float = Field(gt=0)
+    side: str = Field(default="BUY", pattern="^(BUY|SELL)$")
+
+
 class TradeOptionRequest(BaseModel):
     ticker: str
     option_type: str = Field(..., pattern="^(CALL|PUT)$")
@@ -248,6 +255,23 @@ def add_cash_to_portfolio(portfolio_id: int, payload: dict, user_id: int = Depen
     amount = float(payload.get("amount", 0))
     try:
         return engine.add_cash_balance(portfolio_id, user_id, amount)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="This portfolio doesn't belong to you")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/portfolio/{portfolio_id}/trade-stock")
+def trade_stock(portfolio_id: int, req: TradeStockRequest, user_id: int = Depends(get_current_user)):
+    try:
+        return engine.trade_stock(
+            portfolio_id,
+            user_id,
+            req.ticker,
+            req.quantity,
+            req.price,
+            req.side,
+        )
     except PermissionError:
         raise HTTPException(status_code=403, detail="This portfolio doesn't belong to you")
     except ValueError as e:

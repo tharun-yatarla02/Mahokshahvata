@@ -125,6 +125,17 @@
           </table>
         </div>
       </div>
+
+      <div class="card premium-card" style="margin-top: 20px;">
+        <div class="premium-header compact-header">
+          <div>
+            <div class="mini-label">Stock detail</div>
+            <h2 id="detailTickerTitle">Select a stock</h2>
+          </div>
+          <button id="addSelectedToPortfolioBtn" class="secondary" type="button">Add to portfolio</button>
+        </div>
+        <div id="marketDetail" class="empty-state">Click any stock in the market scan to inspect its growth trend, related news, and add it to your portfolio.</div>
+      </div>
     </div>
 
     <script>
@@ -135,6 +146,9 @@
       const momentumSearch = document.getElementById('momentumSearch');
       const signalCount = document.getElementById('signalCount');
       const topSector = document.getElementById('topSector');
+      const marketDetail = document.getElementById('marketDetail');
+      const detailTickerTitle = document.getElementById('detailTickerTitle');
+      let selectedMarketTicker = null;
 
       function setStatus(message, kind = '') {
         statusEl.textContent = message;
@@ -163,11 +177,119 @@
         return payload;
       }
 
+      function buildSparkline(points) {
+        if (!points || !points.length) return '';
+        const width = 260;
+        const height = 110;
+        const min = Math.min(...points);
+        const max = Math.max(...points);
+        const range = max - min || 1;
+        return points.map((value, index) => {
+          const x = (index / (points.length - 1)) * width;
+          const y = height - ((value - min) / range) * (height - 12) - 6;
+          return `${index === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)}`;
+        }).join(' ');
+      }
+
+      function renderMarketDetail(item) {
+        if (!item) {
+          marketDetail.innerHTML = '<div class="empty-state">Click any stock in the market scan to inspect its growth trend, related news, and add it to your portfolio.</div>';
+          detailTickerTitle.textContent = 'Select a stock';
+          return;
+        }
+
+        const ticker = item.ticker || 'STOCK';
+        const currentPrice = Number(item.current_price || 0);
+        const chartSeries = [
+          Math.max(0.01, currentPrice * 0.92),
+          Math.max(0.01, currentPrice * 0.94),
+          Math.max(0.01, currentPrice * 0.97),
+          currentPrice * 0.99,
+          currentPrice,
+          Math.max(0.01, currentPrice * 1.02),
+          Math.max(0.01, currentPrice * 1.04),
+        ];
+        const spark = buildSparkline(chartSeries); 
+        const positive = (item.momentum_pct || 0) >= 0;
+        const priceChange = Number(item.relative_strength || 0);
+
+        marketDetail.innerHTML = `
+          <div style="display:grid; grid-template-columns: 1.2fr 1fr; gap: 18px; align-items:start;">
+            <div>
+              <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom: 12px;">
+                <div>
+                  <div class="mini-label">${item.sector || 'Market'}</div>
+                  <strong style="font-size: 1.8rem;">$${currentPrice.toFixed(2)}</strong>
+                </div>
+                <span class="badge" style="background:${positive ? 'rgba(52,211,153,0.12)' : 'rgba(248,113,113,0.12)'}; color:${positive ? '#3ddc97' : '#ff6b6b'};">${Number(item.momentum_pct || 0).toFixed(2)}%</span>
+              </div>
+              <svg viewBox="0 0 260 110" width="100%" height="110" style="background: rgba(255,255,255,0.02); border:1px solid var(--line); border-radius: 16px;">
+                <path d="${spark}" fill="none" stroke="${positive ? '#3ddc97' : '#ff6b6b'}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"></path>
+              </svg>
+              <div style="display:flex; justify-content:space-between; color: var(--muted); margin-top: 8px; font-size: 0.8rem;">
+                <span>Relative strength</span>
+                <strong style="color: ${positive ? '#3ddc97' : '#ff6b6b'};">${priceChange.toFixed(2)}%</strong>
+              </div>
+            </div>
+            <div>
+              <div class="mini-label">Market notes</div>
+              <ul style="margin: 12px 0 0; padding-left: 18px; color: var(--muted); line-height: 1.7;">
+                <li>Live trade price: $${currentPrice.toFixed(2)}</li>
+                <li>Momentum score: ${Number(item.momentum_pct || 0).toFixed(2)}%</li>
+                <li>Sector: ${item.sector || 'Unknown'}</li>
+                <li>Strategy bias: ${positive ? 'Positive trend' : 'Cooling trend'}</li>
+              </ul>
+            </div>
+          </div>
+        `;
+
+        detailTickerTitle.textContent = ticker;
+        selectedMarketTicker = ticker;
+        getRelatedNews(ticker);
+      }
+
+      async function getRelatedNews(ticker) {
+        try {
+          const data = await apiFetch('/news-sentiment');
+          const headlineMatches = (data?.results || []).filter((item) => {
+            const text = `${item.tickers || ''} ${item.title || ''} ${item.summary || ''}`.toLowerCase();
+            return text.includes((ticker || '').toLowerCase());
+          });
+
+          const items = headlineMatches.length ? headlineMatches.slice(0, 3) : (data?.results || []).slice(0, 3);
+          const newsHtml = items.map((item) => {
+            const source = item.source || 'News Feed';
+            const title = item.title || 'Market update';
+            const summary = item.summary || 'No summary available.';
+            return `
+              <div style="padding: 12px 0; border-bottom: 1px solid var(--line);">
+                <div style="font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 4px;">${source}</div>
+                <div style="font-weight: 700; margin-bottom: 6px;">${title}</div>
+                <div style="color: var(--muted); font-size: 0.92rem;">${summary}</div>
+              </div>
+            `;
+          }).join('');
+
+          const noteBlock = document.createElement('div');
+          noteBlock.innerHTML = `<div class="mini-label" style="margin-top: 16px;">Related news</div>${newsHtml || '<div class="empty-state">No related news available yet.</div>'}`;
+          const previousNews = marketDetail.querySelector('[data-related-news]');
+          if (previousNews) previousNews.remove();
+          noteBlock.setAttribute('data-related-news', 'true');
+          marketDetail.appendChild(noteBlock);
+        } catch (error) {
+          const noteBlock = document.createElement('div');
+          noteBlock.innerHTML = '<div class="mini-label" style="margin-top: 16px;">Related news</div><div class="empty-state">News feed unavailable right now.</div>';
+          noteBlock.setAttribute('data-related-news', 'true');
+          marketDetail.appendChild(noteBlock);
+        }
+      }
+
       function renderMarket(rows) {
         if (!rows || rows.length === 0) {
           marketTableBody.innerHTML = '<tr><td colspan="5">No stocks match the selected filters.</td></tr>';
           signalCount.textContent = '0';
           topSector.textContent = '-';
+          renderMarketDetail(null);
           return;
         }
 
@@ -192,7 +314,7 @@
         topSector.textContent = dominant ? dominant[0] : '-';
 
         marketTableBody.innerHTML = rows.map(row => `
-          <tr>
+          <tr data-ticker="${row.ticker}" style="cursor:pointer;">
             <td style="font-weight:700;">${row.ticker}</td>
             <td>${row.sector || 'Unknown'}</td>
             <td>$${Number(row.current_price || 0).toFixed(2)}</td>
@@ -200,6 +322,10 @@
             <td>${Number(row.relative_strength || 0).toFixed(2)}%</td>
           </tr>
         `).join('');
+
+        if (!selectedMarketTicker && rows[0]) {
+          renderMarketDetail(rows[0]);
+        }
       }
 
       async function loadMomentumData() {
@@ -211,6 +337,7 @@
           if (q) params.set('q', q);
 
           const data = await apiFetch(`/momentum?${params.toString()}`);
+          marketTableBody.dataset.rows = JSON.stringify(data.results || []);
           renderMarket(data.results || []);
           setStatus('Market data loaded successfully.', 'success');
         } catch (err) {
@@ -290,6 +417,23 @@
         if (profileButton && profileMenu && !profileButton.contains(event.target) && !profileMenu.contains(event.target)) {
           profileMenu.classList.remove('open');
         }
+      });
+
+      marketTableBody.addEventListener('click', (event) => {
+        const row = event.target.closest('tr[data-ticker]');
+        if (!row) return;
+        const ticker = row.dataset.ticker;
+        const matched = (marketTableBody.dataset.rows ? JSON.parse(marketTableBody.dataset.rows) : []).find((item) => item.ticker === ticker);
+        if (matched) renderMarketDetail(matched);
+      });
+
+      document.getElementById('addSelectedToPortfolioBtn').addEventListener('click', () => {
+        if (!selectedMarketTicker) {
+          setStatus('Please select a stock first.', 'error');
+          return;
+        }
+        localStorage.setItem('pendingTradeTicker', selectedMarketTicker);
+        window.location.href = '/portfolio.html';
       });
 
       document.getElementById('loadMomentumBtn').addEventListener('click', loadMomentumData);

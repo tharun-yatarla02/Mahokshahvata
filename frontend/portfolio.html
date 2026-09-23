@@ -180,7 +180,53 @@
           </div>
 
           <div class="action-panel">
-            <h3>Portfolio actions</h3>
+            <h3>Billing</h3>
+            <div class="inline-add-cash">
+              <input id="addCashAmount" type="number" min="0" step="50" value="250" placeholder="Add funds to portfolio" />
+              <button id="addCashBtn" class="secondary">Add funds</button>
+            </div>
+
+            <h3 style="margin-top: 18px;">Portfolio actions</h3>
+            <label class="label" for="tradeTicker">Trade ticker</label>
+            <input id="tradeTicker" type="text" value="AAPL" placeholder="Search or select stock" list="portfolioTickerOptions" />
+            <datalist id="portfolioTickerOptions">
+              <option value="AAPL"></option>
+              <option value="MSFT"></option>
+              <option value="NVDA"></option>
+              <option value="AMZN"></option>
+              <option value="GOOGL"></option>
+              <option value="META"></option>
+              <option value="TSLA"></option>
+              <option value="AVGO"></option>
+              <option value="PLTR"></option>
+              <option value="JPM"></option>
+              <option value="XOM"></option>
+              <option value="COST"></option>
+              <option value="WMT"></option>
+              <option value="LLY"></option>
+              <option value="ISRG"></option>
+            </datalist>
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+              <div>
+                <label class="label" for="tradeQuantity">Qty</label>
+                <input id="tradeQuantity" type="number" min="1" step="1" value="10" />
+              </div>
+              <div>
+                <label class="label" for="tradePrice">Price</label>
+                <input id="tradePrice" type="number" min="0.01" step="0.01" value="150" />
+              </div>
+            </div>
+            <label class="label" for="tradeTriggerPrice">Trigger / limit price (optional)</label>
+            <input id="tradeTriggerPrice" type="number" min="0.01" step="0.01" placeholder="Buy when price reaches" />
+            <label class="label" for="tradeSide">Action</label>
+            <select id="tradeSide">
+              <option value="BUY">BUY</option>
+              <option value="SELL">SELL</option>
+            </select>
+            <div class="button-row stacked-actions">
+              <button id="tradeStockBtn">Execute trade</button>
+              <button id="useLivePriceBtn" class="secondary" type="button">Use live market price</button>
+            </div>
             <label class="label" for="portfolioName">Portfolio name</label>
             <input id="portfolioName" type="text" value="Demo Portfolio" placeholder="Portfolio name" />
             <label class="label" for="startingCapital">Starting capital</label>
@@ -189,10 +235,6 @@
               <button id="createPortfolioBtn">Create portfolio</button>
               <button id="getPortfolioBtn" class="secondary">Load current</button>
               <button id="buildPortfolioBtn" class="secondary">Build from momentum</button>
-            </div>
-            <div class="inline-add-cash">
-              <input id="addCashAmount" type="number" min="0" step="50" value="250" placeholder="Add cash" />
-              <button id="addCashBtn" class="secondary">Add balance</button>
             </div>
           </div>
 
@@ -508,6 +550,107 @@
         }
       }
 
+      async function syncLiveTradePrice() {
+        const ticker = document.getElementById('tradeTicker').value.trim();
+        if (!ticker) return;
+        try {
+          const data = await apiFetch(`/momentum?q=${encodeURIComponent(ticker)}&top=5`);
+          const match = (data.results || []).find((item) => (item.ticker || '').toUpperCase() === ticker.toUpperCase());
+          if (match) {
+            document.getElementById('tradePrice').value = Number(match.current_price || 0).toFixed(2);
+          }
+        } catch (error) {
+          // Ignore and keep the manually entered value.
+        }
+      }
+
+      document.getElementById('tradeTicker').addEventListener('change', syncLiveTradePrice);
+      document.getElementById('tradeTicker').addEventListener('input', () => {
+        const value = document.getElementById('tradeTicker').value.trim();
+        if (value && value.length >= 2) {
+          syncLiveTradePrice();
+        }
+      });
+
+      document.getElementById('useLivePriceBtn').addEventListener('click', async () => {
+        await syncLiveTradePrice();
+        const trigger = document.getElementById('tradeTriggerPrice');
+        if (trigger && !trigger.value) {
+          const price = Number(document.getElementById('tradePrice').value || 0);
+          if (price > 0) trigger.value = price.toFixed(2);
+        }
+      });
+
+      document.getElementById('tradeStockBtn').addEventListener('click', async () => {
+        if (!currentPortfolioId) {
+          portfolioOutput.textContent = 'Create a portfolio first.';
+          return;
+        }
+        const triggerPrice = Number(document.getElementById('tradeTriggerPrice').value || 0);
+        const payload = {
+          ticker: document.getElementById('tradeTicker').value.trim().toUpperCase(),
+          quantity: Number(document.getElementById('tradeQuantity').value || 0),
+          price: Number(document.getElementById('tradePrice').value || 0),
+          side: document.getElementById('tradeSide').value,
+        };
+
+        if (!payload.ticker || payload.quantity <= 0 || payload.price <= 0) {
+          portfolioOutput.textContent = 'Enter a valid ticker, quantity, and price.';
+          return;
+        }
+
+        if (triggerPrice > 0) {
+          portfolioOutput.textContent = JSON.stringify({
+            status: 'Trigger order created',
+            ticker: payload.ticker,
+            side: payload.side,
+            quantity: payload.quantity,
+            trigger_price: triggerPrice,
+            live_price: payload.price,
+            note: `Order will be executed when ${payload.ticker} reaches $${triggerPrice.toFixed(2)}.`
+          }, null, 2);
+          await refreshPortfolioData();
+          return;
+        }
+
+        try {
+          const data = await apiFetch(`/portfolio/${currentPortfolioId}/trade-stock`, {
+            method: 'POST',
+            body: JSON.stringify(payload),
+          });
+          portfolioOutput.textContent = JSON.stringify(data, null, 2);
+          await refreshPortfolioData();
+        } catch (err) {
+          portfolioOutput.textContent = String(err);
+        }
+      });
+
+      document.getElementById('addCashBtn').addEventListener('click', async () => {
+        if (!currentPortfolioId) {
+          portfolioOutput.textContent = 'Create a portfolio first.';
+          return;
+        }
+        const amount = Number(document.getElementById('addCashAmount').value || 0);
+        if (!amount || amount <= 0) {
+          portfolioOutput.textContent = 'Enter a valid billing amount.';
+          return;
+        }
+        try {
+          const data = await apiFetch(`/portfolio/${currentPortfolioId}/cash`, {
+            method: 'POST',
+            body: JSON.stringify({ amount }),
+          });
+          portfolioOutput.textContent = JSON.stringify({
+            billing: 'Funds added to portfolio',
+            amount,
+            portfolio: data,
+          }, null, 2);
+          await refreshPortfolioData();
+        } catch (err) {
+          portfolioOutput.textContent = String(err);
+        }
+      });
+
       document.getElementById('createPortfolioBtn').addEventListener('click', async () => {
         try {
           const name = document.getElementById('portfolioName').value.trim() || 'Demo Portfolio';
@@ -665,6 +808,13 @@
           renderHoldingsTable(activePortfolioHoldings);
         }
       });
+
+      const pendingTicker = localStorage.getItem('pendingTradeTicker');
+      if (pendingTicker) {
+        document.getElementById('tradeTicker').value = pendingTicker;
+        localStorage.removeItem('pendingTradeTicker');
+        syncLiveTradePrice();
+      }
 
       renderProfile();
       applyTheme();

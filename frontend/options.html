@@ -72,13 +72,32 @@
       <div class="grid">
         <div class="card premium-card">
           <h2>New option trade</h2>
+          <div id="portfolioSummaryBox" class="status" style="margin-bottom: 12px;">Loading portfolio summary...</div>
           <div class="button-row">
             <button id="tradeOptionBtn">Trade option</button>
+            <button id="loadPortfolioBtn" class="secondary">Load portfolio</button>
             <button id="tradeHistoryBtn" class="secondary">Load history</button>
           </div>
 
           <label class="label" for="optionTicker">Ticker</label>
-          <input id="optionTicker" type="text" value="AAPL" />
+          <input id="optionTicker" type="text" value="AAPL" list="optionTickerOptions" />
+          <datalist id="optionTickerOptions">
+            <option value="AAPL"></option>
+            <option value="MSFT"></option>
+            <option value="NVDA"></option>
+            <option value="AMZN"></option>
+            <option value="GOOGL"></option>
+            <option value="META"></option>
+            <option value="TSLA"></option>
+            <option value="AVGO"></option>
+            <option value="PLTR"></option>
+            <option value="JPM"></option>
+            <option value="XOM"></option>
+            <option value="COST"></option>
+            <option value="WMT"></option>
+            <option value="LLY"></option>
+            <option value="ISRG"></option>
+          </datalist>
           <label class="label" for="optionType">Option type</label>
           <select id="optionType">
             <option value="CALL">CALL</option>
@@ -108,6 +127,7 @@
       const API_BASE = window.location.origin;
       const optionTradeOutput = document.getElementById('optionTradeOutput');
       const optionsStatus = document.getElementById('optionsStatus');
+      const portfolioSummaryBox = document.getElementById('portfolioSummaryBox');
       let currentPortfolioId = null;
 
       function setOptionsStatus(message, kind = 'success') {
@@ -194,16 +214,53 @@
         return payload;
       }
 
+      function renderPortfolioSummary(summary) {
+        if (!portfolioSummaryBox) return;
+        if (!summary) {
+          portfolioSummaryBox.textContent = 'No portfolio loaded yet.';
+          portfolioSummaryBox.className = 'status';
+          return;
+        }
+        const cash = Number(summary.cash_balance ?? 0);
+        const invested = Number(summary.total_invested ?? 0);
+        const pnl = Number(summary.total_pl ?? 0);
+        const total = Number(summary.total_portfolio_value ?? cash + invested);
+        portfolioSummaryBox.innerHTML = `
+          <strong>Portfolio:</strong> ${summary.name || 'Demo'} · 
+          <strong>Cash:</strong> $${cash.toFixed(2)} · 
+          <strong>Invested:</strong> $${invested.toFixed(2)} · 
+          <strong>P/L:</strong> <span style="color:${pnl >= 0 ? '#27c38d' : '#ff6b6b'}; font-weight:700;">$${pnl.toFixed(2)}</span> · 
+          <strong>Total:</strong> $${total.toFixed(2)}
+        `;
+      }
+
+      async function refreshPortfolioSummary() {
+        if (!currentPortfolioId) {
+          renderPortfolioSummary(null);
+          return;
+        }
+        try {
+          const summary = await apiFetch(`/portfolio/${currentPortfolioId}`);
+          renderPortfolioSummary(summary);
+        } catch (err) {
+          renderPortfolioSummary(null);
+          setOptionsStatus(String(err), 'error');
+        }
+      }
+
       async function initializePortfolio() {
         try {
           const data = await apiFetch('/portfolio');
           if (data.portfolios && data.portfolios.length) {
             currentPortfolioId = data.portfolios[0].id;
           }
+          await refreshPortfolioSummary();
         } catch (err) {
           optionTradeOutput.textContent = String(err);
         }
       }
+
+      document.getElementById('loadPortfolioBtn').addEventListener('click', refreshPortfolioSummary);
 
       document.querySelectorAll('.sector-pill').forEach((button) => {
         button.addEventListener('click', () => {
@@ -240,7 +297,8 @@
             body: JSON.stringify(payload),
           });
           optionTradeOutput.innerHTML = formatTradeResult({ trades: [data] });
-          setOptionsStatus(`Trade placed for ${payload.ticker}.`, 'success');
+          await refreshPortfolioSummary();
+          setOptionsStatus(`Trade placed for ${payload.ticker}. Cash after trade: $${Number((await apiFetch(`/portfolio/${currentPortfolioId}`)).cash_balance ?? 0).toFixed(2)}`, 'success');
         } catch (err) {
           optionTradeOutput.innerHTML = `<div class="empty-state">${String(err)}</div>`;
           setOptionsStatus('Option trade could not be placed.', 'error');
