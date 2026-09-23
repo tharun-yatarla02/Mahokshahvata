@@ -24,11 +24,13 @@ Endpoints:
     POST /portfolio/{id}/mark-to-market         update with current prices
 """
 
+import os
 import sys
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Depends, Header
-from pydantic import BaseModel
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
 
 # Make sibling modules importable
 sys.path.append(str(Path(__file__).parent.parent / "momentum"))
@@ -43,6 +45,23 @@ from google_auth import verify_google_id_token, issue_session_token, verify_sess
 
 app = FastAPI(title="AI Stock Platform API", version="0.1.0")
 engine = PaperTradingEngine(str(Path(__file__).parent.parent / "paper_trading" / "paper_trading.db"))
+
+# CORS: without this, a browser blocks every call from your frontend to this
+# API once they're on different origins (different port counts as different
+# origin too — localhost:5500 calling localhost:8000 is already cross-origin).
+# ALLOWED_ORIGINS is a comma-separated env var, e.g.
+#   export ALLOWED_ORIGINS="https://your-dashboard.com,http://localhost:5500"
+# Defaults to "*" (allow anything) for easy local development — TIGHTEN THIS
+# to your real frontend's exact domain(s) before deploying publicly, or
+# anyone can call your API from any website.
+_allowed_origins = os.environ.get("ALLOWED_ORIGINS", "*")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"] if _allowed_origins == "*" else _allowed_origins.split(","),
+    allow_credentials=False,  # we use a Bearer token, not cookies, so this can stay False
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 # ---------------------------------------------------------------------------
@@ -73,14 +92,14 @@ class GoogleSignInRequest(BaseModel):
 
 
 class CreatePortfolioRequest(BaseModel):
-    name: str
-    starting_capital: float
+    name: str = Field(min_length=1, max_length=100)
+    starting_capital: float = Field(gt=0, description="Must be a positive amount")
 
 
 class BuildPortfolioRequest(BaseModel):
-    max_positions: int = 5
-    max_allocation_per_stock: float = 0.30
-    max_allocation_per_sector: float = 0.50
+    max_positions: int = Field(default=5, gt=0, le=20)
+    max_allocation_per_stock: float = Field(default=0.30, gt=0, le=1.0)
+    max_allocation_per_sector: float = Field(default=0.50, gt=0, le=1.0)
 
 
 class MarkToMarketRequest(BaseModel):
@@ -145,10 +164,32 @@ def create_portfolio(req: CreatePortfolioRequest, user_id: int = Depends(get_cur
 
 @app.post("/portfolio/{portfolio_id}/build")
 def build_portfolio(portfolio_id: int, req: BuildPortfolioRequest, user_id: int = Depends(get_current_user)):
-    """Builds the portfolio from the current momentum ranking."""
+    """Builds the portfolio from the current momentum ranking. Only works
+    once per portfolio — guards against a double-click or retry silently
+    buying twice and double-spending the portfolio's cash."""
+    try:
+        existing = engine.get_portfolio_summary(portfolio_id, user_id)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="This portfolio doesn't belong to you")
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Portfolio not found")
+    if existing["holdings"]:
+        raise HTTPException(
+            status_code=409,
+            detail="This portfolio has already been built. Create a new portfolio to try a different allocation.",
+        )
+
     momentum_list = rank_momentum(DEFAULT_UNIVERSE, lookback_days=90)
     if not momentum_list:
         raise HTTPException(status_code=502, detail="Could not fetch momentum data")
+
+    # momentum_engine.py outputs "current_price"; paper_trading_engine.py
+    # expects "price" — this adapts between the two, since without it every
+    # real (non-hand-written) momentum list crashes the allocation engine
+    # with a KeyError the moment it tries to read the price.
+    normalized_momentum_list = [
+        {**stock, "price": stock["current_price"]} for stock in momentum_list
+    ]
 
     rules = RiskRules(
         max_positions=req.max_positions,
@@ -156,7 +197,7 @@ def build_portfolio(portfolio_id: int, req: BuildPortfolioRequest, user_id: int 
         max_allocation_per_sector=req.max_allocation_per_sector,
     )
     try:
-        purchases = engine.build_portfolio_from_momentum(portfolio_id, user_id, momentum_list, rules)
+        purchases = engine.build_portfolio_from_momentum(portfolio_id, user_id, normalized_momentum_list, rules)
     except PermissionError:
         raise HTTPException(status_code=403, detail="This portfolio doesn't belong to you")
     except ValueError as e:
@@ -167,15 +208,15 @@ def build_portfolio(portfolio_id: int, req: BuildPortfolioRequest, user_id: int 
 
 @app.get("/portfolio/{portfolio_id}")
 def get_portfolio(portfolio_id: int, user_id: int = Depends(get_current_user)):
+    """Returns the portfolio's current state. A freshly created portfolio
+    with no holdings yet is a normal, valid response — not a 404. Only a
+    portfolio that truly doesn't exist (or belongs to someone else) errors."""
     try:
-        summary = engine.get_portfolio_summary(portfolio_id, user_id)
+        return engine.get_portfolio_summary(portfolio_id, user_id)
     except PermissionError:
         raise HTTPException(status_code=403, detail="This portfolio doesn't belong to you")
     except ValueError:
         raise HTTPException(status_code=404, detail="Portfolio not found")
-    if summary["latest"] is None and not summary["holdings"]:
-        raise HTTPException(status_code=404, detail="Portfolio not found or empty")
-    return summary
 
 
 @app.post("/portfolio/{portfolio_id}/mark-to-market")

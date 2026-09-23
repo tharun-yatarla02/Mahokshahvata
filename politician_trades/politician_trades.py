@@ -48,7 +48,8 @@ CREATE TABLE IF NOT EXISTS trades (
     transaction_date TEXT,
     disclosure_date TEXT,
     amount_range TEXT,
-    fetched_at TEXT NOT NULL
+    fetched_at TEXT NOT NULL,
+    UNIQUE(politician, ticker, transaction_date, transaction_type, amount_range)
 );
 CREATE INDEX IF NOT EXISTS idx_politician ON trades(politician);
 CREATE INDEX IF NOT EXISTS idx_transaction_date ON trades(transaction_date);
@@ -85,8 +86,11 @@ def refresh_cache():
         # Field names below follow Quiver's documented response shape —
         # double check these keys against their docs if this errors, APIs
         # do rename fields between versions.
-        conn.execute(
-            """INSERT INTO trades (politician, chamber, party, ticker, transaction_type,
+        # INSERT OR IGNORE: with the UNIQUE constraint above, re-running this
+        # on a schedule against overlapping data won't create duplicate rows
+        # — only genuinely new trades get inserted.
+        cur = conn.execute(
+            """INSERT OR IGNORE INTO trades (politician, chamber, party, ticker, transaction_type,
                                     transaction_date, disclosure_date, amount_range, fetched_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
@@ -101,10 +105,11 @@ def refresh_cache():
                 fetched_at,
             ),
         )
-        inserted += 1
+        if cur.rowcount:  # actually inserted, not skipped as a duplicate
+            inserted += 1
 
     conn.commit()
-    print(f"Refreshed cache: {inserted} trade records stored.")
+    print(f"Refreshed cache: {inserted} new trade record(s) stored ({len(raw_trades)} fetched, rest already known).")
     return inserted
 
 

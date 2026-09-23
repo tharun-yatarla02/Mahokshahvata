@@ -172,13 +172,19 @@ class PaperTradingEngine:
             {"ticker": str, "sector": str, "price": float}
         rules: RiskRules instance (defaults used if omitted)
 
-        Allocation strategy (simple equal-weight within caps):
+        Allocation strategy (iterative waterfill, equal-weight within caps):
         1. Take the top N candidates (N = rules.max_positions)
-        2. Split capital equally among them, but never exceed the
-           per-stock cap or push any one sector over its cap
-        3. Whatever a stock's cap can't absorb is redistributed to the
-           remaining candidates on a later pass (simple greedy fill)
-        4. Buy whole shares only; leftover cash stays as cash
+        2. Split remaining capital equally among candidates that can still
+           afford at least one more share within their remaining per-stock
+           and per-sector headroom
+        3. Repeat: whatever a stock's cap or price couldn't absorb this
+           round gets redistributed among the remaining affordable
+           candidates on the next round, instead of being abandoned —
+           this is what stops small starting capital from silently
+           under-deploying into only 1-2 positions when the "fair share"
+           per stock can't afford a whole share of a pricier candidate
+        4. Stops when no candidate can afford another share, or the caps
+           are exhausted. Buy whole shares only; leftover cash stays as cash.
         """
         rules = rules or RiskRules()
         as_of = as_of or datetime.now(timezone.utc).isoformat()
@@ -190,41 +196,71 @@ class PaperTradingEngine:
         if portfolio is None:
             raise ValueError(f"No portfolio with id {portfolio_id}")
 
-        capital = portfolio["cash_balance"] * (1 - rules.cash_reserve_pct)
         candidates = momentum_list[: rules.max_positions]
+        if not candidates:
+            return []
 
         per_stock_cap = portfolio["starting_capital"] * rules.max_allocation_per_stock
+        sector_cap = portfolio["starting_capital"] * rules.max_allocation_per_sector
+
+        remaining_capital = portfolio["cash_balance"] * (1 - rules.cash_reserve_pct)
+        stock_spent = {c["ticker"]: 0.0 for c in candidates}
         sector_spent = {}
-        target_per_stock = capital / len(candidates) if candidates else 0
+        purchased_qty = {c["ticker"]: 0 for c in candidates}
+
+        # Iterative waterfill: keep redistributing remaining capital across
+        # whichever candidates can still afford another share, until no
+        # round makes progress.
+        made_progress = True
+        while made_progress and remaining_capital > 0:
+            made_progress = False
+
+            active = []
+            for stock in candidates:
+                ticker = stock["ticker"]
+                sector = stock.get("sector", "Unknown")
+                stock_headroom = per_stock_cap - stock_spent[ticker]
+                sector_headroom = sector_cap - sector_spent.get(sector, 0.0)
+                if stock_headroom >= stock["price"] and sector_headroom >= stock["price"] and remaining_capital >= stock["price"]:
+                    active.append(stock)
+
+            if not active:
+                break
+
+            share = remaining_capital / len(active)
+
+            for stock in active:
+                ticker = stock["ticker"]
+                sector = stock.get("sector", "Unknown")
+                price = stock["price"]
+                stock_headroom = per_stock_cap - stock_spent[ticker]
+                sector_headroom = sector_cap - sector_spent.get(sector, 0.0)
+
+                allocation = min(share, stock_headroom, sector_headroom, remaining_capital)
+                quantity = int(allocation // price)  # whole shares only
+                if quantity <= 0:
+                    continue
+
+                cost = quantity * price
+                stock_spent[ticker] += cost
+                sector_spent[sector] = sector_spent.get(sector, 0.0) + cost
+                remaining_capital -= cost
+                purchased_qty[ticker] += quantity
+                made_progress = True
 
         purchases = []
-        remaining_capital = capital
-
         for stock in candidates:
-            sector = stock.get("sector", "Unknown")
-            sector_cap = portfolio["starting_capital"] * rules.max_allocation_per_sector
-            sector_used = sector_spent.get(sector, 0.0)
-            sector_headroom = max(0.0, sector_cap - sector_used)
-
-            allocation = min(target_per_stock, per_stock_cap, sector_headroom, remaining_capital)
-            if allocation <= 0:
+            ticker = stock["ticker"]
+            qty = purchased_qty[ticker]
+            if qty <= 0:
                 continue
-
-            price = stock["price"]
-            quantity = int(allocation // price)  # whole shares only
-            if quantity <= 0:
-                continue
-
-            cost = quantity * price
             purchases.append({
-                "ticker": stock["ticker"],
-                "sector": sector,
-                "quantity": quantity,
-                "price": price,
-                "cost": cost,
+                "ticker": ticker,
+                "sector": stock.get("sector", "Unknown"),
+                "quantity": qty,
+                "price": stock["price"],
+                "cost": stock_spent[ticker],
             })
-            sector_spent[sector] = sector_used + cost
-            remaining_capital -= cost
 
         # Execute the purchases: write holdings + transactions, update cash
         for p in purchases:
