@@ -306,7 +306,7 @@ def root():
 def market_page():
     page = frontend_dir / "market.html"
     if page.exists():
-        return FileResponse(page)
+        return FileResponse(page, headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"})
     raise HTTPException(status_code=404, detail="Market page not found")
 
 
@@ -314,7 +314,7 @@ def market_page():
 def portfolio_page():
     page = frontend_dir / "portfolio.html"
     if page.exists():
-        return FileResponse(page)
+        return FileResponse(page, headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"})
     raise HTTPException(status_code=404, detail="Portfolio page not found")
 
 
@@ -322,7 +322,7 @@ def portfolio_page():
 def sentiment_page():
     page = frontend_dir / "sentiment.html"
     if page.exists():
-        return FileResponse(page)
+        return FileResponse(page, headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"})
     raise HTTPException(status_code=404, detail="Sentiment page not found")
 
 
@@ -330,7 +330,7 @@ def sentiment_page():
 def options_page():
     page = frontend_dir / "options.html"
     if page.exists():
-        return FileResponse(page)
+        return FileResponse(page, headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"})
     raise HTTPException(status_code=404, detail="Options page not found")
 
 
@@ -338,7 +338,7 @@ def options_page():
 def styles_css():
     css_path = frontend_dir / "styles.css"
     if css_path.exists():
-        return FileResponse(css_path, media_type="text/css")
+        return FileResponse(css_path, media_type="text/css", headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"})
     raise HTTPException(status_code=404, detail="Stylesheet not found")
 
 

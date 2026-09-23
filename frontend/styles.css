@@ -78,7 +78,22 @@ button, input, select { font: inherit; }
   border-bottom: 1px solid var(--line);
 }
 body[data-theme="light"] .navbar {
-  background: rgba(255,255,255,0.52);
+  background: rgba(255,255,255,0.62);
+  border-bottom-color: rgba(15, 23, 42, 0.07);
+}
+body[data-theme="light"] .nav-links a {
+  background: rgba(255,255,255,0.45);
+  color: rgba(17, 24, 39, 0.8);
+}
+body[data-theme="light"] .nav-links a:hover,
+body[data-theme="light"] .nav-links a.active {
+  background: rgba(59, 130, 246, 0.08);
+  border-color: rgba(59, 130, 246, 0.16);
+}
+body[data-theme="light"] .profile-button,
+body[data-theme="light"] .theme-toggle {
+  background: rgba(255,255,255,0.8);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.8);
 }
 .nav-inner {
   max-width: 1280px;
@@ -246,7 +261,20 @@ body[data-theme="light"] .profile-menu {
   -webkit-backdrop-filter: blur(18px);
 }
 body[data-theme="light"] .hero {
-  background: linear-gradient(135deg, rgba(255,255,255,0.88), rgba(240,246,255,0.88));
+  background: linear-gradient(135deg, rgba(255,255,255,0.9), rgba(240,246,255,0.88));
+  box-shadow: 0 18px 44px rgba(15, 23, 42, 0.08);
+}
+body[data-theme="light"] .hero h1 {
+  letter-spacing: -0.065em;
+  color: #111827;
+}
+body[data-theme="light"] .hero p,
+body[data-theme="light"] .stat-sub,
+body[data-theme="light"] .text-muted,
+body[data-theme="light"] .mini-label,
+body[data-theme="light"] .tile-label,
+body[data-theme="light"] .stat-label {
+  color: rgba(83, 98, 125, 0.96);
 }
 .premium-hero {
   background: radial-gradient(circle at top right, rgba(124,58,237,0.18), transparent 35%),
@@ -383,8 +411,15 @@ body[data-theme="light"] .premium-hero {
 .sector-row:hover,
 .premium-card:hover {
   transform: translateY(-2px);
-  box-shadow: 0 18px 36px rgba(2, 6, 23, 0.22);
-  border-color: rgba(125, 211, 252, 0.18);
+  box-shadow: 0 18px 36px rgba(15, 23, 42, 0.12);
+  border-color: rgba(59, 130, 246, 0.18);
+}
+body[data-theme="light"] .stat:hover,
+body[data-theme="light"] .card:hover,
+body[data-theme="light"] .trend-tile:hover,
+body[data-theme="light"] .premium-card:hover {
+  box-shadow: 0 20px 38px rgba(15, 23, 42, 0.09);
+  border-color: rgba(59, 130, 246, 0.18);
 }
 .stat::before {
   content: "";
@@ -614,6 +649,69 @@ body[data-theme="light"] .trend-tile.warning {
 body[data-theme="light"] .premium-card {
   background: linear-gradient(180deg, rgba(255,255,255,0.9), rgba(242,247,255,0.9));
 }
+body[data-theme="light"] .action-panel,
+body[data-theme="light"] .output-panel,
+body[data-theme="light"] .table-wrap,
+body[data-theme="light"] .holdings-table-wrap,
+body[data-theme="light"] .card,
+body[data-theme="light"] .trend-tile {
+  background: linear-gradient(180deg, rgba(255,255,255,0.88), rgba(244,247,252,0.76));
+  border-color: rgba(15, 23, 42, 0.08);
+  box-shadow: none;
+}
+body[data-theme="light"] .stat,
+body[data-theme="light"] .hero-metric-box,
+body[data-theme="light"] .premium-card,
+body[data-theme="light"] .premium-visual-card {
+  background: linear-gradient(180deg, rgba(255,255,255,0.8), rgba(243,247,252,0.8));
+  border-color: rgba(15, 23, 42, 0.06);
+  box-shadow: none;
+}
+body[data-theme="light"] table,
+body[data-theme="light"] th,
+body[data-theme="light"] td {
+  color: rgba(17,24,39,0.96);
+}
+body[data-theme="light"] thead th {
+  background: rgba(15, 23, 42, 0.015);
+  color: rgba(17, 24, 39, 0.8);
+  border-bottom-color: rgba(15, 23, 42, 0.06);
+}
+body[data-theme="light"] .table-wrap,
+body[data-theme="light"] .holdings-table-wrap {
+  background: rgba(255,255,255,0.06);
+  border-color: rgba(15, 23, 42, 0.05);
+}
+body[data-theme="light"] th,
+body[data-theme="light"] td {
+  border-top-color: rgba(15, 23, 42, 0.05);
+}
+body[data-theme="light"] .table-wrap table thead th {
+  letter-spacing: -0.02em;
+}
+body[data-theme="light"] .output-panel pre {
+  background: rgba(241, 245, 249, 0.9);
+  color: var(--text);
+  border-color: rgba(15, 23, 42, 0.08);
+}
+body[data-theme="light"] .sector-pill,
+body[data-theme="light"] .chip {
+  background: rgba(255,255,255,0.8);
+  border-color: rgba(148, 163, 184, 0.28);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.8);
+  color: var(--text);
+}
+body[data-theme="light"] .sector-pill.active,
+body[data-theme="light"] .chip.active {
+  background: linear-gradient(135deg, rgba(59,130,246,0.10), rgba(109,94,244,0.12));
+  border-color: rgba(59,130,246,0.2);
+  color: var(--accent);
+}
+body[data-theme="light"] .badge,
+body[data-theme="light"] .mini-chip {
+  background: rgba(59,130,246,0.08);
+  border-color: rgba(59,130,246,0.18);
+}
 .premium-header {
   margin-bottom: 18px;
 }
@@ -625,7 +723,7 @@ body[data-theme="light"] .premium-card {
   overflow: auto;
   border-radius: 18px;
   border: 1px solid var(--line);
-  background: rgba(4,7,14,0.42);
+  background: rgba(255,255,255,0.03);
 }
 .holdings-table {
   min-width: 700px;
@@ -783,7 +881,8 @@ input, select {
   overflow: auto;
   border-radius: 16px;
   border: 1px solid var(--line);
-  background: rgba(2,6,23,0.48);
+  background: rgba(255,255,255,0.02);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.02);
 }
 table {
   width: 100%;
@@ -798,9 +897,10 @@ th, td {
   line-height: 1.4;
 }
 thead th {
-  background: rgba(255,255,255,0.03);
+  background: rgba(255,255,255,0.015);
   font-weight: 600;
   color: var(--muted);
+  border-bottom: 1px solid var(--line);
 }
 
 .trade-output {
