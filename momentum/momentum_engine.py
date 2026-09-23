@@ -62,6 +62,57 @@ DEFAULT_SECTOR_LOOKUP = {
     "DIS": "Communication Services",
 }
 
+# Short filter names the dashboard uses. A theme is a hand-picked ticker list
+# that cuts across sectors; an alias is just a shorter name for one sector.
+# Edit these to change what the AI / Growth / Tech / Health / Finance filters show.
+THEME_TICKERS = {
+    "ai": ["NVDA", "MSFT", "GOOGL", "META", "AVGO", "PLTR", "AMZN"],
+    "growth": ["TSLA", "NVDA", "PLTR", "CRWD", "AMZN", "ISRG", "META"],
+}
+
+SECTOR_ALIASES = {
+    "tech": "Technology",
+    "health": "Healthcare",
+    "finance": "Financials",
+}
+
+
+def filter_by_group(ranked, group):
+    """Filters ranked momentum rows by a sector name, a sector alias
+    ("Tech"), or a theme ("AI"). Matching is case-insensitive."""
+    key = group.strip().lower()
+    if key in THEME_TICKERS:
+        tickers = set(THEME_TICKERS[key])
+        return [item for item in ranked if item.get("ticker") in tickers]
+    sector = SECTOR_ALIASES.get(key, group).lower()
+    return [item for item in ranked if item.get("sector", "Unknown").lower() == sector]
+
+
+def search_rows(rows, query):
+    """Search by ticker, company name or sector, best matches first:
+    exact ticker, then ticker prefix, then name prefix, then name/sector
+    substring. Ties go to the larger company."""
+    q = query.strip().lower()
+    if not q:
+        return list(rows)
+    scored = []
+    for row in rows:
+        ticker = row.get("ticker", "").lower()
+        name = (row.get("name") or "").lower()
+        if ticker == q:
+            score = 0
+        elif ticker.startswith(q):
+            score = 1
+        elif name.startswith(q) or any(word.startswith(q) for word in name.split()):
+            score = 2
+        elif q in name or q in (row.get("sector") or "").lower():
+            score = 3
+        else:
+            continue
+        scored.append((score, -(row.get("market_cap") or 0), row))
+    scored.sort(key=lambda item: item[:2])
+    return [row for _, _, row in scored]
+
 
 def fetch_price_history(tickers, lookback_days=90):
     """Returns a DataFrame of adjusted close prices, tickers as columns."""

@@ -33,22 +33,38 @@ Endpoints:
 import os
 import threading
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Depends, Header
+from fastapi import FastAPI, HTTPException, Depends, Header, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from momentum.momentum_engine import rank_momentum, latest_price, DEFAULT_UNIVERSE, DEFAULT_SECTOR_LOOKUP
+from momentum.momentum_engine import latest_price, filter_by_group, search_rows, DEFAULT_SECTOR_LOOKUP
+from momentum.market_data import MarketData
 from paper_trading.paper_trading_engine import PaperTradingEngine, RiskRules
 from politician_trades.politician_trades import list_politicians, get_trades_for_politician, refresh_cache
 from auth.firebase_auth import verify_firebase_token
 from news_sentiment.news_sentiment_scraper import collect_sentiment_results
 
-app = FastAPI(title="Mahokshahvata API", version="0.1.0")
+@asynccontextmanager
+async def lifespan(app):
+    # Loads the saved market snapshot, then keeps quotes and history fresh in
+    # a background thread (see momentum/market_data.py).
+    market_data.start()
+    engine.fill_unknown_sectors(lambda ticker: (market_data.lookup(ticker) or {}).get("sector"))
+    yield
+
+
+app = FastAPI(title="Mahokshahvata API", version="0.1.0", lifespan=lifespan)
 frontend_dir = Path(__file__).parent.parent / "frontend"
 engine = PaperTradingEngine(str(Path(__file__).parent.parent / "paper_trading" / "paper_trading.db"))
+market_data = MarketData()
+
+# Portfolio builds pick from the largest names only, so a momentum build
+# doesn't fill up on small caps that happened to triple this quarter.
+BUILD_UNIVERSE_SIZE = 500
 
 # CORS: without this, a browser blocks every call from your frontend to this
 # API once they're on different origins (different port counts as different
@@ -155,20 +171,47 @@ class TradeOptionRequest(BaseModel):
 # Momentum endpoints
 # ---------------------------------------------------------------------------
 
+_SORT_KEYS = {
+    "momentum": lambda r: r["momentum_pct"],
+    "market_cap": lambda r: r.get("market_cap") or 0,
+    "day_change": lambda r: r.get("day_change_pct") or 0,
+    "volume": lambda r: r.get("volume") or 0,
+}
+
+
 @app.get("/momentum")
-def get_momentum(top: int = 10, lookback_days: int = 90, sector: str | None = None, q: str | None = None):
-    """Returns the top-N ranked momentum stocks from the default universe.
+def get_momentum(
+    top: int = Query(10, ge=1, le=5000),
+    offset: int = Query(0, ge=0),
+    sector: str | None = None,
+    q: str | None = None,
+    sort: str = Query("momentum", pattern="^(momentum|market_cap|day_change|volume)$"),
+):
+    """Ranked momentum for the tracked US stocks (top 3000 by market cap),
+    served from the background snapshot in momentum/market_data.py.
     No sign-in required — momentum data isn't tied to any one user.
 
-    Supports optional client-side filters by sector and ticker search term."""
-    ranked = rank_momentum(DEFAULT_UNIVERSE, sector_lookup=DEFAULT_SECTOR_LOOKUP, lookback_days=lookback_days)
+    `sector` accepts a sector name ("Energy"), a short alias ("Tech") or a
+    theme ("AI", "Growth") — see THEME_TICKERS in momentum_engine.py.
+    `q` searches ticker, company name and sector, best match first.
+    `sort` orders results (highest first) when there's no search; `top`
+    and `offset` page through them. `total` is the full match count."""
+    rows = market_data.snapshot()
     if sector:
-        ranked = [item for item in ranked if item.get("sector", "Unknown").lower() == sector.lower()]
-    if q:
-        needle = q.strip().lower()
-        ranked = [item for item in ranked if needle in item.get("ticker", "").lower() or needle in item.get("sector", "").lower()]
-    limited = ranked[:top]
-    return {"count": len(limited), "results": limited}
+        rows = filter_by_group(rows, sector)
+    if q and q.strip():
+        rows = search_rows(rows, q)
+    elif sort != "momentum":  # the snapshot is already in momentum order
+        rows = sorted(rows, key=_SORT_KEYS[sort], reverse=True)
+    page = rows[offset:offset + top]
+    return {
+        "count": len(page),
+        "total": len(rows),
+        "offset": offset,
+        "results": page,
+        "sectors": market_data.sectors(),
+        "status": market_data.status(),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -204,9 +247,10 @@ def build_portfolio(portfolio_id: int, req: BuildPortfolioRequest, user_id: int 
             detail="This portfolio has already been built. Create a new portfolio to try a different allocation.",
         )
 
-    momentum_list = rank_momentum(DEFAULT_UNIVERSE, lookback_days=90)
+    largest = sorted(market_data.snapshot(), key=_SORT_KEYS["market_cap"], reverse=True)[:BUILD_UNIVERSE_SIZE]
+    momentum_list = sorted(largest, key=_SORT_KEYS["momentum"], reverse=True)
     if not momentum_list:
-        raise HTTPException(status_code=502, detail="Could not fetch momentum data")
+        raise HTTPException(status_code=503, detail="Market data is still loading. Try again in a couple of minutes.")
 
     # momentum_engine.py outputs "current_price"; paper_trading_engine.py
     # expects "price" — this adapts between the two, since without it every
@@ -264,7 +308,7 @@ def add_cash_to_portfolio(portfolio_id: int, req: AddCashRequest, user_id: int =
         raise HTTPException(status_code=400, detail=str(e))
 
 
-# How far a submitted trade price may drift from the last market close.
+# How far a submitted trade price may drift from the latest market price.
 # Covers intraday moves; stops a client from buying at $0.01.
 MAX_PRICE_DEVIATION = 0.05
 
@@ -272,7 +316,11 @@ MAX_PRICE_DEVIATION = 0.05
 @app.post("/portfolio/{portfolio_id}/trade-stock")
 def trade_stock(portfolio_id: int, req: TradeStockRequest, user_id: int = Depends(get_current_user)):
     ticker = req.ticker.strip().upper()
-    market_price = latest_price(ticker)
+    # Tracked stocks use the in-memory snapshot (the same price the dashboard
+    # shows); anything else falls back to a one-off yfinance lookup.
+    tracked = market_data.lookup(ticker)
+    market_price = tracked["current_price"] if tracked else latest_price(ticker)
+    sector = (tracked or {}).get("sector") or DEFAULT_SECTOR_LOOKUP.get(ticker, "Unknown")
     if market_price is None:
         raise HTTPException(status_code=502, detail=f"Could not fetch a market price for {ticker}")
     if abs(req.price - market_price) / market_price > MAX_PRICE_DEVIATION:
@@ -288,7 +336,7 @@ def trade_stock(portfolio_id: int, req: TradeStockRequest, user_id: int = Depend
             req.quantity,
             req.price,
             req.side,
-            sector=DEFAULT_SECTOR_LOOKUP.get(ticker, "Unknown"),
+            sector=sector,
         )
     except PermissionError:
         raise HTTPException(status_code=403, detail="This portfolio doesn't belong to you")
@@ -395,6 +443,14 @@ def styles_css():
 @app.get("/api.js")
 def api_js():
     js_path = frontend_dir / "api.js"
+    if js_path.exists():
+        return FileResponse(js_path, media_type="text/javascript", headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"})
+    raise HTTPException(status_code=404, detail="Script not found")
+
+
+@app.get("/ticker-picker.js")
+def ticker_picker_js():
+    js_path = frontend_dir / "ticker-picker.js"
     if js_path.exists():
         return FileResponse(js_path, media_type="text/javascript", headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"})
     raise HTTPException(status_code=404, detail="Script not found")

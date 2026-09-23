@@ -189,24 +189,7 @@
 
             <h3 style="margin-top: 18px;">Portfolio actions</h3>
             <label class="label" for="tradeTicker">Trade ticker</label>
-            <input id="tradeTicker" type="text" value="AAPL" placeholder="Search or select stock" list="portfolioTickerOptions" />
-            <datalist id="portfolioTickerOptions">
-              <option value="AAPL"></option>
-              <option value="MSFT"></option>
-              <option value="NVDA"></option>
-              <option value="AMZN"></option>
-              <option value="GOOGL"></option>
-              <option value="META"></option>
-              <option value="TSLA"></option>
-              <option value="AVGO"></option>
-              <option value="PLTR"></option>
-              <option value="JPM"></option>
-              <option value="XOM"></option>
-              <option value="COST"></option>
-              <option value="WMT"></option>
-              <option value="LLY"></option>
-              <option value="ISRG"></option>
-            </datalist>
+            <input id="tradeTicker" type="text" value="AAPL" placeholder="Search or select stock" />
             <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
               <div>
                 <label class="label" for="tradeQuantity">Qty</label>
@@ -259,6 +242,7 @@
     </div>
 
     <script src="/api.js"></script>
+    <script src="/ticker-picker.js"></script>
     <script>
       const portfolioOutput = document.getElementById('portfolioOutput');
       const historyTableBody = document.getElementById('historyTableBody');
@@ -691,6 +675,8 @@
         setTheme(currentTheme === 'light' ? 'dark' : 'light');
       });
 
+      document.getElementById('refreshHoldingsBtn').addEventListener('click', refreshPortfolioData);
+
       document.getElementById('profileButton').addEventListener('click', () => {
         document.getElementById('profileMenu').classList.toggle('open');
       });
@@ -807,6 +793,7 @@
       renderProfile();
       applyTheme();
       initializePortfolio();
+      attachTickerPicker(document.getElementById('tradeTicker'));
     </script>
   </body>
 </html>

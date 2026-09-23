@@ -218,3 +218,20 @@ def test_cash_stays_exact_to_the_cent_after_many_trades(tmp_path):
     assert engine.get_portfolio_summary(pid, user)["cash_balance"] == 0.01
     raw = engine.conn.execute("SELECT cash_balance FROM portfolios WHERE id = ?", (pid,)).fetchone()[0]
     assert raw == 0.01
+
+
+def test_trade_stock_records_sector_and_backfills_unknown(tmp_path):
+    engine = PaperTradingEngine(str(tmp_path / "paper_trading.db"))
+    user_id = engine.get_or_create_user("demo-user", "demo@example.com", "Demo User")
+    portfolio_id = engine.create_portfolio(user_id, "Sectors", 5000)
+
+    engine.trade_stock(portfolio_id, user_id, "PODD", 1, 100.0, sector="Healthcare")
+    engine.trade_stock(portfolio_id, user_id, "AAPL", 1, 100.0)  # no sector known yet
+
+    sectors = lambda: {h["ticker"]: h["sector"] for h in engine.get_portfolio_summary(portfolio_id, user_id)["holdings"]}
+    assert sectors() == {"PODD": "Healthcare", "AAPL": "Unknown"}
+
+    updated = engine.fill_unknown_sectors({"AAPL": "Technology"}.get)
+
+    assert updated == 1
+    assert sectors() == {"PODD": "Healthcare", "AAPL": "Technology"}

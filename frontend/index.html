@@ -61,11 +61,11 @@
           </div>
         </div>
         <div class="hero-bottom-row">
-          <div class="hero-pill-row">
-            <button class="sector-pill active" type="button">AI</button>
-            <button class="sector-pill" type="button">Tech</button>
-            <button class="sector-pill" type="button">Health</button>
-            <button class="sector-pill" type="button">Energy</button>
+          <div class="hero-pill-row" aria-label="Show top movers for a sector">
+            <button class="sector-pill active" type="button" data-sector="AI" aria-pressed="true">AI</button>
+            <button class="sector-pill" type="button" data-sector="Tech" aria-pressed="false">Tech</button>
+            <button class="sector-pill" type="button" data-sector="Health" aria-pressed="false">Health</button>
+            <button class="sector-pill" type="button" data-sector="Energy" aria-pressed="false">Energy</button>
           </div>
           <span class="badge">Demo Live</span>
         </div>
@@ -96,13 +96,11 @@
 
       <div class="grid">
         <div class="card premium-card">
-          <h2>Top Movers</h2>
-          <ul class="list">
-            <li><span>CRWD</span> <span class="pos">+8.64%</span></li>
-            <li><span>PLTR</span> <span class="pos">+4.83%</span></li>
-            <li><span>MSFT</span> <span class="pos">+2.21%</span></li>
-            <li><span>NVDA</span> <span class="neg">-4.35%</span></li>
+          <h2 id="topMoversTitle">Top Movers · AI</h2>
+          <ul class="list" id="topMoversList">
+            <li><span>Loading momentum…</span></li>
           </ul>
+          <a id="topMoversLink" href="/market.html?sector=AI">View AI in Market →</a>
         </div>
 
         <div class="card premium-card">
@@ -302,9 +300,46 @@
         }
       });
 
+      // Sector pills: show the top momentum names (90-day return) for the chosen group.
+      let topMoversRequest = 0;
+      async function loadTopMovers(sector) {
+        const requestId = ++topMoversRequest;
+        const list = document.getElementById('topMoversList');
+        document.getElementById('topMoversTitle').textContent = `Top Movers · ${sector}`;
+        const link = document.getElementById('topMoversLink');
+        link.href = `/market.html?sector=${encodeURIComponent(sector)}`;
+        link.textContent = `View ${sector} in Market →`;
+        list.innerHTML = '<li><span>Loading momentum…</span></li>';
+        try {
+          const data = await apiFetch(`/momentum?top=4&sector=${encodeURIComponent(sector)}`);
+          if (requestId !== topMoversRequest) return;  // a newer pill click won
+          const rows = data.results || [];
+          list.innerHTML = rows.length
+            ? rows.map((item) => {
+                const pct = Number(item.momentum_pct || 0);
+                return `<li><span>${item.ticker}</span> <span class="${pct >= 0 ? 'pos' : 'neg'}">${formatPercent(pct)}</span></li>`;
+              }).join('')
+            : '<li><span>No stocks in this group yet.</span></li>';
+        } catch (error) {
+          if (requestId !== topMoversRequest) return;
+          list.innerHTML = '<li><span>Could not load market data.</span></li>';
+        }
+      }
+
+      document.querySelectorAll('.hero-pill-row .sector-pill').forEach((pill) => {
+        pill.addEventListener('click', () => {
+          document.querySelectorAll('.hero-pill-row .sector-pill').forEach((other) => {
+            other.classList.toggle('active', other === pill);
+            other.setAttribute('aria-pressed', String(other === pill));
+          });
+          loadTopMovers(pill.dataset.sector);
+        });
+      });
+
       renderProfile();
       applyTheme();
       refreshOverviewData();
+      loadTopMovers('AI');
     </script>
   </body>
 </html>

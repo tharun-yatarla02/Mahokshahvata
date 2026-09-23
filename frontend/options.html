@@ -81,24 +81,7 @@
           </div>
 
           <label class="label" for="optionTicker">Ticker</label>
-          <input id="optionTicker" type="text" value="AAPL" list="optionTickerOptions" />
-          <datalist id="optionTickerOptions">
-            <option value="AAPL"></option>
-            <option value="MSFT"></option>
-            <option value="NVDA"></option>
-            <option value="AMZN"></option>
-            <option value="GOOGL"></option>
-            <option value="META"></option>
-            <option value="TSLA"></option>
-            <option value="AVGO"></option>
-            <option value="PLTR"></option>
-            <option value="JPM"></option>
-            <option value="XOM"></option>
-            <option value="COST"></option>
-            <option value="WMT"></option>
-            <option value="LLY"></option>
-            <option value="ISRG"></option>
-          </datalist>
+          <input id="optionTicker" type="text" value="AAPL" />
           <label class="label" for="optionType">Option type</label>
           <select id="optionType">
             <option value="CALL">CALL</option>
@@ -125,6 +108,7 @@
     </div>
 
     <script src="/api.js"></script>
+    <script src="/ticker-picker.js"></script>
     <script>
       const optionTradeOutput = document.getElementById('optionTradeOutput');
       const optionsStatus = document.getElementById('optionsStatus');
@@ -387,6 +371,7 @@
       applyTheme();
       initializePortfolio();
       setOptionsStatus('Ready for a new option trade.', 'success');
+      attachTickerPicker(document.getElementById('optionTicker'));
     </script>
   </body>
 </html>

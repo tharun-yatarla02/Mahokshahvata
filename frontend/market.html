@@ -74,33 +74,42 @@
 
       <div class="stats">
         <div class="stat accent-card">
-          <div class="stat-label">Live Signals</div>
+          <div class="stat-label">Stocks tracked</div>
           <div class="stat-value" id="signalCount">0</div>
-          <div class="stat-sub">Current market scan</div>
+          <div class="stat-sub" id="signalCountSub">Largest US stocks by market cap</div>
         </div>
         <div class="stat success-card">
           <div class="stat-label">Top Sector</div>
           <div class="stat-value" id="topSector">-</div>
-          <div class="stat-sub">Dominant setup</div>
+          <div class="stat-sub">Most common in the top 50 matches</div>
         </div>
         <div class="stat neutral-card">
-          <div class="stat-label">Market Mode</div>
-          <div class="stat-value">Live</div>
-          <div class="stat-sub">Continuous refresh</div>
+          <div class="stat-label">Last update</div>
+          <div class="stat-value" id="lastUpdateValue">--</div>
+          <div class="stat-sub">Prices refresh every 5 min, ~15 min delayed</div>
         </div>
       </div>
 
       <div class="card premium-card">
         <div class="status" id="status">Loading market data...</div>
-        <div style="display:grid; grid-template-columns: 1.5fr 1fr; gap:10px; align-items:end;">
+        <div class="market-controls">
           <div>
-            <label class="label" for="momentumSearch">Search ticker</label>
-            <input id="momentumSearch" type="text" placeholder="Search ticker or sector" />
+            <label class="label" for="momentumSearch">Search stocks</label>
+            <input id="momentumSearch" type="text" placeholder="Ticker, company or sector" autocomplete="off" />
           </div>
           <div>
             <label class="label" for="sectorFilter">Department</label>
             <select id="sectorFilter">
               <option value="">All sectors</option>
+            </select>
+          </div>
+          <div>
+            <label class="label" for="sortSelect">Sort by</label>
+            <select id="sortSelect">
+              <option value="momentum">90-day momentum</option>
+              <option value="market_cap">Market cap</option>
+              <option value="day_change">Today's move</option>
+              <option value="volume">Volume</option>
             </select>
           </div>
         </div>
@@ -113,17 +122,24 @@
           <table>
             <thead>
               <tr>
-                <th>Ticker</th>
-                <th>Department</th>
+                <th>#</th>
+                <th>Stock</th>
+                <th>Sector</th>
                 <th>Price</th>
-                <th>Momentum</th>
-                <th>Relative</th>
+                <th>Today</th>
+                <th>Momentum (90d)</th>
+                <th>vs S&amp;P 500</th>
               </tr>
             </thead>
             <tbody id="marketTableBody">
-              <tr><td colspan="5">Loading...</td></tr>
+              <tr><td colspan="7">Loading...</td></tr>
             </tbody>
           </table>
+        </div>
+        <div class="button-row market-pagination">
+          <button type="button" id="marketPrevBtn" class="secondary">Previous</button>
+          <span id="marketPageInfo">--</span>
+          <button type="button" id="marketNextBtn" class="secondary">Next</button>
         </div>
       </div>
 
@@ -150,6 +166,31 @@
       const marketDetail = document.getElementById('marketDetail');
       const detailTickerTitle = document.getElementById('detailTickerTitle');
       let selectedMarketTicker = null;
+      const PAGE_SIZE = 50;
+      let marketOffset = 0;
+      let marketTotal = 0;
+      let marketRequest = 0;
+      let warmupTimer = null;
+      const sortSelect = document.getElementById('sortSelect');
+
+      function formatSignedPercent(value, digits = 2) {
+        if (value === null || value === undefined) return '--';
+        const amount = Number(value);
+        return `${amount >= 0 ? '+' : ''}${amount.toFixed(digits)}%`;
+      }
+
+      function changeClass(value) {
+        return Number(value || 0) >= 0 ? 'positive' : 'negative';
+      }
+
+      function formatMarketCap(value) {
+        const amount = Number(value || 0);
+        if (amount >= 1e12) return `$${(amount / 1e12).toFixed(2)}T`;
+        if (amount >= 1e9) return `$${(amount / 1e9).toFixed(1)}B`;
+        if (amount >= 1e6) return `$${(amount / 1e6).toFixed(0)}M`;
+        return '--';
+      }
+
 
       function setStatus(message, kind = '') {
         statusEl.textContent = message;
@@ -223,6 +264,9 @@
             <div>
               <div class="mini-label">Market notes</div>
               <ul style="margin: 12px 0 0; padding-left: 18px; color: var(--muted); line-height: 1.7;">
+                <li>Company: ${escapeHtml(item.name || ticker)}</li>
+                <li>Market cap: ${formatMarketCap(item.market_cap)}</li>
+                <li>Today: ${formatSignedPercent(item.day_change_pct)}</li>
                 <li>Live trade price: $${currentPrice.toFixed(2)}</li>
                 <li>Momentum score: ${Number(item.momentum_pct || 0).toFixed(2)}%</li>
                 <li>Sector: ${item.sector || 'Unknown'}</li>
@@ -273,16 +317,25 @@
         }
       }
 
-      function renderMarket(rows) {
+      function renderPagination() {
+        const first = marketTotal ? marketOffset + 1 : 0;
+        const last = Math.min(marketOffset + PAGE_SIZE, marketTotal);
+        document.getElementById('marketPageInfo').textContent =
+          `Showing ${first.toLocaleString()}–${last.toLocaleString()} of ${marketTotal.toLocaleString()}`;
+        document.getElementById('marketPrevBtn').disabled = marketOffset === 0;
+        document.getElementById('marketNextBtn').disabled = last >= marketTotal;
+      }
+
+      function renderMarket(rows, sectors = []) {
+        renderPagination();
         if (!rows || rows.length === 0) {
-          marketTableBody.innerHTML = '<tr><td colspan="5">No stocks match the selected filters.</td></tr>';
-          signalCount.textContent = '0';
+          marketTableBody.innerHTML = '<tr><td colspan="7">No stocks match the selected filters.</td></tr>';
           topSector.textContent = '-';
           renderMarketDetail(null);
           return;
         }
 
-        const uniqueSectors = [...new Set(rows.map(item => item.sector || 'Unknown'))].sort();
+        const uniqueSectors = sectors.length ? sectors : [...new Set(rows.map(item => item.sector || 'Unknown'))].sort();
         const currentOptions = [...sectorFilter.options].map(option => option.value);
         for (const sector of uniqueSectors) {
           if (!currentOptions.includes(sector)) {
@@ -299,16 +352,20 @@
           counts[sector] = (counts[sector] || 0) + 1;
         }
         const dominant = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
-        signalCount.textContent = String(rows.length);
         topSector.textContent = dominant ? dominant[0] : '-';
 
-        marketTableBody.innerHTML = rows.map(row => `
-          <tr data-ticker="${row.ticker}">
-            <td style="font-weight:600;">${row.ticker}</td>
-            <td>${row.sector || 'Unknown'}</td>
+        marketTableBody.innerHTML = rows.map((row, index) => `
+          <tr data-ticker="${escapeHtml(row.ticker)}">
+            <td class="market-rank">${(marketOffset + index + 1).toLocaleString()}</td>
+            <td>
+              <div class="market-symbol">${escapeHtml(row.ticker)}</div>
+              <div class="market-name">${escapeHtml(row.name || '')}</div>
+            </td>
+            <td>${escapeHtml(row.sector || 'Unknown')}</td>
             <td>$${Number(row.current_price || 0).toFixed(2)}</td>
-            <td class="${(row.momentum_pct || 0) >= 0 ? 'positive' : 'negative'}">${Number(row.momentum_pct || 0).toFixed(2)}%</td>
-            <td>${Number(row.relative_strength || 0).toFixed(2)}%</td>
+            <td class="${changeClass(row.day_change_pct)}">${formatSignedPercent(row.day_change_pct)}</td>
+            <td class="${changeClass(row.momentum_pct)}">${formatSignedPercent(row.momentum_pct)}</td>
+            <td>${formatSignedPercent(row.relative_strength)}</td>
           </tr>
         `).join('');
 
@@ -317,20 +374,48 @@
         }
       }
 
+      // Filters changed: go back to the first page.
+      function reloadFromFirstPage() {
+        marketOffset = 0;
+        loadMomentumData();
+      }
+
       async function loadMomentumData() {
+        const requestId = ++marketRequest;
+        clearTimeout(warmupTimer);
         try {
           const sector = sectorFilter.value || '';
           const q = momentumSearch.value.trim();
-          const params = new URLSearchParams({ top: '20' });
+          const params = new URLSearchParams({ top: String(PAGE_SIZE), offset: String(marketOffset), sort: sortSelect.value });
           if (sector) params.set('sector', sector);
           if (q) params.set('q', q);
 
           const data = await apiFetch(`/momentum?${params.toString()}`);
+          if (requestId !== marketRequest) return;  // a newer search or page click won
+          const status = data.status || {};
+          marketTotal = data.total ?? (data.results || []).length;
           marketTableBody.dataset.rows = JSON.stringify(data.results || []);
-          renderMarket(data.results || []);
-          setStatus('Market data loaded successfully.', 'success');
+          renderMarket(data.results || [], data.sectors || []);
+
+          signalCount.textContent = Number(status.tracked || 0).toLocaleString();
+          document.getElementById('signalCountSub').textContent = sector || q
+            ? `${marketTotal.toLocaleString()} match the current filter`
+            : 'Largest US stocks by market cap';
+          document.getElementById('lastUpdateValue').textContent = status.quotes_updated_at
+            ? new Date(status.quotes_updated_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+            : '--';
+
+          if (status.warming_up) {
+            setStatus('Loading market data for the top US stocks. The first start takes about 2 minutes; this page will update on its own.', '');
+            warmupTimer = setTimeout(loadMomentumData, 10000);
+          } else if (status.last_error) {
+            setStatus(`Showing the last saved market data. ${status.last_error}`, 'error');
+          } else {
+            setStatus(`Tracking ${Number(status.tracked || 0).toLocaleString()} US stocks.`, 'success');
+          }
         } catch (err) {
-          marketTableBody.innerHTML = `<tr><td colspan="5" class="negative">${escapeHtml(String(err))}</td></tr>`;
+          if (requestId !== marketRequest) return;
+          marketTableBody.innerHTML = `<tr><td colspan="7" class="negative">${escapeHtml(String(err))}</td></tr>`;
           setStatus(err.message, 'error');
         }
       }
@@ -428,25 +513,56 @@
       document.getElementById('loadMomentumBtn').addEventListener('click', loadMomentumData);
       sectorFilter.addEventListener('change', () => {
         applySectorPillSelection(sectorFilter.value || '');
+        reloadFromFirstPage();
+      });
+      let searchTimer = null;
+      momentumSearch.addEventListener('input', () => {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(reloadFromFirstPage, 250);
+      });
+      sortSelect.addEventListener('change', reloadFromFirstPage);
+      document.getElementById('marketPrevBtn').addEventListener('click', () => {
+        marketOffset = Math.max(0, marketOffset - PAGE_SIZE);
         loadMomentumData();
       });
-      momentumSearch.addEventListener('input', loadMomentumData);
+      document.getElementById('marketNextBtn').addEventListener('click', () => {
+        marketOffset += PAGE_SIZE;
+        loadMomentumData();
+      });
       document.querySelectorAll('.sector-pill').forEach((button) => {
         button.addEventListener('click', () => {
           const selectedSector = button.dataset.sector || '';
           applySectorPillSelection(selectedSector);
-          if (selectedSector === '') {
-            sectorFilter.value = '';
-          } else {
-            const option = [...sectorFilter.options].find((entry) => entry.value.toLowerCase() === selectedSector.toLowerCase());
-            if (option) option.value = selectedSector;
-            sectorFilter.value = selectedSector;
-          }
-          loadMomentumData();
+          selectSectorFilter(selectedSector);
+          reloadFromFirstPage();
         });
       });
+
+      // Selecting a value with no matching <option> silently resets a <select> to
+      // "All sectors", so add an option for groups like "AI" that aren't a sector.
+      function selectSectorFilter(sector) {
+        if (!sector) {
+          sectorFilter.value = '';
+          return;
+        }
+        let option = [...sectorFilter.options].find((entry) => entry.value.toLowerCase() === sector.toLowerCase());
+        if (!option) {
+          option = document.createElement('option');
+          option.value = sector;
+          option.textContent = sector;
+          sectorFilter.appendChild(option);
+        }
+        sectorFilter.value = option.value;
+      }
+
       renderProfile();
       applyTheme();
+      // Deep link from the Overview page, e.g. /market.html?sector=AI
+      const linkedSector = new URLSearchParams(window.location.search).get('sector') || '';
+      if (linkedSector) {
+        selectSectorFilter(linkedSector);
+        applySectorPillSelection(sectorFilter.value);
+      }
       loadMomentumData();
     </script>
   </body>

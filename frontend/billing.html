@@ -61,10 +61,10 @@
           </div>
         </div>
         <div class="hero-bottom-row">
-          <div class="hero-pill-row">
-            <button class="sector-pill active" type="button">Cash</button>
-            <button class="sector-pill" type="button">Portfolio</button>
-            <button class="sector-pill" type="button">Risk</button>
+          <div class="hero-pill-row" aria-label="Choose summary view">
+            <button class="sector-pill active" type="button" data-view="cash" aria-pressed="true">Cash</button>
+            <button class="sector-pill" type="button" data-view="portfolio" aria-pressed="false">Portfolio</button>
+            <button class="sector-pill" type="button" data-view="risk" aria-pressed="false">Risk</button>
           </div>
           <span class="badge">Live</span>
         </div>
@@ -104,12 +104,12 @@
         </div>
 
         <div class="card premium-card">
-          <h2>Funding summary</h2>
-          <ul class="list">
-            <li><span>Available cash</span> <strong id="summaryCash">$0.00</strong></li>
-            <li><span>Invested</span> <strong id="summaryInvested">$0.00</strong></li>
-            <li><span>Account total</span> <strong id="summaryAccount">$0.00</strong></li>
-            <li><span>Net P/L</span> <strong id="summaryPnl">+$0.00</strong></li>
+          <h2 id="summaryTitle">Funding summary</h2>
+          <ul class="list" id="summaryList">
+            <li><span>Available cash</span> <strong>$0.00</strong></li>
+            <li><span>Invested</span> <strong>$0.00</strong></li>
+            <li><span>Account total</span> <strong>$0.00</strong></li>
+            <li><span>Net P/L</span> <strong>+$0.00</strong></li>
           </ul>
         </div>
       </div>
@@ -123,11 +123,11 @@
       const investedCapitalValue = document.getElementById('investedCapitalValue');
       const accountValue = document.getElementById('accountValue');
       const pnlValue = document.getElementById('pnlValue');
-      const summaryCash = document.getElementById('summaryCash');
-      const summaryInvested = document.getElementById('summaryInvested');
-      const summaryAccount = document.getElementById('summaryAccount');
-      const summaryPnl = document.getElementById('summaryPnl');
+      const summaryTitle = document.getElementById('summaryTitle');
+      const summaryList = document.getElementById('summaryList');
       let currentPortfolioId = null;
+      let summaryView = 'cash';
+      let lastSummary = null;
 
       function formatCurrency(value) {
         const amount = Number(value || 0);
@@ -183,13 +183,81 @@
         pnlValue.classList.toggle('positive', pnl >= 0);
         pnlValue.classList.toggle('negative', pnl < 0);
 
-        summaryCash.textContent = formatCurrency(cashBalance);
-        summaryInvested.textContent = formatCurrency(totalInvested);
-        summaryAccount.textContent = formatCurrency(totalPortfolioValue);
-        summaryPnl.textContent = formatSignedCurrency(pnl);
-
         billingStatusBadge.textContent = cashBalance > 0 ? 'Funded' : 'Low cash';
+        lastSummary = { summary, cashBalance, totalInvested, totalPortfolioValue, pnl };
+        renderSummaryView();
       }
+
+      function formatShare(part, whole) {
+        return `${(whole > 0 ? (part / whole) * 100 : 0).toFixed(1)}%`;
+      }
+
+      // Same thresholds as the Overview page's risk level.
+      function getRiskLabel(value) {
+        if (value < 30) return 'Conservative';
+        if (value < 60) return 'Balanced';
+        return 'Aggressive';
+      }
+
+      // The Cash / Portfolio / Risk pills switch what the summary card shows.
+      function renderSummaryView() {
+        if (!lastSummary) return;
+        const { summary, cashBalance, totalInvested, totalPortfolioValue, pnl } = lastSummary;
+        const holdings = Array.isArray(summary.holdings) ? summary.holdings : [];
+        const row = (label, value, className = '') =>
+          `<li><span>${label}</span> <strong${className ? ` class="${className}"` : ''}>${value}</strong></li>`;
+        let title;
+        let rows;
+
+        if (summaryView === 'portfolio') {
+          title = 'Portfolio allocation';
+          const sectors = Object.entries(summary.sector_breakdown || {}).sort((a, b) => b[1] - a[1]);
+          const optionCount = holdings.filter((h) => h.instrument_type === 'OPTION').length;
+          rows = [
+            row('Stock positions', String(Number(summary.stock_count ?? 0))),
+            row('Option positions', String(optionCount)),
+            ...(sectors.length
+              ? sectors.map(([sector, value]) => row(sector, `${formatCurrency(value)} · ${formatShare(value, totalInvested)}`))
+              : [row('Sectors', 'No holdings yet')]),
+          ];
+        } else if (summaryView === 'risk') {
+          title = 'Risk overview';
+          const exposure = totalPortfolioValue > 0 ? (totalInvested / totalPortfolioValue) * 100 : 0;
+          const largest = holdings
+            .map((h) => ({ name: h.ticker || h.position_key || 'Unknown', value: Number(h.quantity || 0) * Number(h.avg_buy_price || 0) }))
+            .sort((a, b) => b.value - a.value)[0];
+          const topSector = Object.entries(summary.sector_breakdown || {}).sort((a, b) => b[1] - a[1])[0];
+          rows = [
+            row('Risk level', totalPortfolioValue > 0 ? getRiskLabel(exposure) : '--'),
+            row('Market exposure', formatShare(totalInvested, totalPortfolioValue)),
+            row('Cash reserve', formatShare(cashBalance, totalPortfolioValue)),
+            row('Largest position', largest ? `${largest.name} · ${formatShare(largest.value, totalPortfolioValue)}` : 'None'),
+            row('Top sector', topSector ? `${topSector[0]} · ${formatShare(topSector[1], totalInvested)} of invested` : 'None'),
+          ];
+        } else {
+          title = 'Funding summary';
+          rows = [
+            row('Available cash', formatCurrency(cashBalance)),
+            row('Invested', formatCurrency(totalInvested)),
+            row('Account total', formatCurrency(totalPortfolioValue)),
+            row('Net P/L', formatSignedCurrency(pnl), pnl >= 0 ? 'positive' : 'negative'),
+          ];
+        }
+
+        summaryTitle.textContent = title;
+        summaryList.innerHTML = rows.join('');
+      }
+
+      document.querySelectorAll('.hero-pill-row .sector-pill').forEach((pill) => {
+        pill.addEventListener('click', () => {
+          summaryView = pill.dataset.view;
+          document.querySelectorAll('.hero-pill-row .sector-pill').forEach((other) => {
+            other.classList.toggle('active', other === pill);
+            other.setAttribute('aria-pressed', String(other === pill));
+          });
+          renderSummaryView();
+        });
+      });
 
       async function refreshBillingData() {
         if (!currentPortfolioId) {
@@ -309,7 +377,7 @@
       document.addEventListener('click', (event) => {
         const profileButton = document.getElementById('profileButton');
         const profileMenu = document.getElementById('profileMenu');
-        if (!profileButton.contains(event.target) && !profileMenu.contains(event.target)) {
+        if (profileButton && profileMenu && !profileButton.contains(event.target) && !profileMenu.contains(event.target)) {
           profileMenu.classList.remove('open');
         }
       });

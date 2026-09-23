@@ -439,7 +439,7 @@ class PaperTradingEngine:
                      quantity = quantity + excluded.quantity,
                      avg_buy_price = ((avg_buy_price * quantity) + (excluded.avg_buy_price * excluded.quantity))
                                      / (quantity + excluded.quantity)""",
-                (portfolio_id, ticker, sector, position_key, quantity, trade_price),
+                (portfolio_id, ticker, sector or "Unknown", position_key, quantity, trade_price),
             )
             self.conn.execute(
                 "UPDATE portfolios SET cash_balance = ROUND(cash_balance - ?, 2) WHERE id = ?",
@@ -625,6 +625,23 @@ class PaperTradingEngine:
     # -----------------------------------------------------------------
     # Reporting
     # -----------------------------------------------------------------
+
+    @_locked
+    def fill_unknown_sectors(self, sector_for_ticker):
+        """Sets the sector on stock holdings saved as 'Unknown' (manual trades
+        used to always save that). sector_for_ticker(ticker) returns a sector
+        name or None. Returns how many holdings were updated."""
+        rows = self.conn.execute(
+            "SELECT id, ticker FROM holdings WHERE instrument_type = 'STOCK' AND sector = 'Unknown'"
+        ).fetchall()
+        updated = 0
+        for row in rows:
+            sector = sector_for_ticker(row["ticker"])
+            if sector and sector != "Unknown":
+                self.conn.execute("UPDATE holdings SET sector = ? WHERE id = ?", (sector, row["id"]))
+                updated += 1
+        self.conn.commit()
+        return updated
 
     @_locked
     def add_cash_balance(self, portfolio_id, user_id, amount):
