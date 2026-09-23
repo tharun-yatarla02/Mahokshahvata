@@ -296,9 +296,22 @@
         setTheme(current === 'dark' ? 'light' : 'dark');
       });
 
+      document.getElementById('profileButton').addEventListener('click', () => {
+        document.getElementById('profileMenu').classList.toggle('open');
+      });
+
       document.getElementById('logoutButton').addEventListener('click', () => {
         localStorage.removeItem('mahokshahvata_user');
         renderProfile();
+        document.getElementById('profileMenu').classList.remove('open');
+      });
+
+      document.addEventListener('click', (event) => {
+        const profileButton = document.getElementById('profileButton');
+        const profileMenu = document.getElementById('profileMenu');
+        if (!profileButton.contains(event.target) && !profileMenu.contains(event.target)) {
+          profileMenu.classList.remove('open');
+        }
       });
     </script>
   </body>

@@ -203,21 +203,21 @@
         const priceChange = Number(item.relative_strength || 0);
 
         marketDetail.innerHTML = `
-          <div style="display:grid; grid-template-columns: 1.2fr 1fr; gap: 18px; align-items:start;">
+          <div class="detail-grid">
             <div>
               <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom: 12px;">
                 <div>
                   <div class="mini-label">${item.sector || 'Market'}</div>
-                  <strong style="font-size: 1.8rem;">$${currentPrice.toFixed(2)}</strong>
+                  <strong style="font-size: 1.75rem; font-weight: 600; letter-spacing: -0.025em; font-variant-numeric: tabular-nums;">$${currentPrice.toFixed(2)}</strong>
                 </div>
-                <span class="badge" style="background:${positive ? 'rgba(52,211,153,0.12)' : 'rgba(248,113,113,0.12)'}; color:${positive ? '#3ddc97' : '#ff6b6b'};">${Number(item.momentum_pct || 0).toFixed(2)}%</span>
+                <span class="badge ${positive ? 'positive' : 'negative'}">${Number(item.momentum_pct || 0).toFixed(2)}%</span>
               </div>
-              <svg viewBox="0 0 260 110" width="100%" height="110" style="background: rgba(255,255,255,0.02); border:1px solid var(--line); border-radius: 16px;">
-                <path d="${spark}" fill="none" stroke="${positive ? '#3ddc97' : '#ff6b6b'}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"></path>
+              <svg viewBox="0 0 260 110" width="100%" height="110" style="background: var(--surface-2); border-radius: 14px;">
+                <path d="${spark}" fill="none" style="stroke: var(${positive ? '--pos' : '--neg'});" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></path>
               </svg>
               <div style="display:flex; justify-content:space-between; color: var(--muted); margin-top: 8px; font-size: 0.8rem;">
                 <span>Relative strength</span>
-                <strong style="color: ${positive ? '#3ddc97' : '#ff6b6b'};">${priceChange.toFixed(2)}%</strong>
+                <strong class="${positive ? 'positive' : 'negative'}">${priceChange.toFixed(2)}%</strong>
               </div>
             </div>
             <div>
@@ -251,10 +251,10 @@
             const title = item.title || 'Market update';
             const summary = item.summary || 'No summary available.';
             return `
-              <div style="padding: 12px 0; border-bottom: 1px solid var(--line);">
-                <div style="font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 4px;">${source}</div>
-                <div style="font-weight: 700; margin-bottom: 6px;">${title}</div>
-                <div style="color: var(--muted); font-size: 0.92rem;">${summary}</div>
+              <div class="news-item">
+                <div class="news-source">${source}</div>
+                <div class="news-title">${title}</div>
+                <div class="news-summary">${summary}</div>
               </div>
             `;
           }).join('');
@@ -303,11 +303,11 @@
         topSector.textContent = dominant ? dominant[0] : '-';
 
         marketTableBody.innerHTML = rows.map(row => `
-          <tr data-ticker="${row.ticker}" style="cursor:pointer;">
-            <td style="font-weight:700;">${row.ticker}</td>
+          <tr data-ticker="${row.ticker}">
+            <td style="font-weight:600;">${row.ticker}</td>
             <td>${row.sector || 'Unknown'}</td>
             <td>$${Number(row.current_price || 0).toFixed(2)}</td>
-            <td style="color:${(row.momentum_pct || 0) >= 0 ? '#3ddc97' : '#ff6b6b'};">${Number(row.momentum_pct || 0).toFixed(2)}%</td>
+            <td class="${(row.momentum_pct || 0) >= 0 ? 'positive' : 'negative'}">${Number(row.momentum_pct || 0).toFixed(2)}%</td>
             <td>${Number(row.relative_strength || 0).toFixed(2)}%</td>
           </tr>
         `).join('');
@@ -330,7 +330,7 @@
           renderMarket(data.results || []);
           setStatus('Market data loaded successfully.', 'success');
         } catch (err) {
-          marketTableBody.innerHTML = `<tr><td colspan="5" style="color:#ff6b6b;">${String(err)}</td></tr>`;
+          marketTableBody.innerHTML = `<tr><td colspan="5" class="negative">${String(err)}</td></tr>`;
           setStatus(err.message, 'error');
         }
       }

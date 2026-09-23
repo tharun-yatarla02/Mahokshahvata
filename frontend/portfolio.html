@@ -324,11 +324,11 @@
         portfolioSparkline.innerHTML = `
           <defs>
             <linearGradient id="sparklineGlow" x1="0" x2="1" y1="0" y2="0">
-              <stop offset="0%" stop-color="#4cc9f0" />
-              <stop offset="100%" stop-color="#7c3aed" />
+              <stop offset="0%" style="stop-color: var(--accent); stop-opacity: 0.55" />
+              <stop offset="100%" style="stop-color: var(--accent)" />
             </linearGradient>
           </defs>
-          <path d="${path}" fill="none" stroke="url(#sparklineGlow)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"></path>
+          <path d="${path}" fill="none" stroke="url(#sparklineGlow)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></path>
         `;
 
         if (!path) {
@@ -353,7 +353,7 @@
           circle.setAttribute('cx', point.x);
           circle.setAttribute('cy', point.y);
           circle.setAttribute('r', 4);
-          circle.setAttribute('fill', '#bfeeff');
+          circle.style.fill = 'var(--accent)';
           circle.setAttribute('opacity', index === points.length - 1 ? '1' : '0.6');
           circle.style.cursor = 'pointer';
           circle.addEventListener('mouseenter', (event) => {

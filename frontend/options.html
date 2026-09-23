@@ -218,7 +218,7 @@
           <strong>Portfolio:</strong> ${summary.name || 'Demo'} · 
           <strong>Cash:</strong> $${cash.toFixed(2)} · 
           <strong>Invested:</strong> $${invested.toFixed(2)} · 
-          <strong>P/L:</strong> <span style="color:${pnl >= 0 ? '#27c38d' : '#ff6b6b'}; font-weight:700;">$${pnl.toFixed(2)}</span> · 
+          <strong>P/L:</strong> <span class="${pnl >= 0 ? 'positive' : 'negative'}" style="font-weight:600;">$${pnl.toFixed(2)}</span> · 
           <strong>Total:</strong> $${total.toFixed(2)}
         `;
       }
