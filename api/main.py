@@ -18,7 +18,8 @@ generates this automatically).
 
 Auth: every /portfolio/* endpoint requires "Authorization: Bearer <Firebase
 ID token>" — see auth/README.md for the Firebase project setup and the
-frontend sign-in snippet. /momentum and /politicians/* don't require sign-in.
+frontend sign-in snippet. /momentum, /news-sentiment and the read-only /politicians endpoints don't
+require sign-in; POST /politicians/refresh does.
 
 Endpoints:
     GET  /momentum?top=10                     ranked momentum stocks
@@ -60,13 +61,18 @@ engine = PaperTradingEngine(str(Path(__file__).parent.parent / "paper_trading" /
 # origin too — localhost:5500 calling localhost:8000 is already cross-origin).
 # ALLOWED_ORIGINS is a comma-separated env var, e.g.
 #   export ALLOWED_ORIGINS="https://your-dashboard.com,http://localhost:5500"
-# Defaults to "*" (allow anything) for easy local development — TIGHTEN THIS
-# to your real frontend's exact domain(s) before deploying publicly, or
-# anyone can call your API from any website.
-_allowed_origins = os.environ.get("ALLOWED_ORIGINS", "*")
+# Defaults to local development origins only. The bundled frontend is served
+# by this app (same origin), so it doesn't need CORS at all. Set this to your
+# real frontend's exact domain(s) if you host it elsewhere; "*" allows any
+# website to call the API and should only be used for throwaway testing.
+_DEFAULT_ORIGINS = (
+    "http://localhost:8000,http://127.0.0.1:8000,"
+    "http://localhost:5500,http://127.0.0.1:5500"
+)
+_allowed_origins = os.environ.get("ALLOWED_ORIGINS", _DEFAULT_ORIGINS)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"] if _allowed_origins == "*" else _allowed_origins.split(","),
+    allow_origins=["*"] if _allowed_origins == "*" else [o.strip() for o in _allowed_origins.split(",") if o.strip()],
     allow_credentials=False,  # we use a Bearer token, not cookies, so this can stay False
     allow_methods=["*"],
     allow_headers=["*"],
@@ -128,6 +134,10 @@ class BuildPortfolioRequest(BaseModel):
 class MarkToMarketRequest(BaseModel):
     prices: dict  # {"NVDA": 190.12, "PLTR": 42.5, ...}
     option_prices: dict | None = None
+
+
+class AddCashRequest(BaseModel):
+    amount: float = Field(gt=0, description="Must be a positive amount")
 
 
 class TradeStockRequest(BaseModel):
@@ -251,10 +261,9 @@ def mark_to_market(portfolio_id: int, req: MarkToMarketRequest, user_id: int = D
 
 
 @app.post("/portfolio/{portfolio_id}/cash")
-def add_cash_to_portfolio(portfolio_id: int, payload: dict, user_id: int = Depends(get_current_user)):
-    amount = float(payload.get("amount", 0))
+def add_cash_to_portfolio(portfolio_id: int, req: AddCashRequest, user_id: int = Depends(get_current_user)):
     try:
-        return engine.add_cash_balance(portfolio_id, user_id, amount)
+        return engine.add_cash_balance(portfolio_id, user_id, req.amount)
     except PermissionError:
         raise HTTPException(status_code=403, detail="This portfolio doesn't belong to you")
     except ValueError as e:
@@ -407,8 +416,9 @@ def get_politician_trades(name: str):
 
 
 @app.post("/politicians/refresh")
-def refresh_politician_data():
-    """Pulls fresh data from Quiver Quantitative into the local cache."""
+def refresh_politician_data(user_id: int = Depends(get_current_user)):
+    """Pulls fresh data from Quiver Quantitative into the local cache.
+    Requires sign-in so anonymous callers can't burn through the Quiver quota."""
     try:
         count = refresh_cache()
     except Exception as e:

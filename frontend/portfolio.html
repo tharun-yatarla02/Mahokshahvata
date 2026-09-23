@@ -264,7 +264,6 @@
       const historyTableBody = document.getElementById('historyTableBody');
       const remainingBalanceValue = document.getElementById('remainingBalanceValue');
       const totalInvestedValue = document.getElementById('totalInvestedValue');
-      const stockCountValue = document.getElementById('stockCountValue');
       const sectorCountValue = document.getElementById('sectorCountValue');
       const sectorBreakdown = document.getElementById('sectorBreakdown');
       const holdingsTableBody = document.getElementById('holdingsTableBody');
@@ -496,7 +495,6 @@
         portfolioProfitValue.textContent = `${pnl >= 0 ? '+' : '-'}${formatCurrency(Math.abs(pnl))}`;
         portfolioProfitValue.classList.toggle('positive', pnl >= 0);
         portfolioProfitValue.classList.toggle('negative', pnl < 0);
-        stockCountValue.textContent = Number(summary.stock_count ?? 0);
         sectorCountValue.textContent = Number(summary.sector_count ?? 0);
         portfolioTotalValue.textContent = formatCurrency(totalPortfolioValue);
         portfolioPnLValue.textContent = `${pnl >= 0 ? '+' : '-'}${formatCurrency(Math.abs(pnl))}`;
@@ -531,7 +529,6 @@
         if (!currentPortfolioId) {
           remainingBalanceValue.textContent = '$0.00';
           totalInvestedValue.textContent = '$0.00';
-          stockCountValue.textContent = '0';
           sectorCountValue.textContent = '0';
           renderSectorBreakdown({});
           return;
@@ -559,24 +556,32 @@
       }
 
       async function syncLiveTradePrice() {
-        const ticker = document.getElementById('tradeTicker').value.trim();
+        const tickerInput = document.getElementById('tradeTicker');
+        const priceInput = document.getElementById('tradePrice');
+        const ticker = tickerInput.value.trim();
         if (!ticker) return;
+        const priceAtRequest = priceInput.value;
         try {
           const data = await apiFetch(`/momentum?q=${encodeURIComponent(ticker)}&top=5`);
+          // The lookup is slow: drop the result if the user has since changed the
+          // ticker or typed their own price, so a late response can't overwrite it.
+          if (tickerInput.value.trim() !== ticker || priceInput.value !== priceAtRequest) return;
           const match = (data.results || []).find((item) => (item.ticker || '').toUpperCase() === ticker.toUpperCase());
           if (match) {
-            document.getElementById('tradePrice').value = Number(match.current_price || 0).toFixed(2);
+            priceInput.value = Number(match.current_price || 0).toFixed(2);
           }
         } catch (error) {
           // Ignore and keep the manually entered value.
         }
       }
 
+      let tickerLookupTimer = null;
       document.getElementById('tradeTicker').addEventListener('change', syncLiveTradePrice);
       document.getElementById('tradeTicker').addEventListener('input', () => {
+        clearTimeout(tickerLookupTimer);
         const value = document.getElementById('tradeTicker').value.trim();
         if (value && value.length >= 2) {
-          syncLiveTradePrice();
+          tickerLookupTimer = setTimeout(syncLiveTradePrice, 400);
         }
       });
 

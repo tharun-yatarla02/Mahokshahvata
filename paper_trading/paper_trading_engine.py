@@ -23,6 +23,7 @@ Usage as a library:
 See demo.py for a full runnable walkthrough.
 """
 
+import re
 import sqlite3
 from datetime import datetime, timezone
 from dataclasses import dataclass
@@ -163,8 +164,33 @@ class PaperTradingEngine:
                     (row["ticker"], row["id"]),
                 )
 
-        # Preserve compatibility with older databases that already used ticker-based uniqueness.
+        self._rebuild_legacy_holdings_table()
         self.conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_holdings_portfolio_position ON holdings(portfolio_id, position_key)")
+
+    def _rebuild_legacy_holdings_table(self):
+        """Databases created before options support have UNIQUE(portfolio_id, ticker)
+        on holdings, which blocks holding a stock and an option on the same ticker.
+        SQLite can't drop a table constraint, so copy the rows into a fresh table
+        built from SCHEMA (unique on position_key instead)."""
+        row = self.conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'holdings'"
+        ).fetchone()
+        if not row or not re.search(r"UNIQUE\s*\(\s*portfolio_id\s*,\s*ticker\s*\)", row[0]):
+            return
+
+        columns = (
+            "id, portfolio_id, ticker, sector, instrument_type, position_key, "
+            "option_type, strike, expiry, quantity, avg_buy_price"
+        )
+        # SCHEMA is all IF NOT EXISTS, so re-running it only recreates holdings.
+        self.conn.executescript(f"""
+            BEGIN;
+            ALTER TABLE holdings RENAME TO holdings_legacy;
+            {SCHEMA}
+            INSERT INTO holdings ({columns}) SELECT {columns} FROM holdings_legacy;
+            DROP TABLE holdings_legacy;
+            COMMIT;
+        """)
 
     # -----------------------------------------------------------------
     # Users

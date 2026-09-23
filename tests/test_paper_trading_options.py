@@ -1,3 +1,5 @@
+import sqlite3
+
 from paper_trading.paper_trading_engine import PaperTradingEngine, RiskRules
 
 
@@ -171,3 +173,35 @@ def test_trade_stock_buy_sell_updates_cash_and_summary(tmp_path):
     assert summary["stock_count"] == 1
     assert summary["total_portfolio_value"] == 10080.0
     assert summary["total_pl"] == 0.0
+
+
+def test_legacy_database_allows_stock_and_option_on_same_ticker(tmp_path):
+    # Databases created before options support were unique on (portfolio_id, ticker).
+    db_path = tmp_path / "legacy.db"
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        """
+        CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, firebase_uid TEXT UNIQUE NOT NULL,
+                            email TEXT, name TEXT, created_at TEXT NOT NULL);
+        CREATE TABLE portfolios (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL,
+                                 name TEXT NOT NULL, starting_capital REAL NOT NULL,
+                                 cash_balance REAL NOT NULL, created_at TEXT NOT NULL);
+        CREATE TABLE holdings (id INTEGER PRIMARY KEY AUTOINCREMENT, portfolio_id INTEGER NOT NULL,
+                               ticker TEXT NOT NULL, sector TEXT, quantity REAL NOT NULL,
+                               avg_buy_price REAL NOT NULL, UNIQUE(portfolio_id, ticker));
+        INSERT INTO users VALUES (1, 'demo-user', 'demo@example.com', 'Demo User', '2026-01-01');
+        INSERT INTO portfolios VALUES (1, 1, 'Legacy', 5000, 4700, '2026-01-01');
+        INSERT INTO holdings (portfolio_id, ticker, sector, quantity, avg_buy_price)
+            VALUES (1, 'AAPL', 'Technology', 2, 150);
+        """
+    )
+    conn.close()
+
+    engine = PaperTradingEngine(str(db_path))
+    engine.trade_option(1, 1, ticker="AAPL", option_type="CALL", strike=200.0,
+                        expiry="2026-12-18", quantity=2, premium=8.5, side="BUY")
+
+    holdings = engine.get_portfolio_summary(1, 1)["holdings"]
+    assert sorted(h["instrument_type"] for h in holdings if h["ticker"] == "AAPL") == ["OPTION", "STOCK"]
+    stock = next(h for h in holdings if h["instrument_type"] == "STOCK")
+    assert stock["quantity"] == 2

@@ -45,7 +45,7 @@ This project has reached a working multi-page investment dashboard with live sen
 
 ### 6. Validation coverage
 - Automated regression tests for sentiment and paper-trading flows are in place.
-- Latest verification run: 10 tests passed.
+- Latest verification run: 24 tests passed (2026-09-23).
 
 ## Current halt / release checkpoint
 
@@ -55,6 +55,25 @@ Before moving into the next feature layer, the following areas should be treated
 2. Validate the live feed refresh behavior in a running app session.
 3. Verify trade history and balance updates remain consistent over several actions.
 4. Make sure the auto-refresh cycle is not overloading the scraping layer.
+
+### Browser check results (2026-09-23)
+
+Driven in headless Chrome against a running app, with demo auth, on a copy of an existing local database.
+
+1. **Portfolio, options, billing:** pass, after three fixes:
+   - Option trades returned a 500 on databases created before options support (old `UNIQUE(portfolio_id, ticker)` constraint on holdings). The engine now rebuilds the legacy table on startup.
+   - The portfolio page crashed partway through rendering (it still wrote to the removed "Stocks" stat card), so holdings, sectors, performance and buying power stayed empty.
+   - A slow live-price lookup could overwrite a price the user had typed, so trades executed at a different price than entered.
+2. **Live feed refresh:** pass. The sentiment page refreshes every 20 seconds.
+3. **Trade history and balances:** pass. Buy, sell and add-funds balances matched expected values exactly in the UI and the API.
+4. **Scraping load:** open. Each 20-second refresh re-fetches RSS and, with `ANTHROPIC_API_KEY` set, re-classifies every matched headline with no per-URL cache. Add a cache or slow the refresh before running this for long periods. Without a key, labels come from a keyword heuristic and are often wrong.
+
+Other things seen, not yet fixed:
+- The frontend always sends `demo-token`, so real Firebase sign-in isn't wired into the pages.
+- The trade history panel on the portfolio page has low-contrast BUY/SELL badges on a grey background in light mode.
+- Some older option trades in existing databases have an empty ticker (shown as "N/A").
+- AAPL's sector shows as "Unknown".
+- Headlines with HTML entities show them raw (e.g. `S&amp;P`).
 
 ## Next major items to complete
 
