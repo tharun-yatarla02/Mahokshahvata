@@ -45,7 +45,7 @@ This project has reached a working multi-page investment dashboard with live sen
 
 ### 6. Validation coverage
 - Automated regression tests for sentiment and paper-trading flows are in place.
-- Latest verification run: 24 tests passed (2026-09-23).
+- Latest verification run: 29 tests passed (2026-09-23).
 
 ## Current halt / release checkpoint
 
@@ -66,14 +66,20 @@ Driven in headless Chrome against a running app, with demo auth, on a copy of an
    - A slow live-price lookup could overwrite a price the user had typed, so trades executed at a different price than entered.
 2. **Live feed refresh:** pass. The sentiment page refreshes every 20 seconds.
 3. **Trade history and balances:** pass. Buy, sell and add-funds balances matched expected values exactly in the UI and the API.
-4. **Scraping load:** open. Each 20-second refresh re-fetches RSS and, with `ANTHROPIC_API_KEY` set, re-classifies every matched headline with no per-URL cache. Add a cache or slow the refresh before running this for long periods. Without a key, labels come from a keyword heuristic and are often wrong.
+4. **Scraping load:** fixed (2026-09-23). `/news-sentiment` is cached for 5 minutes and Claude classifications are cached per headline, so Claude runs at most 12 times an hour regardless of open tabs. Without `ANTHROPIC_API_KEY`, labels still come from a keyword heuristic and are often wrong.
 
 Other things seen, not yet fixed:
 - The frontend always sends `demo-token`, so real Firebase sign-in isn't wired into the pages.
 - The trade history panel on the portfolio page has low-contrast BUY/SELL badges on a grey background in light mode.
 - Some older option trades in existing databases have an empty ticker (shown as "N/A").
-- AAPL's sector shows as "Unknown".
 - Headlines with HTML entities show them raw (e.g. `S&amp;P`).
+
+### Architecture review fixes (2026-09-23)
+
+- Concurrent trades could overspend cash (shared SQLite connection, check-then-write). Engine methods now run under one lock. Only safe with a single server process.
+- The client set the trade price. Stock trades are now rejected if more than 5% from the latest market close. Option premiums are still not validated.
+- Stock buys stored sector "Unknown" (fixes AAPL). Real sector is recorded and tickers are uppercased; existing Unknown holdings update on the next buy.
+- Running the tests writes to the real `news_sentiment/sentiment_history.json`; tests should use a temp file.
 
 ## Next major items to complete
 
