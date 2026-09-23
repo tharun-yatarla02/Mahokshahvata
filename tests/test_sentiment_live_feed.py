@@ -105,3 +105,23 @@ def test_fetch_articles_tries_alternative_feed_urls_when_primary_is_stale(monkey
     assert len(articles) == 1
     assert articles[0]["link"] == "https://example.com/new"
     assert "September 23" in articles[0]["title"]
+
+
+def test_classify_all_only_sends_new_headlines(monkeypatch):
+    monkeypatch.setattr(scraper, "SENTIMENT_BACKEND", "claude")
+    monkeypatch.setattr(scraper, "_classification_cache", {})
+    sent = []
+
+    def fake_batch(client, batch):
+        sent.extend(a["link"] for a in batch)
+        return [{"sentiment": "Positive", "confidence": 0.9, "reasoning": "x"} for _ in batch]
+
+    monkeypatch.setattr(scraper, "classify_batch", fake_batch)
+    a = {"title": "A", "summary": "", "link": "https://example.com/a"}
+    b = {"title": "B", "summary": "", "link": "https://example.com/b"}
+
+    scraper.classify_all(None, [a])
+    results = scraper.classify_all(None, [a, b])
+
+    assert sent == ["https://example.com/a", "https://example.com/b"]
+    assert [r["sentiment"] for r in results] == ["Positive", "Positive"]

@@ -23,10 +23,24 @@ Usage as a library:
 See demo.py for a full runnable walkthrough.
 """
 
+import functools
 import re
 import sqlite3
+import threading
 from datetime import datetime, timezone
 from dataclasses import dataclass
+
+
+def _locked(method):
+    """Runs the method under the engine's lock. FastAPI calls the engine from
+    several worker threads over one shared connection, so without this two
+    BUYs can both pass the cash check, and one thread's commit() can commit
+    another thread's half-finished writes."""
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+    return wrapper
 
 
 def _normalize_timestamp(ts=None):
@@ -121,9 +135,11 @@ class PaperTradingEngine:
     def __init__(self, db_path="paper_trading.db"):
         # check_same_thread=False: needed because FastAPI runs sync endpoints
         # in a worker thread pool, not the thread that created this engine.
-        # Safe here because SQLite serializes writes internally and this
-        # engine is only ever used single-process; swap for a proper
-        # connection pool if you move to Postgres/multi-process deployment.
+        # Every public method takes self._lock (see _locked), so the shared
+        # connection is used by one thread at a time.
+        # ponytail: one lock per process serializes all trades; move to
+        # per-request connections + BEGIN IMMEDIATE (or Postgres) for multi-process.
+        self._lock = threading.RLock()
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SCHEMA)
@@ -196,6 +212,7 @@ class PaperTradingEngine:
     # Users
     # -----------------------------------------------------------------
 
+    @_locked
     def get_or_create_user(self, firebase_uid, email=None, name=None):
         """Looks up a user by their stable Firebase id, creating them on
         first sign-in. Returns the internal user_id (ours, not Firebase's)."""
@@ -224,6 +241,7 @@ class PaperTradingEngine:
         if row["user_id"] != user_id:
             raise PermissionError(f"Portfolio {portfolio_id} does not belong to this user")
 
+    @_locked
     def list_portfolios_for_user(self, user_id):
         rows = self.conn.execute(
             "SELECT id, name, starting_capital, cash_balance, created_at FROM portfolios WHERE user_id = ? ORDER BY created_at DESC",
@@ -235,6 +253,7 @@ class PaperTradingEngine:
     # Portfolio creation
     # -----------------------------------------------------------------
 
+    @_locked
     def create_portfolio(self, user_id, name, starting_capital):
         cur = self.conn.execute(
             "INSERT INTO portfolios (user_id, name, starting_capital, cash_balance, created_at) VALUES (?, ?, ?, ?, ?)",
@@ -253,6 +272,7 @@ class PaperTradingEngine:
             return _option_position_key(ticker, option_type, strike, expiry)
         return ticker
 
+    @_locked
     def build_portfolio_from_momentum(self, portfolio_id, user_id, momentum_list, rules=None, as_of=None):
         """
         portfolio_id, user_id: the portfolio must belong to this user, or this raises PermissionError
@@ -374,8 +394,10 @@ class PaperTradingEngine:
         self.conn.commit()
         return purchases
 
-    def trade_stock(self, portfolio_id, user_id, ticker, quantity, price, side="BUY", timestamp=None):
+    @_locked
+    def trade_stock(self, portfolio_id, user_id, ticker, quantity, price, side="BUY", timestamp=None, sector="Unknown"):
         self._assert_owner(portfolio_id, user_id)
+        ticker = (ticker or "").strip().upper()
         if not ticker:
             raise ValueError("Ticker is required")
         if quantity <= 0:
@@ -406,12 +428,13 @@ class PaperTradingEngine:
                 raise ValueError("Insufficient cash to buy this stock")
             self.conn.execute(
                 """INSERT INTO holdings (portfolio_id, ticker, sector, instrument_type, position_key, quantity, avg_buy_price)
-                   VALUES (?, ?, 'Unknown', 'STOCK', ?, ?, ?)
+                   VALUES (?, ?, ?, 'STOCK', ?, ?, ?)
                    ON CONFLICT(portfolio_id, position_key) DO UPDATE SET
+                     sector = CASE WHEN sector = 'Unknown' THEN excluded.sector ELSE sector END,
                      quantity = quantity + excluded.quantity,
                      avg_buy_price = ((avg_buy_price * quantity) + (excluded.avg_buy_price * excluded.quantity))
                                      / (quantity + excluded.quantity)""",
-                (portfolio_id, ticker, position_key, quantity, trade_price),
+                (portfolio_id, ticker, sector, position_key, quantity, trade_price),
             )
             self.conn.execute(
                 "UPDATE portfolios SET cash_balance = cash_balance - ? WHERE id = ?",
@@ -451,6 +474,7 @@ class PaperTradingEngine:
             "cash_balance": cash_after,
         }
 
+    @_locked
     def trade_option(self, portfolio_id, user_id, ticker, option_type, strike, expiry, quantity, premium, side="BUY", timestamp=None):
         self._assert_owner(portfolio_id, user_id)
         if quantity <= 0:
@@ -530,6 +554,7 @@ class PaperTradingEngine:
     # Mark-to-market: recompute portfolio value against current prices
     # -----------------------------------------------------------------
 
+    @_locked
     def mark_to_market(self, portfolio_id, user_id, current_prices, as_of=None, current_option_prices=None):
         """current_prices: dict {ticker: price}; option values can also be supplied through current_option_prices keyed by position_key or ticker."""
         as_of = _normalize_timestamp(as_of)
@@ -596,6 +621,7 @@ class PaperTradingEngine:
     # Reporting
     # -----------------------------------------------------------------
 
+    @_locked
     def add_cash_balance(self, portfolio_id, user_id, amount):
         if amount < 0:
             raise ValueError("Cash amount must be non-negative")
@@ -607,6 +633,7 @@ class PaperTradingEngine:
         self.conn.commit()
         return self.get_portfolio_summary(portfolio_id, user_id)
 
+    @_locked
     def get_portfolio_summary(self, portfolio_id, user_id):
         self._assert_owner(portfolio_id, user_id)
         portfolio = self.conn.execute(
@@ -658,6 +685,7 @@ class PaperTradingEngine:
             "holdings_value": round(total_holdings_value, 2),
         }
 
+    @_locked
     def get_history(self, portfolio_id, user_id):
         self._assert_owner(portfolio_id, user_id)
         rows = self.conn.execute(
@@ -666,6 +694,7 @@ class PaperTradingEngine:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    @_locked
     def get_trade_history(self, portfolio_id, user_id):
         self._assert_owner(portfolio_id, user_id)
         rows = self.conn.execute(

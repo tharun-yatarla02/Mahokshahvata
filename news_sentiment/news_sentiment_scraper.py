@@ -206,11 +206,26 @@ def classify_all(client, articles):
     if SENTIMENT_BACKEND == "local":
         return classify_all_local(articles)
 
-    all_results = []
-    for start in range(0, len(articles), BATCH_SIZE):
-        batch = articles[start:start + BATCH_SIZE]
-        all_results.extend(classify_batch(client, batch))
-    return all_results
+    # Only send headlines Claude hasn't already classified.
+    uncached = [a for a in articles if _classification_key(a) not in _classification_cache]
+    for start in range(0, len(uncached), BATCH_SIZE):
+        batch = uncached[start:start + BATCH_SIZE]
+        for article, result in zip(batch, classify_batch(client, batch)):
+            if result.get("sentiment") != "Unknown":  # don't cache parse errors; retry next time
+                _classification_cache[_classification_key(article)] = result
+    if len(_classification_cache) > CLASSIFICATION_CACHE_MAX:
+        _classification_cache.clear()  # ponytail: crude bound, swap for an LRU if the cache churns
+    unknown = {"sentiment": "Unknown", "confidence": 0.0, "reasoning": "classification failed"}
+    return [_classification_cache.get(_classification_key(a), unknown) for a in articles]
+
+
+# Per-headline cache so repeat refreshes only pay for new headlines.
+CLASSIFICATION_CACHE_MAX = 5000
+_classification_cache = {}
+
+
+def _classification_key(article):
+    return article.get("link") or article.get("title", "")
 
 
 def classify_all_local(articles):

@@ -78,6 +78,18 @@ def fetch_price_history(tickers, lookback_days=90):
     return closes.dropna(how="all")
 
 
+def latest_price(ticker):
+    """Most recent close for one ticker, or None if it can't be fetched."""
+    try:
+        closes = fetch_price_history([ticker], lookback_days=5)
+    except Exception:
+        return None
+    if closes.empty:
+        return None
+    series = closes.iloc[:, 0].dropna()
+    return float(series.iloc[-1]) if not series.empty else None
+
+
 def compute_momentum(closes, lookback_days=90):
     """Given a price DataFrame, compute % return over the lookback window per ticker."""
     momentum = {}

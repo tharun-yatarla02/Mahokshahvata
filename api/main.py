@@ -32,6 +32,8 @@ Endpoints:
 
 import os
 import sys
+import threading
+import time
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Depends, Header
@@ -46,7 +48,7 @@ sys.path.append(str(Path(__file__).parent.parent / "politician_trades"))
 sys.path.append(str(Path(__file__).parent.parent / "auth"))
 sys.path.append(str(Path(__file__).parent.parent / "news_sentiment"))
 
-from momentum_engine import rank_momentum, DEFAULT_UNIVERSE, DEFAULT_SECTOR_LOOKUP
+from momentum_engine import rank_momentum, latest_price, DEFAULT_UNIVERSE, DEFAULT_SECTOR_LOOKUP
 from paper_trading_engine import PaperTradingEngine, RiskRules
 from politician_trades import list_politicians, get_trades_for_politician, refresh_cache
 from firebase_auth import verify_firebase_token
@@ -270,16 +272,31 @@ def add_cash_to_portfolio(portfolio_id: int, req: AddCashRequest, user_id: int =
         raise HTTPException(status_code=400, detail=str(e))
 
 
+# How far a submitted trade price may drift from the last market close.
+# Covers intraday moves; stops a client from buying at $0.01.
+MAX_PRICE_DEVIATION = 0.05
+
+
 @app.post("/portfolio/{portfolio_id}/trade-stock")
 def trade_stock(portfolio_id: int, req: TradeStockRequest, user_id: int = Depends(get_current_user)):
+    ticker = req.ticker.strip().upper()
+    market_price = latest_price(ticker)
+    if market_price is None:
+        raise HTTPException(status_code=502, detail=f"Could not fetch a market price for {ticker}")
+    if abs(req.price - market_price) / market_price > MAX_PRICE_DEVIATION:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Price ${req.price:.2f} is more than {MAX_PRICE_DEVIATION:.0%} away from the market price ${market_price:.2f}",
+        )
     try:
         return engine.trade_stock(
             portfolio_id,
             user_id,
-            req.ticker,
+            ticker,
             req.quantity,
             req.price,
             req.side,
+            sector=DEFAULT_SECTOR_LOOKUP.get(ticker, "Unknown"),
         )
     except PermissionError:
         raise HTTPException(status_code=403, detail="This portfolio doesn't belong to you")
@@ -388,12 +405,25 @@ def health():
     return {"status": "ok"}
 
 
+# Every open sentiment tab polls this endpoint, so without a cache each poll
+# re-fetched all RSS feeds, re-ran Claude, and rewrote the history file.
+# The lock also means only one request at a time writes sentiment_history.json.
+SENTIMENT_TTL_SECONDS = 300
+_sentiment_cache = {"data": None, "at": 0.0}
+_sentiment_lock = threading.Lock()
+
+
 @app.get("/news-sentiment")
 def get_news_sentiment():
     """Returns current news sentiment for tracked tickers and sector themes.
     If the live RSS feed yields no relevant headlines, this returns a curated
-    demo fallback so the frontend still shows meaningful sentiment."""
-    return collect_sentiment_results()
+    demo fallback so the frontend still shows meaningful sentiment.
+    Results are cached for SENTIMENT_TTL_SECONDS."""
+    with _sentiment_lock:
+        if _sentiment_cache["data"] is None or time.monotonic() - _sentiment_cache["at"] > SENTIMENT_TTL_SECONDS:
+            _sentiment_cache["data"] = collect_sentiment_results()
+            _sentiment_cache["at"] = time.monotonic()
+        return _sentiment_cache["data"]
 
 
 # ---------------------------------------------------------------------------
