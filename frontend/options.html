@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mahokshahvata | Options</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <nav class="navbar">
+      <div class="nav-inner">
+        <div class="brand">
+          <div class="brand-mark">M</div>
+          <span>Mahokshahvata</span>
+        </div>
+        <div class="nav-links">
+          <a href="/">Overview</a>
+          <a href="/market.html">Market</a>
+          <a href="/portfolio.html">Portfolio</a>
+          <a href="/sentiment.html">Sentiment</a>
+          <a href="/options.html" class="active">Options</a>
+        </div>
+        <div class="nav-actions">
+          <button id="themeToggle" class="theme-toggle" type="button" aria-label="Switch color mode">Light mode</button>
+          <div style="position: relative;">
+            <button id="profileButton" class="profile-button" type="button" aria-label="Open profile">
+              <span class="profile-avatar">U</span>
+              <span id="profileLabel">Profile</span>
+            </button>
+            <div id="profileMenu" class="profile-menu" aria-live="polite">
+              <div class="profile-card">
+                <span id="profileMenuAvatar" class="profile-avatar">U</span>
+                <div>
+                  <p id="profileName" class="profile-name">Demo User</p>
+                  <p id="profileEmail" class="profile-email">demo@mahokshahvata.ai</p>
+                </div>
+              </div>
+              <div class="profile-menu-actions">
+                <button type="button" class="secondary">Account</button>
+                <button id="logoutButton" type="button" class="logout-btn">Logout</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </nav>
+
+    <div class="page">
+      <div class="hero premium-hero">
+        <div class="hero-top hero-top-extended">
+          <div class="hero-copy">
+            <span class="eyebrow">Options desk</span>
+            <h1>Trade and Track</h1>
+            <p>Trade paper options and review trade history, expiries, and premium activity in a single desk view.</p>
+          </div>
+          <div class="hero-metric-box">
+            <span>Strategy mode</span>
+            <strong>Defined risk</strong>
+            <small>Paper option desk</small>
+          </div>
+        </div>
+        <div class="hero-bottom-row">
+          <div class="hero-pill-row">
+            <button class="sector-pill active" type="button" data-option-type="CALL">Calls</button>
+            <button class="sector-pill" type="button" data-option-type="PUT">Puts</button>
+            <button class="sector-pill" type="button" data-option-type="COVERED">Covered</button>
+          </div>
+          <span class="badge">Desk</span>
+        </div>
+      </div>
+
+      <div class="grid">
+        <div class="card premium-card">
+          <h2>New option trade</h2>
+          <div class="button-row">
+            <button id="tradeOptionBtn">Trade option</button>
+            <button id="tradeHistoryBtn" class="secondary">Load history</button>
+          </div>
+
+          <label class="label" for="optionTicker">Ticker</label>
+          <input id="optionTicker" type="text" value="AAPL" />
+          <label class="label" for="optionType">Option type</label>
+          <select id="optionType">
+            <option value="CALL">CALL</option>
+            <option value="PUT">PUT</option>
+          </select>
+          <label class="label" for="optionStrike">Strike</label>
+          <input id="optionStrike" type="number" value="200" min="1" step="0.01" />
+          <label class="label" for="optionExpiry">Expiry</label>
+          <input id="optionExpiry" type="text" value="2026-12-18" />
+          <label class="label" for="optionQuantity">Quantity</label>
+          <input id="optionQuantity" type="number" value="2" min="1" step="1" />
+          <label class="label" for="optionPremium">Premium</label>
+          <input id="optionPremium" type="number" value="8.5" min="0.01" step="0.01" />
+          <label class="label" for="optionSide">Side</label>
+          <select id="optionSide">
+            <option value="BUY">BUY</option>
+            <option value="SELL">SELL</option>
+          </select>
+
+          <div class="status" id="optionsStatus" style="margin-top: 16px;">Ready for a new option trade.</div>
+          <div id="optionTradeOutput" class="trade-output">No option trades yet.</div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const API_BASE = window.location.origin;
+      const optionTradeOutput = document.getElementById('optionTradeOutput');
+      const optionsStatus = document.getElementById('optionsStatus');
+      let currentPortfolioId = null;
+
+      function setOptionsStatus(message, kind = 'success') {
+        if (!optionsStatus) return;
+        optionsStatus.textContent = message;
+        optionsStatus.className = 'status';
+        if (kind) optionsStatus.classList.add(kind);
+      }
+
+      function formatTradeDate(value) {
+        if (!value) return '—';
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return value;
+        return new Intl.DateTimeFormat('en-US', {
+          month: 'short',
+          day: 'numeric',
+          year: 'numeric',
+          hour: 'numeric',
+          minute: '2-digit',
+        }).format(date);
+      }
+
+      function formatTradeResult(payload) {
+        const trades = Array.isArray(payload?.trades) ? payload.trades : [];
+        if (!trades.length) {
+          return '<div class="empty-state">No trade history yet.</div>';
+        }
+
+        const rows = trades.map((trade) => {
+          const side = (trade.type || trade.side || 'BUY').toUpperCase();
+          const symbol = trade.ticker || 'N/A';
+          const quantity = Number(trade.quantity ?? 0);
+          const price = trade.price ?? trade.premium ?? 0;
+          const strike = trade.strike != null ? `$${Number(trade.strike).toFixed(2)}` : '—';
+          const expiry = trade.expiry || '—';
+          const tradeType = trade.instrument_type === 'OPTION' || trade.option_type ? 'Option' : 'Stock';
+          const optionType = trade.option_type || '—';
+          return `
+            <tr>
+              <td><strong>${symbol}</strong></td>
+              <td>${tradeType}</td>
+              <td><span class="trade-side ${side === 'BUY' ? 'buy' : 'sell'}">${side}</span></td>
+              <td>${quantity}</td>
+              <td>${price !== null && price !== undefined ? `$${Number(price).toFixed(2)}` : '—'}</td>
+              <td>${strike}</td>
+              <td>${optionType}</td>
+              <td>${expiry}</td>
+              <td>${formatTradeDate(trade.timestamp)}</td>
+            </tr>
+          `;
+        }).join('');
+
+        return `
+          <div class="table-wrap">
+            <table class="trade-table">
+              <thead>
+                <tr>
+                  <th>Stock</th>
+                  <th>Type</th>
+                  <th>Action</th>
+                  <th>Qty</th>
+                  <th>Price</th>
+                  <th>Strike</th>
+                  <th>Option</th>
+                  <th>Expiry</th>
+                  <th>Trade Time</th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        `;
+      }
+
+      async function apiFetch(path, options = {}) {
+        const res = await fetch(`${API_BASE}${path}`, {
+          ...options,
+          headers: { 'Authorization': 'Bearer demo-token', 'Content-Type': 'application/json', ...(options.headers || {}) },
+        });
+        const text = await res.text();
+        let payload = null;
+        try { payload = text ? JSON.parse(text) : null; } catch { payload = text; }
+        if (!res.ok) throw new Error(payload?.detail || payload || `HTTP ${res.status}`);
+        return payload;
+      }
+
+      async function initializePortfolio() {
+        try {
+          const data = await apiFetch('/portfolio');
+          if (data.portfolios && data.portfolios.length) {
+            currentPortfolioId = data.portfolios[0].id;
+          }
+        } catch (err) {
+          optionTradeOutput.textContent = String(err);
+        }
+      }
+
+      document.querySelectorAll('.sector-pill').forEach((button) => {
+        button.addEventListener('click', () => {
+          const selectedType = button.dataset.optionType || 'CALL';
+          const optionTypeSelect = document.getElementById('optionType');
+          if (optionTypeSelect) {
+            optionTypeSelect.value = selectedType;
+          }
+          document.querySelectorAll('.sector-pill').forEach((chip) => {
+            chip.classList.toggle('active', chip === button);
+          });
+        });
+      });
+
+      document.getElementById('tradeOptionBtn').addEventListener('click', async () => {
+        if (!currentPortfolioId) {
+          optionTradeOutput.innerHTML = '<div class="empty-state">Create or load portfolio first.</div>';
+          setOptionsStatus('No portfolio selected yet.', 'error');
+          return;
+        }
+        const payload = {
+          ticker: document.getElementById('optionTicker').value.trim().toUpperCase(),
+          option_type: document.getElementById('optionType').value,
+          strike: Number(document.getElementById('optionStrike').value),
+          expiry: document.getElementById('optionExpiry').value,
+          quantity: Number(document.getElementById('optionQuantity').value),
+          premium: Number(document.getElementById('optionPremium').value),
+          side: document.getElementById('optionSide').value,
+        };
+
+        try {
+          const data = await apiFetch(`/portfolio/${currentPortfolioId}/trade-option`, {
+            method: 'POST',
+            body: JSON.stringify(payload),
+          });
+          optionTradeOutput.innerHTML = formatTradeResult({ trades: [data] });
+          setOptionsStatus(`Trade placed for ${payload.ticker}.`, 'success');
+        } catch (err) {
+          optionTradeOutput.innerHTML = `<div class="empty-state">${String(err)}</div>`;
+          setOptionsStatus('Option trade could not be placed.', 'error');
+        }
+      });
+
+      function getInitials(name) {
+        const clean = (name || 'Demo User').trim();
+        if (!clean) return 'DU';
+        const parts = clean.split(/\s+/).filter(Boolean);
+        return parts.length >= 2 ? `${parts[0][0]}${parts[1][0]}`.toUpperCase() : clean.slice(0, 2).toUpperCase();
+      }
+
+      function getUserProfile() {
+        const fallback = { name: 'Demo User', email: 'demo@mahokshahvata.ai', image: '' };
+        const stored = JSON.parse(localStorage.getItem('mahokshahvata_user') || 'null');
+        const user = stored || fallback;
+        const finalUser = { name: user.name || fallback.name, email: user.email || fallback.email, image: user.image || '' };
+        localStorage.setItem('mahokshahvata_user', JSON.stringify(finalUser));
+        return finalUser;
+      }
+
+      function renderProfile() {
+        const user = getUserProfile();
+        const avatarText = getInitials(user.name);
+        const buttonAvatar = document.querySelector('#profileButton .profile-avatar');
+        const profileLabel = document.getElementById('profileLabel');
+        const profileMenuAvatar = document.getElementById('profileMenuAvatar');
+        const profileName = document.getElementById('profileName');
+        const profileEmail = document.getElementById('profileEmail');
+
+        if (buttonAvatar) buttonAvatar.textContent = avatarText;
+        if (profileLabel) profileLabel.textContent = user.name.split(' ')[0] || 'Profile';
+        if (profileMenuAvatar) profileMenuAvatar.textContent = avatarText;
+        if (profileName) profileName.textContent = user.name;
+        if (profileEmail) profileEmail.textContent = user.email;
+      }
+
+      function setTheme(nextTheme) {
+        document.body.setAttribute('data-theme', nextTheme);
+        localStorage.setItem('theme', nextTheme);
+        const toggle = document.getElementById('themeToggle');
+        if (toggle) toggle.textContent = nextTheme === 'dark' ? 'Light mode' : 'Dark mode';
+      }
+
+      function applyTheme() {
+        const saved = localStorage.getItem('theme');
+        const prefersLight = window.matchMedia('(prefers-color-scheme: light)').matches;
+        const nextTheme = saved || (prefersLight ? 'light' : 'dark');
+        setTheme(nextTheme);
+      }
+
+      document.getElementById('themeToggle').addEventListener('click', () => {
+        const currentTheme = document.body.dataset.theme === 'light' ? 'light' : 'dark';
+        setTheme(currentTheme === 'light' ? 'dark' : 'light');
+      });
+
+      document.getElementById('profileButton').addEventListener('click', () => {
+        document.getElementById('profileMenu').classList.toggle('open');
+      });
+
+      document.getElementById('logoutButton').addEventListener('click', () => {
+        localStorage.setItem('mahokshahvata_user', JSON.stringify({
+          name: 'Demo User',
+          email: 'demo@mahokshahvata.ai',
+          image: '',
+        }));
+        renderProfile();
+        document.getElementById('profileMenu').classList.remove('open');
+      });
+
+      document.addEventListener('click', (event) => {
+        const profileButton = document.getElementById('profileButton');
+        const profileMenu = document.getElementById('profileMenu');
+        if (profileButton && profileMenu && !profileButton.contains(event.target) && !profileMenu.contains(event.target)) {
+          profileMenu.classList.remove('open');
+        }
+      });
+
+      document.getElementById('tradeHistoryBtn').addEventListener('click', async () => {
+        if (!currentPortfolioId) {
+          optionTradeOutput.innerHTML = '<div class="empty-state">Create or load portfolio first.</div>';
+          setOptionsStatus('No portfolio selected yet.', 'error');
+          return;
+        }
+        try {
+          const data = await apiFetch(`/portfolio/${currentPortfolioId}/trade-history`);
+          optionTradeOutput.innerHTML = formatTradeResult(data);
+          setOptionsStatus('Trade history loaded successfully.', 'success');
+        } catch (err) {
+          optionTradeOutput.innerHTML = `<div class="empty-state">${String(err)}</div>`;
+          setOptionsStatus('Unable to load history right now.', 'error');
+        }
+      });
+
+      renderProfile();
+      applyTheme();
+      initializePortfolio();
+      setOptionsStatus('Ready for a new option trade.', 'success');
+    </script>
+  </body>
+</html>

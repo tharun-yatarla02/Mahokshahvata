@@ -42,6 +42,8 @@ The flow, end to end:
        itself is checked on every request
 """
 
+import os
+
 import firebase_admin
 from firebase_admin import auth as firebase_auth_sdk
 from firebase_admin import credentials
@@ -60,7 +62,31 @@ def _get_app():
 
 def verify_firebase_token(token):
     """Verifies a Firebase ID token. Returns the user's info, or raises
-    ValueError if it's invalid, expired, or malformed."""
+    ValueError if it's invalid, expired, or malformed.
+
+    When USE_DEMO_AUTH=true, we allow a local development token so the app can
+    be exercised without a Firebase project or service account configured.
+    """
+    if os.getenv("USE_DEMO_AUTH", "").lower() in {"1", "true", "yes", "on"}:
+        if token is None or not str(token).strip():
+            raise ValueError("Missing demo auth token")
+
+        demo_token = str(token).strip()
+        if demo_token == "demo-token":
+            return {
+                "firebase_uid": "demo-token",
+                "email": "demo@example.com",
+                "name": "Local Demo User",
+                "picture": None,
+            }
+
+        return {
+            "firebase_uid": demo_token,
+            "email": f"{demo_token}@example.com",
+            "name": f"Demo User {demo_token}",
+            "picture": None,
+        }
+
     _get_app()
     try:
         decoded = firebase_auth_sdk.verify_id_token(token)

@@ -35,6 +35,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 # Make sibling modules importable
@@ -42,13 +43,16 @@ sys.path.append(str(Path(__file__).parent.parent / "momentum"))
 sys.path.append(str(Path(__file__).parent.parent / "paper_trading"))
 sys.path.append(str(Path(__file__).parent.parent / "politician_trades"))
 sys.path.append(str(Path(__file__).parent.parent / "auth"))
+sys.path.append(str(Path(__file__).parent.parent / "news_sentiment"))
 
-from momentum_engine import rank_momentum, DEFAULT_UNIVERSE
+from momentum_engine import rank_momentum, DEFAULT_UNIVERSE, DEFAULT_SECTOR_LOOKUP
 from paper_trading_engine import PaperTradingEngine, RiskRules
 from politician_trades import list_politicians, get_trades_for_politician, refresh_cache
 from firebase_auth import verify_firebase_token
+from news_sentiment_scraper import collect_sentiment_results
 
-app = FastAPI(title="AI Stock Platform API", version="0.1.0")
+app = FastAPI(title="Mahokshahvata API", version="0.1.0")
+frontend_dir = Path(__file__).parent.parent / "frontend"
 engine = PaperTradingEngine(str(Path(__file__).parent.parent / "paper_trading" / "paper_trading.db"))
 
 # CORS: without this, a browser blocks every call from your frontend to this
@@ -82,12 +86,18 @@ def get_current_user(authorization: str = Header(None)):
     assume the caller is already authenticated by the time its own code
     runs.
 
-    Unlike the earlier raw-Google-OAuth version, there is no separate
-    /auth/google exchange step — the Firebase token the frontend already
-    holds (from the Firebase SDK sign-in) is checked directly, every call."""
+    In local demo mode, we silently fall back to the default demo token so the
+    browser can still exercise the app without a real Firebase login configured."""
+    demo_mode = os.getenv("USE_DEMO_AUTH", "").lower() in {"1", "true", "yes", "on"}
+
     if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing or malformed Authorization header")
-    token = authorization.removeprefix("Bearer ").strip()
+        if demo_mode:
+            token = "demo-token"
+        else:
+            raise HTTPException(status_code=401, detail="Missing or malformed Authorization header")
+    else:
+        token = authorization.removeprefix("Bearer ").strip()
+
     try:
         firebase_user = verify_firebase_token(token)
     except ValueError as e:
@@ -117,6 +127,17 @@ class BuildPortfolioRequest(BaseModel):
 
 class MarkToMarketRequest(BaseModel):
     prices: dict  # {"NVDA": 190.12, "PLTR": 42.5, ...}
+    option_prices: dict | None = None
+
+
+class TradeOptionRequest(BaseModel):
+    ticker: str
+    option_type: str = Field(..., pattern="^(CALL|PUT)$")
+    strike: float = Field(gt=0)
+    expiry: str
+    quantity: int = Field(gt=0)
+    premium: float = Field(gt=0)
+    side: str = Field(default="BUY", pattern="^(BUY|SELL)$")
 
 
 # ---------------------------------------------------------------------------
@@ -124,11 +145,19 @@ class MarkToMarketRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 @app.get("/momentum")
-def get_momentum(top: int = 10, lookback_days: int = 90):
+def get_momentum(top: int = 10, lookback_days: int = 90, sector: str | None = None, q: str | None = None):
     """Returns the top-N ranked momentum stocks from the default universe.
-    No sign-in required — momentum data isn't tied to any one user."""
-    ranked = rank_momentum(DEFAULT_UNIVERSE, lookback_days=lookback_days)
-    return {"count": len(ranked[:top]), "results": ranked[:top]}
+    No sign-in required — momentum data isn't tied to any one user.
+
+    Supports optional client-side filters by sector and ticker search term."""
+    ranked = rank_momentum(DEFAULT_UNIVERSE, sector_lookup=DEFAULT_SECTOR_LOOKUP, lookback_days=lookback_days)
+    if sector:
+        ranked = [item for item in ranked if item.get("sector", "Unknown").lower() == sector.lower()]
+    if q:
+        needle = q.strip().lower()
+        ranked = [item for item in ranked if needle in item.get("ticker", "").lower() or needle in item.get("sector", "").lower()]
+    limited = ranked[:top]
+    return {"count": len(limited), "results": limited}
 
 
 # ---------------------------------------------------------------------------
@@ -207,7 +236,38 @@ def get_portfolio(portfolio_id: int, user_id: int = Depends(get_current_user)):
 @app.post("/portfolio/{portfolio_id}/mark-to-market")
 def mark_to_market(portfolio_id: int, req: MarkToMarketRequest, user_id: int = Depends(get_current_user)):
     try:
-        return engine.mark_to_market(portfolio_id, user_id, req.prices)
+        return engine.mark_to_market(portfolio_id, user_id, req.prices, current_option_prices=req.option_prices)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="This portfolio doesn't belong to you")
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.post("/portfolio/{portfolio_id}/cash")
+def add_cash_to_portfolio(portfolio_id: int, payload: dict, user_id: int = Depends(get_current_user)):
+    amount = float(payload.get("amount", 0))
+    try:
+        return engine.add_cash_balance(portfolio_id, user_id, amount)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="This portfolio doesn't belong to you")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/portfolio/{portfolio_id}/trade-option")
+def trade_option(portfolio_id: int, req: TradeOptionRequest, user_id: int = Depends(get_current_user)):
+    try:
+        return engine.trade_option(
+            portfolio_id,
+            user_id,
+            req.ticker,
+            req.option_type,
+            req.strike,
+            req.expiry,
+            req.quantity,
+            req.premium,
+            req.side,
+        )
     except PermissionError:
         raise HTTPException(status_code=403, detail="This portfolio doesn't belong to you")
     except ValueError as e:
@@ -224,9 +284,75 @@ def get_history(portfolio_id: int, user_id: int = Depends(get_current_user)):
         raise HTTPException(status_code=404, detail=str(e))
 
 
+@app.get("/portfolio/{portfolio_id}/trade-history")
+def get_trade_history(portfolio_id: int, user_id: int = Depends(get_current_user)):
+    try:
+        return {"trades": engine.get_trade_history(portfolio_id, user_id)}
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="This portfolio doesn't belong to you")
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.get("/")
+def root():
+    index_path = frontend_dir / "index.html"
+    if index_path.exists():
+        return FileResponse(index_path)
+    return {"status": "ok"}
+
+
+@app.get("/market.html")
+def market_page():
+    page = frontend_dir / "market.html"
+    if page.exists():
+        return FileResponse(page)
+    raise HTTPException(status_code=404, detail="Market page not found")
+
+
+@app.get("/portfolio.html")
+def portfolio_page():
+    page = frontend_dir / "portfolio.html"
+    if page.exists():
+        return FileResponse(page)
+    raise HTTPException(status_code=404, detail="Portfolio page not found")
+
+
+@app.get("/sentiment.html")
+def sentiment_page():
+    page = frontend_dir / "sentiment.html"
+    if page.exists():
+        return FileResponse(page)
+    raise HTTPException(status_code=404, detail="Sentiment page not found")
+
+
+@app.get("/options.html")
+def options_page():
+    page = frontend_dir / "options.html"
+    if page.exists():
+        return FileResponse(page)
+    raise HTTPException(status_code=404, detail="Options page not found")
+
+
+@app.get("/styles.css")
+def styles_css():
+    css_path = frontend_dir / "styles.css"
+    if css_path.exists():
+        return FileResponse(css_path, media_type="text/css")
+    raise HTTPException(status_code=404, detail="Stylesheet not found")
+
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/news-sentiment")
+def get_news_sentiment():
+    """Returns current news sentiment for tracked tickers and sector themes.
+    If the live RSS feed yields no relevant headlines, this returns a curated
+    demo fallback so the frontend still shows meaningful sentiment."""
+    return collect_sentiment_results()
 
 
 # ---------------------------------------------------------------------------

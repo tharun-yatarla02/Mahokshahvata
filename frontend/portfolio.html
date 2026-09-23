@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mahokshahvata | Portfolio</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <nav class="navbar">
+      <div class="nav-inner">
+        <div class="brand">
+          <div class="brand-mark">M</div>
+          <span>Mahokshahvata</span>
+        </div>
+        <div class="nav-links">
+          <a href="/">Overview</a>
+          <a href="/market.html">Market</a>
+          <a href="/portfolio.html" class="active">Portfolio</a>
+          <a href="/sentiment.html">Sentiment</a>
+          <a href="/options.html">Options</a>
+        </div>
+        <div class="nav-actions">
+          <button id="themeToggle" class="theme-toggle" type="button" aria-label="Switch color mode">Light mode</button>
+          <div style="position: relative;">
+            <button id="profileButton" class="profile-button" type="button" aria-label="Open profile">
+              <span class="profile-avatar">U</span>
+              <span id="profileLabel">Profile</span>
+            </button>
+            <div id="profileMenu" class="profile-menu" aria-live="polite">
+              <div class="profile-card">
+                <span id="profileMenuAvatar" class="profile-avatar">U</span>
+                <div>
+                  <p id="profileName" class="profile-name">Demo User</p>
+                  <p id="profileEmail" class="profile-email">demo@mahokshahvata.ai</p>
+                </div>
+              </div>
+              <div class="profile-menu-actions">
+                <button type="button" class="secondary">Account</button>
+                <button id="logoutButton" type="button" class="logout-btn">Logout</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </nav>
+
+    <div class="page">
+      <div class="hero premium-hero">
+        <div class="hero-top hero-top-extended">
+          <div class="hero-copy">
+            <span class="eyebrow">Portfolio overview</span>
+            <h1>Investment Dashboard</h1>
+            <p>Monitor capital allocation, position quality, and portfolio momentum in one premium overview.</p>
+          </div>
+          <div class="hero-metric-box">
+            <span>Strategy</span>
+            <strong>Balanced Growth</strong>
+            <small>Adaptive allocation</small>
+          </div>
+        </div>
+        <div class="hero-bottom-row">
+          <div class="hero-pill-row" id="heroSectorPills"></div>
+          <span class="badge">Active</span>
+        </div>
+      </div>
+
+      <div class="stats">
+        <div class="stat accent-card">
+          <div class="stat-label">Invested amount</div>
+          <div class="stat-value" id="totalInvestedValue">$0.00</div>
+          <div class="stat-sub">Capital currently allocated</div>
+        </div>
+        <div class="stat success-card">
+          <div class="stat-label">Profit</div>
+          <div class="stat-value" id="portfolioProfitValue">+$0.00</div>
+          <div class="stat-sub">Live portfolio gain or loss</div>
+        </div>
+        <div class="stat warning-card">
+          <div class="stat-label">Remaining balance</div>
+          <div class="stat-value" id="remainingBalanceValue">$0.00</div>
+          <div class="stat-sub">Cash available to deploy</div>
+        </div>
+        <div class="stat neutral-card">
+          <div class="stat-label">Sectors</div>
+          <div class="stat-value" id="sectorCountValue">0</div>
+          <div class="stat-sub">Active sector allocations</div>
+        </div>
+      </div>
+
+      <div class="performance-shell">
+        <div class="card premium-visual-card">
+          <div class="visual-header">
+            <div>
+              <div class="mini-label">Portfolio performance</div>
+              <h2>Performance overview</h2>
+            </div>
+            <div class="mini-chip positive" id="performanceTrendChip">+0.00%</div>
+          </div>
+          <div class="sparkline-wrap">
+            <svg id="portfolioSparkline" class="sparkline" viewBox="0 0 320 120" preserveAspectRatio="none" aria-label="Portfolio performance trend"></svg>
+            <div id="sparklineTooltip" class="sparkline-tooltip" hidden></div>
+          </div>
+          <div class="visual-footer">
+            <div>
+              <span class="mini-label">Portfolio value</span>
+              <strong id="portfolioTotalValue">$0.00</strong>
+            </div>
+            <div>
+              <span class="mini-label">P/L</span>
+              <strong id="portfolioPnLValue" class="positive">+$0.00</strong>
+            </div>
+          </div>
+        </div>
+
+        <div class="trend-grid">
+          <div class="trend-tile positive">
+            <span class="tile-label">Net return</span>
+            <strong id="netReturnTile">+0.00%</strong>
+            <small id="netReturnNote">0.00</small>
+          </div>
+          <div class="trend-tile neutral">
+            <span class="tile-label">Buying power</span>
+            <strong id="buyingPowerTile">$0.00</strong>
+            <small>Available to deploy</small>
+          </div>
+          <div class="trend-tile accent">
+            <span class="tile-label">Cash used</span>
+            <strong id="cashUsedTile">$0.00</strong>
+            <small>Capital allocated</small>
+          </div>
+          <div class="trend-tile warning">
+            <span class="tile-label">Risk dial</span>
+            <strong id="riskTile">0 / 100</strong>
+            <small>Portfolio exposure</small>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid">
+        <div class="card premium-card">
+          <div class="premium-header">
+            <div>
+              <div class="mini-label">Positions</div>
+              <h2>Holdings</h2>
+            </div>
+            <button id="refreshHoldingsBtn" class="secondary small-btn" type="button">Refresh</button>
+          </div>
+          <div class="chip-row" id="holdingFilterChips" aria-label="Filter holdings by sector"></div>
+          <div class="table-wrap holdings-table-wrap">
+            <table class="holdings-table">
+              <thead>
+                <tr>
+                  <th>Symbol</th>
+                  <th>Sector</th>
+                  <th>Qty</th>
+                  <th>Price</th>
+                  <th>Value</th>
+                  <th>Weight</th>
+                </tr>
+              </thead>
+              <tbody id="holdingsTableBody">
+                <tr>
+                  <td colspan="6" class="empty-table-row">No holdings yet.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card premium-card side-stack">
+          <div class="premium-header compact-header">
+            <div>
+              <div class="mini-label">Allocation</div>
+              <h2>Portfolio breakdown</h2>
+            </div>
+          </div>
+          <div id="sectorBreakdown" class="sector-breakdown">
+            <div class="empty-state">No sector data yet.</div>
+          </div>
+
+          <div class="action-panel">
+            <h3>Portfolio actions</h3>
+            <label class="label" for="portfolioName">Portfolio name</label>
+            <input id="portfolioName" type="text" value="Demo Portfolio" placeholder="Portfolio name" />
+            <label class="label" for="startingCapital">Starting capital</label>
+            <input id="startingCapital" type="number" min="0" step="100" value="100000" placeholder="Starting capital" />
+            <div class="button-row stacked-actions">
+              <button id="createPortfolioBtn">Create portfolio</button>
+              <button id="getPortfolioBtn" class="secondary">Load current</button>
+              <button id="buildPortfolioBtn" class="secondary">Build from momentum</button>
+            </div>
+            <div class="inline-add-cash">
+              <input id="addCashAmount" type="number" min="0" step="50" value="250" placeholder="Add cash" />
+              <button id="addCashBtn" class="secondary">Add balance</button>
+            </div>
+          </div>
+
+          <div class="output-panel">
+            <div class="output-head">
+              <h3>Portfolio output</h3>
+              <button id="tradeHistoryBtn" class="secondary small-btn" type="button">History</button>
+            </div>
+            <pre id="portfolioOutput">No portfolio yet.</pre>
+            <pre id="historyOutput" class="history-output">No trade history yet.</pre>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const API_BASE = window.location.origin;
+      const portfolioOutput = document.getElementById('portfolioOutput');
+      const historyOutput = document.getElementById('historyOutput');
+      const remainingBalanceValue = document.getElementById('remainingBalanceValue');
+      const totalInvestedValue = document.getElementById('totalInvestedValue');
+      const stockCountValue = document.getElementById('stockCountValue');
+      const sectorCountValue = document.getElementById('sectorCountValue');
+      const sectorBreakdown = document.getElementById('sectorBreakdown');
+      const holdingsTableBody = document.getElementById('holdingsTableBody');
+      const portfolioTotalValue = document.getElementById('portfolioTotalValue');
+      const portfolioPnLValue = document.getElementById('portfolioPnLValue');
+      const performanceTrendChip = document.getElementById('performanceTrendChip');
+      const portfolioSparkline = document.getElementById('portfolioSparkline');
+      const sparklineTooltip = document.getElementById('sparklineTooltip');
+      const holdingFilterChips = document.getElementById('holdingFilterChips');
+      const heroSectorPills = document.getElementById('heroSectorPills');
+      const netReturnTile = document.getElementById('netReturnTile');
+      const netReturnNote = document.getElementById('netReturnNote');
+      const buyingPowerTile = document.getElementById('buyingPowerTile');
+      const cashUsedTile = document.getElementById('cashUsedTile');
+      const riskTile = document.getElementById('riskTile');
+      let currentPortfolioId = null;
+      let activeHoldingsFilter = 'all';
+      let activePortfolioHoldings = [];
+
+      function formatCurrency(value) {
+        const amount = Number(value || 0);
+        return new Intl.NumberFormat('en-US', {
+          style: 'currency',
+          currency: 'USD',
+          maximumFractionDigits: 2,
+        }).format(amount);
+      }
+
+      function formatSignedCurrency(value) {
+        const amount = Number(value || 0);
+        return `${amount >= 0 ? '+' : '-'}${formatCurrency(Math.abs(amount))}`;
+      }
+
+      function formatPercent(value) {
+        const amount = Number(value || 0);
+        return `${amount >= 0 ? '+' : ''}${amount.toFixed(2)}%`;
+      }
+
+      function buildSparklinePath(series) {
+        if (!series || !series.length) {
+          return '';
+        }
+        const width = 320;
+        const height = 120;
+        const min = Math.min(...series);
+        const max = Math.max(...series);
+        const range = max - min || 1;
+
+        return series.map((point, index) => {
+          const x = (index / (series.length - 1)) * width;
+          const y = height - ((point - min) / range) * (height - 16) - 8;
+          return `${index === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)}`;
+        }).join(' ');
+      }
+
+      function renderSparkline(series) {
+        const path = buildSparklinePath(series);
+        portfolioSparkline.innerHTML = `
+          <defs>
+            <linearGradient id="sparklineGlow" x1="0" x2="1" y1="0" y2="0">
+              <stop offset="0%" stop-color="#4cc9f0" />
+              <stop offset="100%" stop-color="#7c3aed" />
+            </linearGradient>
+          </defs>
+          <path d="${path}" fill="none" stroke="url(#sparklineGlow)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"></path>
+        `;
+
+        if (!path) {
+          portfolioSparkline.setAttribute('data-empty', 'true');
+          return;
+        }
+
+        portfolioSparkline.setAttribute('data-empty', 'false');
+        const width = 320;
+        const height = 120;
+        const min = Math.min(...series);
+        const max = Math.max(...series);
+        const range = max - min || 1;
+        const points = series.map((point, index) => {
+          const x = (index / (series.length - 1)) * width;
+          const y = height - ((point - min) / range) * (height - 16) - 8;
+          return { x, y, value: point };
+        });
+
+        points.forEach((point, index) => {
+          const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+          circle.setAttribute('cx', point.x);
+          circle.setAttribute('cy', point.y);
+          circle.setAttribute('r', 4);
+          circle.setAttribute('fill', '#bfeeff');
+          circle.setAttribute('opacity', index === points.length - 1 ? '1' : '0.6');
+          circle.style.cursor = 'pointer';
+          circle.addEventListener('mouseenter', (event) => {
+            sparklineTooltip.hidden = false;
+            sparklineTooltip.innerHTML = `${formatCurrency(point.value)}<span>Portfolio snapshot</span>`;
+            const rect = portfolioSparkline.getBoundingClientRect();
+            sparklineTooltip.style.left = `${event.clientX - rect.left + 12}px`;
+            sparklineTooltip.style.top = `${event.clientY - rect.top - 10}px`;
+          });
+          circle.addEventListener('mousemove', (event) => {
+            const rect = portfolioSparkline.getBoundingClientRect();
+            sparklineTooltip.style.left = `${event.clientX - rect.left + 12}px`;
+            sparklineTooltip.style.top = `${event.clientY - rect.top - 10}px`;
+          });
+          circle.addEventListener('mouseleave', () => {
+            sparklineTooltip.hidden = true;
+          });
+          portfolioSparkline.appendChild(circle);
+        });
+      }
+
+      function renderFilterChips() {
+        const sectors = [...new Set([
+          ...activePortfolioHoldings.map((row) => (row.sector || 'Unassigned').trim()).filter(Boolean),
+          ...(Object.keys(window.__portfolioSectorSummary || {})),
+        ])];
+
+        const chips = ['All', ...sectors].slice(0, 6);
+        const activeValue = activeHoldingsFilter === 'all' ? 'All' : activeHoldingsFilter;
+        holdingFilterChips.innerHTML = chips.map((sector) => {
+          const normalized = sector === 'All' ? 'all' : sector;
+          const isActive = normalized === activeValue || (sector === 'All' && activeHoldingsFilter === 'all');
+          return `<button class="chip ${isActive ? 'active' : ''}" data-filter="${normalized}">${sector}</button>`;
+        }).join('');
+
+        heroSectorPills.innerHTML = sectors.slice(0, 4).map((sector) => {
+          const isActive = activeHoldingsFilter === sector;
+          return `<button class="sector-pill ${isActive ? 'active' : ''}" data-sector="${sector}">${sector}</button>`;
+        }).join('');
+
+        if (!sectors.length) {
+          holdingFilterChips.innerHTML = '<button class="chip active" data-filter="all">All</button>';
+          heroSectorPills.innerHTML = '<button class="sector-pill active" data-sector="all">All</button>';
+        }
+      }
+
+      function renderSectorBreakdown(sectorBreakdownData) {
+        const entries = Object.entries(sectorBreakdownData || {});
+        if (!entries.length) {
+          sectorBreakdown.innerHTML = '<div class="empty-state">No sector data yet.</div>';
+          return;
+        }
+
+        const total = entries.reduce((sum, [, value]) => sum + Number(value || 0), 0) || 1;
+        sectorBreakdown.innerHTML = entries.map(([sector, value]) => {
+          const numericValue = Number(value || 0);
+          const width = Math.max((numericValue / total) * 100, 6);
+          const pct = ((numericValue / total) * 100).toFixed(2);
+          return `
+            <div class="sector-row">
+              <div class="sector-header">
+                <span>${sector}</span>
+                <strong>${formatCurrency(numericValue)}</strong>
+              </div>
+              <div class="sector-bar">
+                <span style="width: ${width}%"></span>
+              </div>
+              <small>${pct}% of total portfolio allocation</small>
+            </div>
+          `;
+        }).join('');
+      }
+
+      function renderHoldingsTable(holdings) {
+        const rows = Array.isArray(holdings) ? holdings : [];
+        activePortfolioHoldings = rows;
+        const filteredRows = activeHoldingsFilter === 'all'
+          ? rows
+          : rows.filter((row) => (row.sector || 'Unassigned') === activeHoldingsFilter);
+
+        if (!filteredRows.length) {
+          holdingsTableBody.innerHTML = '<tr><td colspan="6" class="empty-table-row">No holdings available for this filter.</td></tr>';
+          renderFilterChips();
+          return;
+        }
+
+        const totalValue = filteredRows.reduce((sum, row) => sum + Number(row.quantity || 0) * Number(row.avg_buy_price || 0), 0) || 1;
+        holdingsTableBody.innerHTML = filteredRows.map((row) => {
+          const quantity = Number(row.quantity || 0);
+          const avgPrice = Number(row.avg_buy_price || 0);
+          const value = quantity * avgPrice;
+          const weight = (value / totalValue) * 100;
+          const symbol = row.ticker || row.position_key || 'N/A';
+          const sector = row.sector || 'Unassigned';
+          return `
+            <tr>
+              <td><div class="symbol-badge">${symbol}</div></td>
+              <td>${sector}</td>
+              <td>${quantity}</td>
+              <td>${formatCurrency(avgPrice)}</td>
+              <td>${formatCurrency(value)}</td>
+              <td>
+                <div class="weight-cell">
+                  <span>${weight.toFixed(1)}%</span>
+                  <div class="mini-bar"><span style="width:${Math.max(weight, 8)}%"></span></div>
+                </div>
+              </td>
+            </tr>
+          `;
+        }).join('');
+
+        renderFilterChips();
+      }
+
+      function renderPortfolioSummary(data) {
+        const summary = data || {};
+        const cashBalance = Number(summary.remaining_balance_to_invest ?? summary.cash_balance ?? 0);
+        const totalInvested = Number(summary.total_invested ?? 0);
+        const holdingsValue = Number(summary.holdings_value ?? 0);
+        const latestSnapshot = summary.latest || {};
+        const totalPortfolioValue = Number(latestSnapshot.total_value ?? (holdingsValue + cashBalance) ?? 0);
+        const totalContributedCapital = totalInvested + cashBalance;
+        const pnl = Number(latestSnapshot.total_pl ?? (totalPortfolioValue - totalContributedCapital) ?? 0);
+        const netReturn = Number(latestSnapshot.total_pl_pct ?? (totalContributedCapital > 0 ? (pnl / totalContributedCapital) * 100 : 0) ?? 0);
+        const portfolioProfitValue = document.getElementById('portfolioProfitValue');
+        const sparkSeries = [
+          Math.max(40, totalPortfolioValue * 0.62),
+          Math.max(42, totalPortfolioValue * 0.68),
+          Math.max(48, totalPortfolioValue * 0.74),
+          Math.max(55, totalPortfolioValue * 0.82),
+          Math.max(68, totalPortfolioValue * 0.9),
+          Math.max(70, totalPortfolioValue * 0.96),
+          totalPortfolioValue,
+        ];
+
+        window.__portfolioSectorSummary = summary.sector_breakdown || {};
+        remainingBalanceValue.textContent = formatCurrency(cashBalance);
+        totalInvestedValue.textContent = formatCurrency(totalInvested);
+        portfolioProfitValue.textContent = `${pnl >= 0 ? '+' : '-'}${formatCurrency(Math.abs(pnl))}`;
+        portfolioProfitValue.classList.toggle('positive', pnl >= 0);
+        portfolioProfitValue.classList.toggle('negative', pnl < 0);
+        stockCountValue.textContent = Number(summary.stock_count ?? 0);
+        sectorCountValue.textContent = Number(summary.sector_count ?? 0);
+        portfolioTotalValue.textContent = formatCurrency(totalPortfolioValue);
+        portfolioPnLValue.textContent = `${pnl >= 0 ? '+' : '-'}${formatCurrency(Math.abs(pnl))}`;
+        portfolioPnLValue.classList.toggle('positive', pnl >= 0);
+        portfolioPnLValue.classList.toggle('negative', pnl < 0);
+        performanceTrendChip.textContent = formatPercent(netReturn);
+        performanceTrendChip.classList.toggle('positive', netReturn >= 0);
+        performanceTrendChip.classList.toggle('negative', netReturn < 0);
+        netReturnTile.textContent = formatPercent(netReturn);
+        netReturnNote.textContent = `${formatSignedCurrency(pnl)} total P/L`;
+        buyingPowerTile.textContent = formatCurrency(cashBalance);
+        cashUsedTile.textContent = formatCurrency(totalInvested);
+        riskTile.textContent = `${Math.min(100, Math.max(10, Math.round((totalInvested / Math.max(totalPortfolioValue, 1)) * 100)))} / 100`;
+        renderSparkline(sparkSeries);
+        renderSectorBreakdown(summary.sector_breakdown || {});
+        renderHoldingsTable(summary.holdings || []);
+      }
+
+      async function apiFetch(path, options = {}) {
+        const res = await fetch(`${API_BASE}${path}`, {
+          ...options,
+          headers: { 'Authorization': 'Bearer demo-token', 'Content-Type': 'application/json', ...(options.headers || {}) },
+        });
+        const text = await res.text();
+        let payload = null;
+        try { payload = text ? JSON.parse(text) : null; } catch { payload = text; }
+        if (!res.ok) throw new Error(payload?.detail || payload || `HTTP ${res.status}`);
+        return payload;
+      }
+
+      async function refreshPortfolioData() {
+        if (!currentPortfolioId) {
+          remainingBalanceValue.textContent = '$0.00';
+          totalInvestedValue.textContent = '$0.00';
+          stockCountValue.textContent = '0';
+          sectorCountValue.textContent = '0';
+          renderSectorBreakdown({});
+          return;
+        }
+
+        try {
+          const data = await apiFetch(`/portfolio/${currentPortfolioId}`);
+          renderPortfolioSummary(data);
+          portfolioOutput.textContent = JSON.stringify(data, null, 2);
+        } catch (err) {
+          portfolioOutput.textContent = String(err);
+        }
+      }
+
+      async function initializePortfolio() {
+        try {
+          const data = await apiFetch('/portfolio');
+          if (data.portfolios && data.portfolios.length) {
+            currentPortfolioId = data.portfolios[0].id;
+          }
+          await refreshPortfolioData();
+        } catch (err) {
+          portfolioOutput.textContent = String(err);
+        }
+      }
+
+      document.getElementById('createPortfolioBtn').addEventListener('click', async () => {
+        try {
+          const name = document.getElementById('portfolioName').value.trim() || 'Demo Portfolio';
+          const capital = Number(document.getElementById('startingCapital').value || 1000);
+          const data = await apiFetch('/portfolio', {
+            method: 'POST',
+            body: JSON.stringify({ name, starting_capital: capital }),
+          });
+          currentPortfolioId = data.portfolio_id;
+          await refreshPortfolioData();
+        } catch (err) {
+          portfolioOutput.textContent = String(err);
+        }
+      });
+
+      document.getElementById('getPortfolioBtn').addEventListener('click', async () => {
+        if (!currentPortfolioId) {
+          portfolioOutput.textContent = 'Create a portfolio first.';
+          return;
+        }
+        await refreshPortfolioData();
+      });
+
+      document.getElementById('buildPortfolioBtn').addEventListener('click', async () => {
+        if (!currentPortfolioId) {
+          portfolioOutput.textContent = 'Create a portfolio first.';
+          return;
+        }
+        try {
+          const data = await apiFetch(`/portfolio/${currentPortfolioId}/build`, {
+            method: 'POST',
+            body: JSON.stringify({ max_positions: 5, max_allocation_per_stock: 0.3, max_allocation_per_sector: 0.5 }),
+          });
+          portfolioOutput.textContent = JSON.stringify(data, null, 2);
+          await refreshPortfolioData();
+        } catch (err) {
+          portfolioOutput.textContent = String(err);
+        }
+      });
+
+      document.getElementById('addCashBtn').addEventListener('click', async () => {
+        if (!currentPortfolioId) {
+          portfolioOutput.textContent = 'Create a portfolio first.';
+          return;
+        }
+        const amount = Number(document.getElementById('addCashAmount').value || 0);
+        if (!amount || amount <= 0) {
+          portfolioOutput.textContent = 'Enter a valid top-up amount.';
+          return;
+        }
+        try {
+          const data = await apiFetch(`/portfolio/${currentPortfolioId}/cash`, {
+            method: 'POST',
+            body: JSON.stringify({ amount }),
+          });
+          portfolioOutput.textContent = JSON.stringify(data, null, 2);
+          await refreshPortfolioData();
+        } catch (err) {
+          portfolioOutput.textContent = String(err);
+        }
+      });
+
+      function getInitials(name) {
+        const clean = (name || 'Demo User').trim();
+        if (!clean) return 'DU';
+        const parts = clean.split(/\s+/).filter(Boolean);
+        return parts.length >= 2 ? `${parts[0][0]}${parts[1][0]}`.toUpperCase() : clean.slice(0, 2).toUpperCase();
+      }
+
+      function getUserProfile() {
+        const fallback = { name: 'Demo User', email: 'demo@mahokshahvata.ai', image: '' };
+        const stored = JSON.parse(localStorage.getItem('mahokshahvata_user') || 'null');
+        const user = stored || fallback;
+        const finalUser = { name: user.name || fallback.name, email: user.email || fallback.email, image: user.image || '' };
+        localStorage.setItem('mahokshahvata_user', JSON.stringify(finalUser));
+        return finalUser;
+      }
+
+      function renderProfile() {
+        const user = getUserProfile();
+        const avatarText = getInitials(user.name);
+        const buttonAvatar = document.querySelector('#profileButton .profile-avatar');
+        const profileLabel = document.getElementById('profileLabel');
+        const profileMenuAvatar = document.getElementById('profileMenuAvatar');
+        const profileName = document.getElementById('profileName');
+        const profileEmail = document.getElementById('profileEmail');
+
+        if (buttonAvatar) buttonAvatar.textContent = avatarText;
+        if (profileLabel) profileLabel.textContent = user.name.split(' ')[0] || 'Profile';
+        if (profileMenuAvatar) profileMenuAvatar.textContent = avatarText;
+        if (profileName) profileName.textContent = user.name;
+        if (profileEmail) profileEmail.textContent = user.email;
+      }
+
+      function setTheme(nextTheme) {
+        document.body.setAttribute('data-theme', nextTheme);
+        localStorage.setItem('theme', nextTheme);
+        const toggle = document.getElementById('themeToggle');
+        if (toggle) toggle.textContent = nextTheme === 'dark' ? 'Light mode' : 'Dark mode';
+      }
+
+      function applyTheme() {
+        const saved = localStorage.getItem('theme');
+        const prefersLight = window.matchMedia('(prefers-color-scheme: light)').matches;
+        const nextTheme = saved || (prefersLight ? 'light' : 'dark');
+        setTheme(nextTheme);
+      }
+
+      document.getElementById('themeToggle').addEventListener('click', () => {
+        const currentTheme = document.body.dataset.theme === 'light' ? 'light' : 'dark';
+        setTheme(currentTheme === 'light' ? 'dark' : 'light');
+      });
+
+      document.getElementById('profileButton').addEventListener('click', () => {
+        document.getElementById('profileMenu').classList.toggle('open');
+      });
+
+      document.getElementById('logoutButton').addEventListener('click', () => {
+        localStorage.setItem('mahokshahvata_user', JSON.stringify({
+          name: 'Demo User',
+          email: 'demo@mahokshahvata.ai',
+          image: '',
+        }));
+        renderProfile();
+        document.getElementById('profileMenu').classList.remove('open');
+      });
+
+      document.addEventListener('click', (event) => {
+        const profileButton = document.getElementById('profileButton');
+        const profileMenu = document.getElementById('profileMenu');
+        if (profileButton && profileMenu && !profileButton.contains(event.target) && !profileMenu.contains(event.target)) {
+          profileMenu.classList.remove('open');
+        }
+      });
+
+      document.getElementById('tradeHistoryBtn').addEventListener('click', async () => {
+        if (!currentPortfolioId) {
+          historyOutput.textContent = 'Create a portfolio first.';
+          return;
+        }
+        const data = await apiFetch(`/portfolio/${currentPortfolioId}/trade-history`);
+        historyOutput.textContent = JSON.stringify(data, null, 2);
+      });
+
+      document.addEventListener('click', (event) => {
+        const chip = event.target.closest('.chip');
+        if (chip) {
+          activeHoldingsFilter = chip.dataset.filter || 'all';
+          renderHoldingsTable(activePortfolioHoldings);
+        }
+
+        const sectorPill = event.target.closest('.sector-pill');
+        if (sectorPill) {
+          activeHoldingsFilter = sectorPill.dataset.sector || 'all';
+          renderHoldingsTable(activePortfolioHoldings);
+        }
+      });
+
+      renderProfile();
+      applyTheme();
+      initializePortfolio();
+    </script>
+  </body>
+</html>

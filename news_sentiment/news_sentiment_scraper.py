@@ -39,10 +39,11 @@ import json
 import os
 import re
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import feedparser
+import requests
 
 try:
     from anthropic import Anthropic
@@ -55,13 +56,18 @@ except ImportError:
 
 RSS_FEEDS = {
     "Yahoo Finance": "https://finance.yahoo.com/news/rssindex",
-    "CNBC Markets": "https://www.cnbc.com/id/20910258/device/rss/rss.html",
+    "CNBC Markets": [
+        "https://www.cnbc.com/id/100003114/device/rss/rss.html",
+        "https://www.cnbc.com/id/20910258/device/rss/rss.html",
+    ],
     "MarketWatch Top Stories": "https://www.marketwatch.com/rss/topstories",
     "Investing.com Stock News": "https://www.investing.com/rss/news_25.rss",
 }
 
 TICKER_CSV = Path(__file__).parent / "company_tickers.csv"
 OUTPUT_CSV = Path(__file__).parent / "news_sentiment_output.csv"
+HISTORY_FILE = Path(__file__).parent / "sentiment_history.json"
+HISTORY_RETENTION_DAYS = 5
 
 # Macro/geopolitical themes that move whole sectors even when no specific
 # company is named in the headline — e.g. "Oil prices surge amid Russia-
@@ -234,23 +240,95 @@ def classify_all_local(articles):
 # Pipeline
 # ---------------------------------------------------------------------------
 
+def _coerce_feed_urls(feed_entry):
+    if isinstance(feed_entry, str):
+        return [feed_entry]
+    if isinstance(feed_entry, (list, tuple)):
+        return [url for url in feed_entry if url]
+    return []
+
+
+def _get_entry_timestamp(entry):
+    raw_value = entry.get("published") or entry.get("updated") or entry.get("pubDate") or ""
+    if not raw_value:
+        return None
+    try:
+        return datetime.strptime(raw_value, "%a, %d %b %Y %H:%M:%S GMT").replace(tzinfo=timezone.utc)
+    except ValueError:
+        pass
+    try:
+        return datetime.fromisoformat(raw_value.replace("Z", "+00:00"))
+    except ValueError:
+        pass
+    try:
+        parsed = datetime.strptime(raw_value, "%Y-%m-%d %H:%M:%S")
+        return parsed.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
 def fetch_articles():
     articles = []
-    for source, url in RSS_FEEDS.items():
-        try:
-            feed = feedparser.parse(url)
-        except Exception as e:
-            print(f"[warn] could not fetch {source}: {e}", file=sys.stderr)
+    for source, feed_urls in RSS_FEEDS.items():
+        urls = _coerce_feed_urls(feed_urls)
+        if not urls:
             continue
-        for entry in feed.entries:
+
+        best_entries = []
+        best_timestamp = None
+
+        for url in urls:
+            try:
+                response = requests.get(
+                    url,
+                    timeout=20,
+                    headers={"User-Agent": "Mozilla/5.0"},
+                    allow_redirects=True,
+                )
+                response.raise_for_status()
+                feed = feedparser.parse(response.content)
+                entries = list(getattr(feed, "entries", []))
+            except Exception as e:
+                print(f"[warn] could not fetch {source} from {url}: {e}", file=sys.stderr)
+                continue
+
+            if not entries:
+                continue
+
+            feed_latest = max(
+                (_get_entry_timestamp(entry) for entry in entries if _get_entry_timestamp(entry) is not None),
+                default=None,
+            )
+            if feed_latest is None or best_timestamp is not None and feed_latest <= best_timestamp:
+                continue
+
+            best_entries = entries
+            best_timestamp = feed_latest
+
+        for entry in best_entries:
+            title = (entry.get("title") or "").strip()
+            summary = (entry.get("summary") or entry.get("description") or "").strip()
+            link = (entry.get("link") or entry.get("url") or "").strip()
+            published = entry.get("published") or entry.get("updated") or entry.get("pubDate") or ""
+            if not title and not summary:
+                continue
             articles.append({
                 "source": source,
-                "title": entry.get("title", ""),
-                "summary": entry.get("summary", ""),
-                "link": entry.get("link", ""),
-                "published": entry.get("published", ""),
+                "title": title,
+                "summary": summary,
+                "link": link,
+                "published": published,
             })
-    return articles
+
+    deduped = []
+    seen = set()
+    for article in sorted(articles, key=lambda a: (a.get("published") or ""), reverse=True):
+        key = (article.get("title") or "", article.get("link") or "")
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(article)
+    return deduped
 
 
 def match_tickers(articles, company_map):
@@ -353,6 +431,183 @@ def print_report(results, summary, sector_summary=None):
             print(f"{sector:22}{s['count']:<10}{s['pos']:<6}{s['neu']:<6}{s['neg']:<6}")
 
 
+def build_demo_sentiment_results():
+    """Fallback data used when the live RSS feed is empty or irrelevant.
+    This keeps the app feeling alive and avoids a blank sentiment section during
+    quiet news cycles."""
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return [
+        {
+            "source": "Demo Feed",
+            "title": "AI leaders and cloud infrastructure demand continue to support large-cap tech momentum.",
+            "summary": "Analysts remain constructive on AI infrastructure, software monetization, and enterprise renewal trends.",
+            "link": "https://example.com/demo/ai-tech-momentum",
+            "published": now,
+            "match_type": "company",
+            "tickers": "MSFT, NVDA",
+            "companies": "Microsoft, NVIDIA",
+            "sectors_affected": "",
+            "themes": "",
+            "sentiment": "Positive",
+            "confidence": 0.82,
+            "reasoning": "Demo fallback: live feed was empty or unrelated.",
+        },
+        {
+            "source": "Demo Feed",
+            "title": "Broad market optimism stays elevated as rate expectations remain stable.",
+            "summary": "Investors price in resilient growth and a relatively stable macro backdrop.",
+            "link": "https://example.com/demo/rates-stability",
+            "published": now,
+            "match_type": "macro",
+            "tickers": "",
+            "companies": "",
+            "sectors_affected": "Financials, Technology",
+            "themes": "rate cut, inflation",
+            "sentiment": "Neutral",
+            "confidence": 0.7,
+            "reasoning": "Demo fallback: macro sentiment remained stable while live news was sparse.",
+        },
+        {
+            "source": "Demo Feed",
+            "title": "Energy and industrial names are tracking commodity and supply-chain headlines closely.",
+            "summary": "Commodity-sensitive sectors remain in focus as investors monitor energy and global trade conditions.",
+            "link": "https://example.com/demo/energy-industrials",
+            "published": now,
+            "match_type": "macro",
+            "tickers": "",
+            "companies": "",
+            "sectors_affected": "Energy, Industrials",
+            "themes": "oil price, supply chain",
+            "sentiment": "Positive",
+            "confidence": 0.71,
+            "reasoning": "Demo fallback: sector-level sentiment placeholder.",
+        },
+    ]
+
+
+def collect_sentiment_results():
+    """Return the latest relevant sentiment data from the live RSS feed.
+
+    The app should prefer real RSS headlines whenever they match tracked names or
+    macro themes. A curated demo dataset is only used as a last-resort fallback
+    when the feed is empty, disconnected, or unrelated to tracked securities.
+    """
+    client = None
+    if SENTIMENT_BACKEND == "claude":
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        if api_key:
+            client = Anthropic(api_key=api_key)
+
+    company_map = load_company_map()
+    articles = fetch_articles()
+    matched = match_tickers(articles, company_map)
+
+    if not matched:
+        demo_results = build_demo_sentiment_results()
+        history = save_history(demo_results)
+        return {
+            "results": demo_results,
+            "summary": summarize_by_ticker(demo_results),
+            "sector_summary": summarize_by_sector(demo_results),
+            "fallback": True,
+            "history": history,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    if SENTIMENT_BACKEND == "claude" and client is None:
+        # Real headlines are available, but the LLM key is missing. In that case
+        # we still return the live matches with a lightweight heuristic sentiment
+        # instead of silently replacing them with stale demo data.
+        results = []
+        for article in matched:
+            title = f"{article.get('title', '')} {article.get('summary', '')}".strip()
+            if not title:
+                sentiment = "Neutral"
+                confidence = 0.0
+                reasoning = "No headline text available"
+            else:
+                lower_title = title.lower()
+                if any(token in lower_title for token in ["rise", "rally", "beats", "surge", "upgrade", "growth", "strong", "higher", "gain"]):
+                    sentiment = "Positive"
+                elif any(token in lower_title for token in ["drop", "fall", "miss", "slump", "cut", "decline", "weak", "lower", "loss"]):
+                    sentiment = "Negative"
+                else:
+                    sentiment = "Neutral"
+                confidence = 0.65
+                reasoning = "Heuristic sentiment fallback (no Anthropic API key)"
+            results.append({**article, "sentiment": sentiment, "confidence": confidence, "reasoning": reasoning})
+        summary = summarize_by_ticker(results)
+        sector_summary = summarize_by_sector(results)
+        history = save_history(results)
+        return {
+            "results": results,
+            "summary": summary,
+            "sector_summary": sector_summary,
+            "fallback": False,
+            "history": history,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    sentiments = classify_all(client, matched)
+    results = []
+    for article, sentiment in zip(matched, sentiments):
+        results.append({**article, **sentiment})
+
+    summary = summarize_by_ticker(results)
+    sector_summary = summarize_by_sector(results)
+    history = save_history(results)
+    return {
+        "results": results,
+        "summary": summary,
+        "sector_summary": sector_summary,
+        "fallback": False,
+        "history": history,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def load_history_store():
+    if not HISTORY_FILE.exists():
+        return []
+    try:
+        with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return []
+    if not isinstance(data, list):
+        return []
+    return data
+
+
+def prune_history(history):
+    cutoff = datetime.now(timezone.utc) - timedelta(days=HISTORY_RETENTION_DAYS)
+    kept = []
+    for item in history:
+        try:
+            fetched_at = item.get("fetched_at")
+            if not fetched_at:
+                continue
+            dt = datetime.fromisoformat(fetched_at.replace("Z", "+00:00"))
+            if dt >= cutoff:
+                kept.append(item)
+        except Exception:
+            continue
+    return kept
+
+
+def save_history(results):
+    history = load_history_store()
+    entry = {
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+        "results": results,
+    }
+    history.append(entry)
+    history = prune_history(history)
+    with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+        json.dump(history, f, indent=2)
+    return history
+
+
 def save_csv(results):
     if not results:
         return
@@ -367,31 +622,14 @@ def save_csv(results):
 
 
 def main():
-    client = None
-    if SENTIMENT_BACKEND == "claude":
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
-        if not api_key:
-            print("[error] Set ANTHROPIC_API_KEY in your environment before running (or set SENTIMENT_BACKEND=local).", file=sys.stderr)
-            sys.exit(1)
-        client = Anthropic(api_key=api_key)
+    data = collect_sentiment_results()
+    results = data["results"]
+    summary = data["summary"]
+    sector_summary = data["sector_summary"]
 
-    company_map = load_company_map()
+    if data["fallback"]:
+        print("[info] Live news feed was empty or unrelated; using demo sentiment fallback.")
 
-    articles = fetch_articles()
-    matched = match_tickers(articles, company_map)
-
-    if not matched:
-        print_report([], {})
-        return
-
-    sentiments = classify_all(client, matched)
-
-    results = []
-    for article, sentiment in zip(matched, sentiments):
-        results.append({**article, **sentiment})
-
-    summary = summarize_by_ticker(results)
-    sector_summary = summarize_by_sector(results)
     print_report(results, summary, sector_summary)
     save_csv(results)
 

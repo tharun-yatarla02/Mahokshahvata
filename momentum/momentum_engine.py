@@ -39,6 +39,29 @@ DEFAULT_UNIVERSE = [
     "WMT", "COST", "HD", "DIS",
 ]
 
+DEFAULT_SECTOR_LOOKUP = {
+    "AAPL": "Technology",
+    "MSFT": "Technology",
+    "GOOGL": "Communication Services",
+    "AMZN": "Consumer Discretionary",
+    "META": "Communication Services",
+    "TSLA": "Automotive",
+    "NVDA": "Technology",
+    "AVGO": "Technology",
+    "PLTR": "Technology",
+    "CRWD": "Technology",
+    "LLY": "Healthcare",
+    "ISRG": "Healthcare",
+    "XOM": "Energy",
+    "CVX": "Energy",
+    "JPM": "Financials",
+    "BAC": "Financials",
+    "WMT": "Consumer Staples",
+    "COST": "Consumer Staples",
+    "HD": "Consumer Discretionary",
+    "DIS": "Communication Services",
+}
+
 
 def fetch_price_history(tickers, lookback_days=90):
     """Returns a DataFrame of adjusted close prices, tickers as columns."""
@@ -83,7 +106,7 @@ def rank_momentum(tickers, sector_lookup=None, lookback_days=90, include_benchma
 
     Returns a list of dicts, ranked best momentum first.
     """
-    sector_lookup = sector_lookup or {}
+    sector_lookup = sector_lookup or DEFAULT_SECTOR_LOOKUP
     all_tickers = list(tickers)
     if include_benchmark:
         all_tickers = all_tickers + [BENCHMARK_TICKER]

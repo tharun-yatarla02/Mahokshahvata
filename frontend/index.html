@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mahokshahvata | Overview</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <nav class="navbar">
+      <div class="nav-inner">
+        <div class="brand">
+          <div class="brand-mark">M</div>
+          <span>Mahokshahvata</span>
+        </div>
+        <div class="nav-links">
+          <a href="/" class="active">Overview</a>
+          <a href="/market.html">Market</a>
+          <a href="/portfolio.html">Portfolio</a>
+          <a href="/sentiment.html">Sentiment</a>
+          <a href="/options.html">Options</a>
+        </div>
+        <div class="nav-actions">
+          <button id="themeToggle" class="theme-toggle" type="button" aria-label="Switch color mode">Light mode</button>
+          <div style="position: relative;">
+            <button id="profileButton" class="profile-button" type="button" aria-label="Open profile">
+              <span class="profile-avatar">U</span>
+              <span id="profileLabel">Profile</span>
+            </button>
+            <div id="profileMenu" class="profile-menu" aria-live="polite">
+              <div class="profile-card">
+                <span id="profileMenuAvatar" class="profile-avatar">U</span>
+                <div>
+                  <p id="profileName" class="profile-name">Demo User</p>
+                  <p id="profileEmail" class="profile-email">demo@mahokshahvata.ai</p>
+                </div>
+              </div>
+              <div class="profile-menu-actions">
+                <button type="button" class="secondary">Account</button>
+                <button id="logoutButton" type="button" class="logout-btn">Logout</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </nav>
+
+    <div class="page">
+      <div class="hero premium-hero">
+        <div class="hero-top hero-top-extended">
+          <div class="hero-copy">
+            <span class="eyebrow">Portfolio overview</span>
+            <h1>Investment Dashboard</h1>
+            <p>AI-assisted market monitoring, sentiment scanning, and paper-trading workflow in one premium command center.</p>
+          </div>
+          <div class="hero-metric-box">
+            <span>Signal quality</span>
+            <strong>Strong</strong>
+            <small>Adaptive opportunity scan</small>
+          </div>
+        </div>
+        <div class="hero-bottom-row">
+          <div class="hero-pill-row">
+            <button class="sector-pill active" type="button">AI</button>
+            <button class="sector-pill" type="button">Tech</button>
+            <button class="sector-pill" type="button">Health</button>
+            <button class="sector-pill" type="button">Energy</button>
+          </div>
+          <span class="badge">Demo Live</span>
+        </div>
+      </div>
+
+      <div class="stats">
+        <div class="stat accent-card">
+          <div class="stat-label">Account Value</div>
+          <div class="stat-value" id="overviewAccountValue">$0.00</div>
+          <div class="stat-sub" id="overviewAccountTrend">No portfolio loaded</div>
+        </div>
+        <div class="stat success-card">
+          <div class="stat-label">Portfolio P/L</div>
+          <div class="stat-value" id="overviewDailyPnL">+$0.00</div>
+          <div class="stat-sub" id="overviewPnlSub">0 positions</div>
+        </div>
+        <div class="stat warning-card">
+          <div class="stat-label">Risk Level</div>
+          <div class="stat-value" id="overviewRiskValue">--</div>
+          <div class="stat-sub" id="overviewRiskSub">No portfolio loaded</div>
+        </div>
+        <div class="stat neutral-card">
+          <div class="stat-label">Holdings</div>
+          <div class="stat-value" id="overviewSignals">0</div>
+          <div class="stat-sub" id="overviewSignalsSub">No holdings</div>
+        </div>
+      </div>
+
+      <div class="grid">
+        <div class="card premium-card">
+          <h2>Top Movers</h2>
+          <ul class="list">
+            <li><span>CRWD</span> <span class="pos">+8.64%</span></li>
+            <li><span>PLTR</span> <span class="pos">+4.83%</span></li>
+            <li><span>MSFT</span> <span class="pos">+2.21%</span></li>
+            <li><span>NVDA</span> <span class="neg">-4.35%</span></li>
+          </ul>
+        </div>
+
+        <div class="card premium-card">
+          <h2>AI Market Signal</h2>
+          <p>Growth momentum remains strongest in technology and AI infrastructure names.</p>
+          <ul class="list">
+            <li><span class="tag">Technology</span> <span class="pos">Bullish</span></li>
+            <li><span class="tag">Healthcare</span> <span class="pos">Stable</span></li>
+            <li><span class="tag">Energy</span> <span class="neg">Cautious</span></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="grid" style="margin-top: 22px;">
+        <div class="card premium-card">
+          <h2>Key Workflow</h2>
+          <div class="button-row">
+            <a href="/market.html"><button>Open Market</button></a>
+            <a href="/portfolio.html"><button class="secondary">Open Portfolio</button></a>
+            <a href="/sentiment.html"><button class="secondary">Sentiment</button></a>
+          </div>
+        </div>
+
+        <div class="card premium-card">
+          <h2>Quick Notes</h2>
+          <p>Use the market page for filtering and ranking, the portfolio page for holdings, and the sentiment page for headline and sector outlook.</p>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      function getInitials(name) {
+        const clean = (name || 'Demo User').trim();
+        if (!clean) return 'DU';
+        const parts = clean.split(/\s+/).filter(Boolean);
+        return parts.length >= 2 ? `${parts[0][0]}${parts[1][0]}`.toUpperCase() : clean.slice(0, 2).toUpperCase();
+      }
+
+      function getUserProfile() {
+        const fallback = { name: 'Demo User', email: 'demo@mahokshahvata.ai', image: '' };
+        const stored = JSON.parse(localStorage.getItem('mahokshahvata_user') || 'null');
+        const user = stored || fallback;
+        const finalUser = {
+          name: user.name || fallback.name,
+          email: user.email || fallback.email,
+          image: user.image || '',
+        };
+        localStorage.setItem('mahokshahvata_user', JSON.stringify(finalUser));
+        return finalUser;
+      }
+
+      function renderProfile() {
+        const user = getUserProfile();
+        const avatarText = getInitials(user.name);
+        const profileButton = document.getElementById('profileButton');
+        const profileLabel = document.getElementById('profileLabel');
+        const profileMenuAvatar = document.getElementById('profileMenuAvatar');
+        const profileName = document.getElementById('profileName');
+        const profileEmail = document.getElementById('profileEmail');
+
+        if (profileButton) {
+          const buttonAvatar = profileButton.querySelector('.profile-avatar');
+          if (buttonAvatar) buttonAvatar.textContent = avatarText;
+          if (profileLabel) profileLabel.textContent = user.name.split(' ')[0] || 'Profile';
+        }
+
+        if (profileMenuAvatar) profileMenuAvatar.textContent = avatarText;
+        if (profileName) profileName.textContent = user.name;
+        if (profileEmail) profileEmail.textContent = user.email;
+      }
+
+      function formatCurrency(value) {
+        const amount = Number(value || 0);
+        return new Intl.NumberFormat('en-US', {
+          style: 'currency',
+          currency: 'USD',
+          maximumFractionDigits: 2,
+        }).format(amount);
+      }
+
+      function formatSignedCurrency(value) {
+        const amount = Number(value || 0);
+        return `${amount >= 0 ? '+' : '-'}${formatCurrency(Math.abs(amount))}`;
+      }
+
+      function formatPercent(value) {
+        const amount = Number(value || 0);
+        return `${amount >= 0 ? '+' : ''}${amount.toFixed(2)}%`;
+      }
+
+      function getRiskLabel(value) {
+        if (value < 30) return 'Conservative';
+        if (value < 60) return 'Balanced';
+        return 'Aggressive';
+      }
+
+      async function apiFetch(path, options = {}) {
+        const res = await fetch(`${window.location.origin}${path}`, {
+          ...options,
+          headers: {
+            'Authorization': 'Bearer demo-token',
+            'Content-Type': 'application/json',
+            ...(options.headers || {}),
+          },
+        });
+        const text = await res.text();
+        let payload = null;
+        try { payload = text ? JSON.parse(text) : null; } catch { payload = text; }
+        if (!res.ok) throw new Error(payload?.detail || payload || `HTTP ${res.status}`);
+        return payload;
+      }
+
+      function renderOverviewData(summary = {}) {
+        const cashBalance = Number(summary.remaining_balance_to_invest ?? summary.cash_balance ?? 0);
+        const totalInvested = Number(summary.total_invested ?? 0);
+        const holdingsValue = Number(summary.holdings_value ?? 0);
+        const latestSnapshot = summary.latest || {};
+        const totalPortfolioValue = Number(latestSnapshot.total_value ?? (holdingsValue + cashBalance) ?? 0);
+        const totalContributedCapital = totalInvested + cashBalance;
+        const pnl = Number(latestSnapshot.total_pl ?? (totalPortfolioValue - totalContributedCapital) ?? 0);
+        const netReturn = Number(latestSnapshot.total_pl_pct ?? (totalContributedCapital > 0 ? (pnl / totalContributedCapital) * 100 : 0) ?? 0);
+        const stockCount = Number(summary.stock_count ?? 0);
+        const sectorCount = Number(summary.sector_count ?? 0);
+        const riskScore = Math.min(100, Math.max(0, Math.round((totalInvested / Math.max(totalPortfolioValue, 1)) * 100)));
+
+        const accountValue = document.getElementById('overviewAccountValue');
+        const accountTrend = document.getElementById('overviewAccountTrend');
+        const dailyPnL = document.getElementById('overviewDailyPnL');
+        const pnlSub = document.getElementById('overviewPnlSub');
+        const riskValue = document.getElementById('overviewRiskValue');
+        const riskSub = document.getElementById('overviewRiskSub');
+        const signals = document.getElementById('overviewSignals');
+        const signalsSub = document.getElementById('overviewSignalsSub');
+
+        if (accountValue) accountValue.textContent = formatCurrency(totalPortfolioValue);
+        if (accountTrend) accountTrend.textContent = totalPortfolioValue > 0 ? `${formatPercent(netReturn)} return` : 'No portfolio loaded';
+        if (dailyPnL) {
+          dailyPnL.textContent = `${pnl >= 0 ? '+' : '-'}${formatCurrency(Math.abs(pnl))}`;
+          dailyPnL.classList.toggle('positive', pnl >= 0);
+          dailyPnL.classList.toggle('negative', pnl < 0);
+        }
+        if (pnlSub) pnlSub.textContent = stockCount ? `${stockCount} positions tracked` : 'No holdings';
+        if (riskValue) riskValue.textContent = totalPortfolioValue > 0 ? getRiskLabel(riskScore) : '--';
+        if (riskSub) riskSub.textContent = totalPortfolioValue > 0 ? `${sectorCount} sectors • ${stockCount} stocks` : 'No portfolio loaded';
+        if (signals) signals.textContent = String(stockCount);
+        if (signalsSub) signalsSub.textContent = stockCount ? `${stockCount} holdings open` : 'No holdings';
+      }
+
+      async function refreshOverviewData() {
+        try {
+          const portfolioList = await apiFetch('/portfolio');
+          const portfolios = Array.isArray(portfolioList?.portfolios) ? portfolioList.portfolios : [];
+          if (!portfolios.length) {
+            renderOverviewData({});
+            return;
+          }
+          const summary = await apiFetch(`/portfolio/${portfolios[0].id}`);
+          renderOverviewData(summary);
+        } catch (error) {
+          renderOverviewData({});
+        }
+      }
+
+      function setTheme(nextTheme) {
+        document.body.setAttribute('data-theme', nextTheme);
+        localStorage.setItem('theme', nextTheme);
+        const toggle = document.getElementById('themeToggle');
+        if (toggle) {
+          toggle.textContent = nextTheme === 'dark' ? 'Light mode' : 'Dark mode';
+        }
+      }
+
+      function applyTheme() {
+        const saved = localStorage.getItem('theme');
+        const prefersLight = window.matchMedia('(prefers-color-scheme: light)').matches;
+        const nextTheme = saved || (prefersLight ? 'light' : 'dark');
+        setTheme(nextTheme);
+      }
+
+      const themeToggle = document.getElementById('themeToggle');
+      if (themeToggle) {
+        themeToggle.addEventListener('click', () => {
+          const currentTheme = document.body.dataset.theme === 'light' ? 'light' : 'dark';
+          setTheme(currentTheme === 'light' ? 'dark' : 'light');
+        });
+      }
+
+      const profileButton = document.getElementById('profileButton');
+      const profileMenu = document.getElementById('profileMenu');
+      if (profileButton) {
+        profileButton.addEventListener('click', () => {
+          if (profileMenu) profileMenu.classList.toggle('open');
+        });
+      }
+
+      const logoutButton = document.getElementById('logoutButton');
+      if (logoutButton) {
+        logoutButton.addEventListener('click', () => {
+          localStorage.setItem('mahokshahvata_user', JSON.stringify({
+            name: 'Demo User',
+            email: 'demo@mahokshahvata.ai',
+            image: '',
+          }));
+          renderProfile();
+          if (profileMenu) profileMenu.classList.remove('open');
+        });
+      }
+
+      document.addEventListener('click', (event) => {
+        if (profileButton && profileMenu && !profileButton.contains(event.target) && !profileMenu.contains(event.target)) {
+          profileMenu.classList.remove('open');
+        }
+      });
+
+      renderProfile();
+      applyTheme();
+      refreshOverviewData();
+    </script>
+  </body>
+</html>

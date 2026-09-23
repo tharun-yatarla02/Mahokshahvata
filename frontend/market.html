@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mahokshahvata | Market</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <nav class="navbar">
+      <div class="nav-inner">
+        <div class="brand">
+          <div class="brand-mark">M</div>
+          <span>Mahokshahvata</span>
+        </div>
+        <div class="nav-links">
+          <a href="/">Overview</a>
+          <a href="/market.html" class="active">Market</a>
+          <a href="/portfolio.html">Portfolio</a>
+          <a href="/sentiment.html">Sentiment</a>
+          <a href="/options.html">Options</a>
+        </div>
+        <div class="nav-actions">
+          <button id="themeToggle" class="theme-toggle" type="button" aria-label="Switch color mode">Light mode</button>
+          <div style="position: relative;">
+            <button id="profileButton" class="profile-button" type="button" aria-label="Open profile">
+              <span class="profile-avatar">U</span>
+              <span id="profileLabel">Profile</span>
+            </button>
+            <div id="profileMenu" class="profile-menu" aria-live="polite">
+              <div class="profile-card">
+                <span id="profileMenuAvatar" class="profile-avatar">U</span>
+                <div>
+                  <p id="profileName" class="profile-name">Demo User</p>
+                  <p id="profileEmail" class="profile-email">demo@mahokshahvata.ai</p>
+                </div>
+              </div>
+              <div class="profile-menu-actions">
+                <button type="button" class="secondary">Account</button>
+                <button id="logoutButton" type="button" class="logout-btn">Logout</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </nav>
+
+    <div class="page">
+      <div class="hero premium-hero">
+        <div class="hero-top hero-top-extended">
+          <div class="hero-copy">
+            <span class="eyebrow">Market monitor</span>
+            <h1>Live Momentum Desk</h1>
+            <p>Track market breadth, sector rotation, and signal quality across the most relevant equities in one premium view.</p>
+          </div>
+          <div class="hero-metric-box">
+            <span>Market state</span>
+            <strong>Active</strong>
+            <small>Scanning in real time</small>
+          </div>
+        </div>
+        <div class="hero-bottom-row">
+          <div class="hero-pill-row">
+            <button class="sector-pill active" type="button" data-sector="">All</button>
+            <button class="sector-pill" type="button" data-sector="AI">AI</button>
+            <button class="sector-pill" type="button" data-sector="Growth">Growth</button>
+            <button class="sector-pill" type="button" data-sector="Finance">Finance</button>
+            <button class="sector-pill" type="button" data-sector="Energy">Energy</button>
+          </div>
+          <span class="badge">Live</span>
+        </div>
+      </div>
+
+      <div class="stats">
+        <div class="stat accent-card">
+          <div class="stat-label">Live Signals</div>
+          <div class="stat-value" id="signalCount">0</div>
+          <div class="stat-sub">Current market scan</div>
+        </div>
+        <div class="stat success-card">
+          <div class="stat-label">Top Sector</div>
+          <div class="stat-value" id="topSector">-</div>
+          <div class="stat-sub">Dominant setup</div>
+        </div>
+        <div class="stat neutral-card">
+          <div class="stat-label">Market Mode</div>
+          <div class="stat-value">Live</div>
+          <div class="stat-sub">Continuous refresh</div>
+        </div>
+      </div>
+
+      <div class="card premium-card">
+        <div class="status" id="status">Loading market data...</div>
+        <div style="display:grid; grid-template-columns: 1.5fr 1fr; gap:10px; align-items:end;">
+          <div>
+            <label class="label" for="momentumSearch">Search ticker</label>
+            <input id="momentumSearch" type="text" placeholder="Search ticker or sector" />
+          </div>
+          <div>
+            <label class="label" for="sectorFilter">Department</label>
+            <select id="sectorFilter">
+              <option value="">All sectors</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="button-row">
+          <button id="loadMomentumBtn">Reload market</button>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Ticker</th>
+                <th>Department</th>
+                <th>Price</th>
+                <th>Momentum</th>
+                <th>Relative</th>
+              </tr>
+            </thead>
+            <tbody id="marketTableBody">
+              <tr><td colspan="5">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const API_BASE = window.location.origin;
+      const statusEl = document.getElementById('status');
+      const marketTableBody = document.getElementById('marketTableBody');
+      const sectorFilter = document.getElementById('sectorFilter');
+      const momentumSearch = document.getElementById('momentumSearch');
+      const signalCount = document.getElementById('signalCount');
+      const topSector = document.getElementById('topSector');
+
+      function setStatus(message, kind = '') {
+        statusEl.textContent = message;
+        statusEl.className = 'status';
+        if (kind) statusEl.classList.add(kind);
+      }
+
+      function applySectorPillSelection(selectedSector) {
+        const buttons = document.querySelectorAll('.sector-pill');
+        buttons.forEach((button) => {
+          const sector = button.dataset.sector || '';
+          const isActive = selectedSector === sector || (!selectedSector && sector === '');
+          button.classList.toggle('active', isActive);
+        });
+      }
+
+      async function apiFetch(path, options = {}) {
+        const res = await fetch(`${API_BASE}${path}`, {
+          ...options,
+          headers: { 'Authorization': 'Bearer demo-token', 'Content-Type': 'application/json', ...(options.headers || {}) },
+        });
+        const text = await res.text();
+        let payload = null;
+        try { payload = text ? JSON.parse(text) : null; } catch { payload = text; }
+        if (!res.ok) throw new Error(payload?.detail || payload || `HTTP ${res.status}`);
+        return payload;
+      }
+
+      function renderMarket(rows) {
+        if (!rows || rows.length === 0) {
+          marketTableBody.innerHTML = '<tr><td colspan="5">No stocks match the selected filters.</td></tr>';
+          signalCount.textContent = '0';
+          topSector.textContent = '-';
+          return;
+        }
+
+        const uniqueSectors = [...new Set(rows.map(item => item.sector || 'Unknown'))].sort();
+        const currentOptions = [...sectorFilter.options].map(option => option.value);
+        for (const sector of uniqueSectors) {
+          if (!currentOptions.includes(sector)) {
+            const option = document.createElement('option');
+            option.value = sector;
+            option.textContent = sector;
+            sectorFilter.appendChild(option);
+          }
+        }
+
+        const counts = {};
+        for (const row of rows) {
+          const sector = row.sector || 'Unknown';
+          counts[sector] = (counts[sector] || 0) + 1;
+        }
+        const dominant = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+        signalCount.textContent = String(rows.length);
+        topSector.textContent = dominant ? dominant[0] : '-';
+
+        marketTableBody.innerHTML = rows.map(row => `
+          <tr>
+            <td style="font-weight:700;">${row.ticker}</td>
+            <td>${row.sector || 'Unknown'}</td>
+            <td>$${Number(row.current_price || 0).toFixed(2)}</td>
+            <td style="color:${(row.momentum_pct || 0) >= 0 ? '#3ddc97' : '#ff6b6b'};">${Number(row.momentum_pct || 0).toFixed(2)}%</td>
+            <td>${Number(row.relative_strength || 0).toFixed(2)}%</td>
+          </tr>
+        `).join('');
+      }
+
+      async function loadMomentumData() {
+        try {
+          const sector = sectorFilter.value || '';
+          const q = momentumSearch.value.trim();
+          const params = new URLSearchParams({ top: '20' });
+          if (sector) params.set('sector', sector);
+          if (q) params.set('q', q);
+
+          const data = await apiFetch(`/momentum?${params.toString()}`);
+          renderMarket(data.results || []);
+          setStatus('Market data loaded successfully.', 'success');
+        } catch (err) {
+          marketTableBody.innerHTML = `<tr><td colspan="5" style="color:#ff6b6b;">${String(err)}</td></tr>`;
+          setStatus(err.message, 'error');
+        }
+      }
+
+      function getInitials(name) {
+        const clean = (name || 'Demo User').trim();
+        if (!clean) return 'DU';
+        const parts = clean.split(/\s+/).filter(Boolean);
+        return parts.length >= 2 ? `${parts[0][0]}${parts[1][0]}`.toUpperCase() : clean.slice(0, 2).toUpperCase();
+      }
+
+      function getUserProfile() {
+        const fallback = { name: 'Demo User', email: 'demo@mahokshahvata.ai', image: '' };
+        const stored = JSON.parse(localStorage.getItem('mahokshahvata_user') || 'null');
+        const user = stored || fallback;
+        const finalUser = { name: user.name || fallback.name, email: user.email || fallback.email, image: user.image || '' };
+        localStorage.setItem('mahokshahvata_user', JSON.stringify(finalUser));
+        return finalUser;
+      }
+
+      function renderProfile() {
+        const user = getUserProfile();
+        const avatarText = getInitials(user.name);
+        const buttonAvatar = document.querySelector('#profileButton .profile-avatar');
+        const profileLabel = document.getElementById('profileLabel');
+        const profileMenuAvatar = document.getElementById('profileMenuAvatar');
+        const profileName = document.getElementById('profileName');
+        const profileEmail = document.getElementById('profileEmail');
+
+        if (buttonAvatar) buttonAvatar.textContent = avatarText;
+        if (profileLabel) profileLabel.textContent = user.name.split(' ')[0] || 'Profile';
+        if (profileMenuAvatar) profileMenuAvatar.textContent = avatarText;
+        if (profileName) profileName.textContent = user.name;
+        if (profileEmail) profileEmail.textContent = user.email;
+      }
+
+      function setTheme(nextTheme) {
+        document.body.setAttribute('data-theme', nextTheme);
+        localStorage.setItem('theme', nextTheme);
+        const toggle = document.getElementById('themeToggle');
+        if (toggle) toggle.textContent = nextTheme === 'dark' ? 'Light mode' : 'Dark mode';
+      }
+
+      function applyTheme() {
+        const saved = localStorage.getItem('theme');
+        const prefersLight = window.matchMedia('(prefers-color-scheme: light)').matches;
+        const nextTheme = saved || (prefersLight ? 'light' : 'dark');
+        setTheme(nextTheme);
+      }
+
+      document.getElementById('themeToggle').addEventListener('click', () => {
+        const currentTheme = document.body.dataset.theme === 'light' ? 'light' : 'dark';
+        setTheme(currentTheme === 'light' ? 'dark' : 'light');
+      });
+
+      document.getElementById('profileButton').addEventListener('click', () => {
+        document.getElementById('profileMenu').classList.toggle('open');
+      });
+
+      document.getElementById('logoutButton').addEventListener('click', () => {
+        localStorage.setItem('mahokshahvata_user', JSON.stringify({
+          name: 'Demo User',
+          email: 'demo@mahokshahvata.ai',
+          image: '',
+        }));
+        renderProfile();
+        document.getElementById('profileMenu').classList.remove('open');
+      });
+
+      document.addEventListener('click', (event) => {
+        const profileButton = document.getElementById('profileButton');
+        const profileMenu = document.getElementById('profileMenu');
+        if (profileButton && profileMenu && !profileButton.contains(event.target) && !profileMenu.contains(event.target)) {
+          profileMenu.classList.remove('open');
+        }
+      });
+
+      document.getElementById('loadMomentumBtn').addEventListener('click', loadMomentumData);
+      sectorFilter.addEventListener('change', () => {
+        applySectorPillSelection(sectorFilter.value || '');
+        loadMomentumData();
+      });
+      momentumSearch.addEventListener('input', loadMomentumData);
+      document.querySelectorAll('.sector-pill').forEach((button) => {
+        button.addEventListener('click', () => {
+          const selectedSector = button.dataset.sector || '';
+          applySectorPillSelection(selectedSector);
+          if (selectedSector === '') {
+            sectorFilter.value = '';
+          } else {
+            const option = [...sectorFilter.options].find((entry) => entry.value.toLowerCase() === selectedSector.toLowerCase());
+            if (option) option.value = selectedSector;
+            sectorFilter.value = selectedSector;
+          }
+          loadMomentumData();
+        });
+      });
+      renderProfile();
+      applyTheme();
+      loadMomentumData();
+    </script>
+  </body>
+</html>
