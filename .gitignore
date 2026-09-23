@@ -19,10 +19,11 @@ firebase-adminsdk-*.json
 news_sentiment/model/sentiment_model/
 news_sentiment/model/training_checkpoints/
 
-# Scraper output
+# Scraper output (runtime data)
 news_sentiment/news_sentiment_output.csv
 
 # OS / editor cruft
 .DS_Store
 .vscode/
 .idea/
+news_sentiment/sentiment_history.json

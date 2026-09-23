@@ -115,8 +115,8 @@
       </div>
     </div>
 
+    <script src="/api.js"></script>
     <script>
-      const API_BASE = window.location.origin;
       const billingStatus = document.getElementById('billingStatus');
       const billingStatusBadge = document.getElementById('billingStatusBadge');
       const remainingCashValue = document.getElementById('remainingCashValue');
@@ -148,22 +148,6 @@
         billingStatus.textContent = message;
         billingStatus.className = 'status';
         if (kind) billingStatus.classList.add(kind);
-      }
-
-      async function apiFetch(path, options = {}) {
-        const res = await fetch(`${API_BASE}${path}`, {
-          ...options,
-          headers: {
-            Authorization: 'Bearer demo-token',
-            'Content-Type': 'application/json',
-            ...(options.headers || {}),
-          },
-        });
-        const text = await res.text();
-        let payload = null;
-        try { payload = text ? JSON.parse(text) : null; } catch { payload = text; }
-        if (!res.ok) throw new Error(payload?.detail || payload || `HTTP ${res.status}`);
-        return payload;
       }
 
       async function ensurePortfolio() {

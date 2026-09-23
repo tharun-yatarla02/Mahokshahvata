@@ -133,6 +133,7 @@
       </div>
     </div>
 
+    <script src="/api.js"></script>
     <script>
       function getInitials(name) {
         const clean = (name || 'Demo User').trim();
@@ -197,22 +198,6 @@
         if (value < 30) return 'Conservative';
         if (value < 60) return 'Balanced';
         return 'Aggressive';
-      }
-
-      async function apiFetch(path, options = {}) {
-        const res = await fetch(`${window.location.origin}${path}`, {
-          ...options,
-          headers: {
-            'Authorization': 'Bearer demo-token',
-            'Content-Type': 'application/json',
-            ...(options.headers || {}),
-          },
-        });
-        const text = await res.text();
-        let payload = null;
-        try { payload = text ? JSON.parse(text) : null; } catch { payload = text; }
-        if (!res.ok) throw new Error(payload?.detail || payload || `HTTP ${res.status}`);
-        return payload;
       }
 
       function renderOverviewData(summary = {}) {

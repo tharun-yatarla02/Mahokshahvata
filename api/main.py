@@ -31,7 +31,6 @@ Endpoints:
 """
 
 import os
-import sys
 import threading
 import time
 from pathlib import Path
@@ -41,18 +40,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-# Make sibling modules importable
-sys.path.append(str(Path(__file__).parent.parent / "momentum"))
-sys.path.append(str(Path(__file__).parent.parent / "paper_trading"))
-sys.path.append(str(Path(__file__).parent.parent / "politician_trades"))
-sys.path.append(str(Path(__file__).parent.parent / "auth"))
-sys.path.append(str(Path(__file__).parent.parent / "news_sentiment"))
-
-from momentum_engine import rank_momentum, latest_price, DEFAULT_UNIVERSE, DEFAULT_SECTOR_LOOKUP
-from paper_trading_engine import PaperTradingEngine, RiskRules
-from politician_trades import list_politicians, get_trades_for_politician, refresh_cache
-from firebase_auth import verify_firebase_token
-from news_sentiment_scraper import collect_sentiment_results
+from momentum.momentum_engine import rank_momentum, latest_price, DEFAULT_UNIVERSE, DEFAULT_SECTOR_LOOKUP
+from paper_trading.paper_trading_engine import PaperTradingEngine, RiskRules
+from politician_trades.politician_trades import list_politicians, get_trades_for_politician, refresh_cache
+from auth.firebase_auth import verify_firebase_token
+from news_sentiment.news_sentiment_scraper import collect_sentiment_results
 
 app = FastAPI(title="Mahokshahvata API", version="0.1.0")
 frontend_dir = Path(__file__).parent.parent / "frontend"
@@ -398,6 +390,14 @@ def styles_css():
     if css_path.exists():
         return FileResponse(css_path, media_type="text/css", headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"})
     raise HTTPException(status_code=404, detail="Stylesheet not found")
+
+
+@app.get("/api.js")
+def api_js():
+    js_path = frontend_dir / "api.js"
+    if js_path.exists():
+        return FileResponse(js_path, media_type="text/javascript", headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"})
+    raise HTTPException(status_code=404, detail="Script not found")
 
 
 @app.get("/health")

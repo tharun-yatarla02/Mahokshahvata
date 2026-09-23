@@ -1,4 +1,12 @@
+import pytest
+
 import news_sentiment.news_sentiment_scraper as scraper
+
+
+@pytest.fixture(autouse=True)
+def isolated_history(tmp_path, monkeypatch):
+    """Keep tests from writing to the real sentiment_history.json."""
+    monkeypatch.setattr(scraper, "HISTORY_FILE", tmp_path / "sentiment_history.json")
 
 
 def test_collect_sentiment_results_uses_live_feed_when_matches_exist(monkeypatch):

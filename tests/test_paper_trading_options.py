@@ -205,3 +205,16 @@ def test_legacy_database_allows_stock_and_option_on_same_ticker(tmp_path):
     assert sorted(h["instrument_type"] for h in holdings if h["ticker"] == "AAPL") == ["OPTION", "STOCK"]
     stock = next(h for h in holdings if h["instrument_type"] == "STOCK")
     assert stock["quantity"] == 2
+
+
+def test_cash_stays_exact_to_the_cent_after_many_trades(tmp_path):
+    engine = PaperTradingEngine(str(tmp_path / "cents.db"))
+    user = engine.get_or_create_user("u1")
+    pid = engine.create_portfolio(user, "Cents", 100)
+
+    for _ in range(3):
+        engine.trade_stock(pid, user, "AAPL", 1, 33.33)  # 3 x 33.33 = 99.99 exactly
+
+    assert engine.get_portfolio_summary(pid, user)["cash_balance"] == 0.01
+    raw = engine.conn.execute("SELECT cash_balance FROM portfolios WHERE id = ?", (pid,)).fetchone()[0]
+    assert raw == 0.01

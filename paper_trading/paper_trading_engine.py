@@ -255,6 +255,11 @@ class PaperTradingEngine:
 
     @_locked
     def create_portfolio(self, user_id, name, starting_capital):
+        # Cash is kept rounded to cents at every write so float error can't
+        # accumulate across trades (e.g. 0.1 + 0.2 != 0.3).
+        # ponytail: REAL columns + rounding; switch to integer cents if exact
+        # accounting (tax lots, fees, fractional shares) is ever needed.
+        starting_capital = round(starting_capital, 2)
         cur = self.conn.execute(
             "INSERT INTO portfolios (user_id, name, starting_capital, cash_balance, created_at) VALUES (?, ?, ?, ?, ?)",
             (user_id, name, starting_capital, starting_capital, datetime.now(timezone.utc).isoformat()),
@@ -387,7 +392,7 @@ class PaperTradingEngine:
                 (portfolio_id, p["ticker"], p["quantity"], p["price"], as_of),
             )
 
-        new_cash = portfolio["cash_balance"] - sum(p["cost"] for p in purchases)
+        new_cash = round(portfolio["cash_balance"] - sum(p["cost"] for p in purchases), 2)
         self.conn.execute(
             "UPDATE portfolios SET cash_balance = ? WHERE id = ?", (new_cash, portfolio_id)
         )
@@ -416,7 +421,7 @@ class PaperTradingEngine:
         if portfolio is None:
             raise ValueError(f"No portfolio with id {portfolio_id}")
 
-        trade_value = quantity * trade_price
+        trade_value = round(quantity * trade_price, 2)
         position_key = self._get_position_key(ticker, instrument_type="STOCK")
         existing = self.conn.execute(
             "SELECT * FROM holdings WHERE portfolio_id = ? AND position_key = ?",
@@ -437,7 +442,7 @@ class PaperTradingEngine:
                 (portfolio_id, ticker, sector, position_key, quantity, trade_price),
             )
             self.conn.execute(
-                "UPDATE portfolios SET cash_balance = cash_balance - ? WHERE id = ?",
+                "UPDATE portfolios SET cash_balance = ROUND(cash_balance - ?, 2) WHERE id = ?",
                 (trade_value, portfolio_id),
             )
         else:
@@ -452,7 +457,7 @@ class PaperTradingEngine:
                     (remaining_qty, portfolio_id, position_key),
                 )
             self.conn.execute(
-                "UPDATE portfolios SET cash_balance = cash_balance + ? WHERE id = ?",
+                "UPDATE portfolios SET cash_balance = ROUND(cash_balance + ?, 2) WHERE id = ?",
                 (trade_value, portfolio_id),
             )
 
@@ -491,7 +496,7 @@ class PaperTradingEngine:
         if portfolio is None:
             raise ValueError(f"No portfolio with id {portfolio_id}")
 
-        trade_cost = quantity * premium
+        trade_cost = round(quantity * premium, 2)
         position_key = self._get_position_key(ticker, "OPTION", option_type, strike, expiry)
         existing = self.conn.execute(
             "SELECT * FROM holdings WHERE portfolio_id = ? AND position_key = ?",
@@ -511,7 +516,7 @@ class PaperTradingEngine:
                 (portfolio_id, ticker, position_key, option_type, strike, expiry, quantity, premium),
             )
             self.conn.execute(
-                "UPDATE portfolios SET cash_balance = cash_balance - ? WHERE id = ?",
+                "UPDATE portfolios SET cash_balance = ROUND(cash_balance - ?, 2) WHERE id = ?",
                 (trade_cost, portfolio_id),
             )
         else:
@@ -526,7 +531,7 @@ class PaperTradingEngine:
                     (remaining_qty, portfolio_id, position_key),
                 )
             self.conn.execute(
-                "UPDATE portfolios SET cash_balance = cash_balance + ? WHERE id = ?",
+                "UPDATE portfolios SET cash_balance = ROUND(cash_balance + ?, 2) WHERE id = ?",
                 (trade_cost, portfolio_id),
             )
 
@@ -627,7 +632,7 @@ class PaperTradingEngine:
             raise ValueError("Cash amount must be non-negative")
         self._assert_owner(portfolio_id, user_id)
         self.conn.execute(
-            "UPDATE portfolios SET cash_balance = cash_balance + ? WHERE id = ?",
+            "UPDATE portfolios SET cash_balance = ROUND(cash_balance + ?, 2) WHERE id = ?",
             (amount, portfolio_id),
         )
         self.conn.commit()

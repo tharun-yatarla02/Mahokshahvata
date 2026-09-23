@@ -101,8 +101,8 @@
       </div>
     </div>
 
+    <script src="/api.js"></script>
     <script>
-      const API_BASE = window.location.origin;
       const sentimentOutput = document.getElementById('sentimentOutput');
       const sentimentBadge = document.getElementById('sentimentBadge');
       const sentimentState = {
@@ -262,19 +262,6 @@
             </article>
           `;
         }).join('');
-      }
-
-      async function apiFetch(path) {
-        const url = `${API_BASE}${path}${path.includes('?') ? '&' : '?'}_ts=${Date.now()}`;
-        const res = await fetch(url, {
-          headers: { 'Authorization': 'Bearer demo-token' },
-          cache: 'no-store',
-        });
-        const text = await res.text();
-        let payload = null;
-        try { payload = text ? JSON.parse(text) : null; } catch { payload = text; }
-        if (!res.ok) throw new Error(payload?.detail || payload || `HTTP ${res.status}`);
-        return payload;
       }
 
       function setLoadingState(isLoading) {
