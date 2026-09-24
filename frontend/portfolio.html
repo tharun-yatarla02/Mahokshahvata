@@ -787,8 +787,9 @@
       if (pendingTicker) {
         document.getElementById('tradeTicker').value = pendingTicker;
         localStorage.removeItem('pendingTradeTicker');
-        syncLiveTradePrice();
       }
+      // Start from the live price: trades more than 5% off it are rejected.
+      syncLiveTradePrice();
 
       renderProfile();
       applyTheme();
