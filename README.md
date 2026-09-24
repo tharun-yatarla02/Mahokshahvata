@@ -58,13 +58,23 @@ pip install -r requirements.txt
 
 | Variable | Needed for | Notes |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | News sentiment | Used to classify headlines with Claude |
+| `ANTHROPIC_API_KEY` | News sentiment | Used to classify headlines with Claude (Haiku 4.5, structured outputs). Without it, a keyword fallback is used |
 | `SENTIMENT_BACKEND` | News sentiment | `claude` (default) or `local` — `local` needs a trained model, see `news_sentiment/model/train_sentiment_model.py` |
 | `GOOGLE_APPLICATION_CREDENTIALS` | Real sign-in | Path to your Firebase service-account JSON — see [auth/README.md](auth/README.md) |
 | `USE_DEMO_AUTH` | Local development | `true` accepts the token `demo-token` instead of a Firebase login |
 | `QUIVER_API_KEY` | Politician trades | Free-tier key from quiverquant.com, used by `POST /politicians/refresh` |
 | `MARKET_UNIVERSE_SIZE` | Market data | How many of the largest US stocks to track (default 3000) |
 | `ALLOWED_ORIGINS` | Hosting the frontend elsewhere | Comma-separated origins allowed by CORS. Defaults to `localhost`/`127.0.0.1` on ports 8000 and 5500 |
+
+Put these in a `.env` file in the project folder; the server loads it on
+startup (variables already set in your shell take priority). `.env` is
+gitignored, so keys are never committed:
+
+```bash
+# .env
+ANTHROPIC_API_KEY=sk-ant-...
+USE_DEMO_AUTH=true
+```
 
 Never commit keys or the Firebase service-account file; `.gitignore`
 already excludes `.env` and `*serviceAccountKey*.json`.
@@ -75,8 +85,7 @@ For local development, use demo auth so the dashboard works without
 setting up Firebase:
 
 ```bash
-export USE_DEMO_AUTH=true
-export ANTHROPIC_API_KEY="your-key-here"
+# with USE_DEMO_AUTH=true and your ANTHROPIC_API_KEY in .env (see above)
 uvicorn api.main:app --reload
 ```
 
@@ -99,6 +108,26 @@ The snapshot is saved to `momentum/market_cache.json` (gitignored), so
 restarts are instant. The very first start takes about 2 minutes while the
 history downloads; until then `/momentum` returns `status.warming_up: true`.
 
+### Paper-trading rules
+
+Stock trades are market orders, like a real broker's:
+
+- They execute at the current market price (the tracked ~15-min-delayed
+  quote); any price the client sends is ignored.
+- Order by **shares** (`quantity`, fractions allowed to 6 decimals) or by
+  **dollar amount** (`amount`, e.g. "$100 of AAPL").
+- Buys need enough cash and sells need enough shares; a rejected order
+  says how many shares the cash would buy (or how many you own).
+- $1 minimum order, except that a whole position can always be sold.
+- Buys round the cost up to the cent and sells round proceeds down, so
+  rounding can never create money.
+- `POST /portfolio/{id}/trade-preview` returns exactly what an order would
+  do without placing it; the Portfolio page uses it as a live preview.
+
+Options premiums are entered by hand (there's no free options price feed).
+P/L is the account value (stocks at market price, options at cost, plus
+cash) minus everything deposited.
+
 The frontend pages currently always send `Authorization: Bearer demo-token`,
 so they need `USE_DEMO_AUTH=true`. Wiring the Firebase sign-in snippet from
 `auth/README.md` into the pages is still to do.
@@ -113,19 +142,21 @@ portfolios.
 |---|---|---|
 | GET | `/health` | Health check |
 | GET | `/momentum?top=50&offset=0` | Tracked stocks ranked by momentum. Also takes `q` (search ticker/company/sector), `sector` (name, alias like `Tech`, or theme like `AI`) and `sort` (`momentum`, `market_cap`, `day_change`, `volume`) |
-| GET | `/news-sentiment` | Current news sentiment by ticker and sector theme |
+| GET | `/news-sentiment` | Latest headlines with sentiment, plus `suggestions`: stocks and sectors in the news next to their current market condition. `refresh=true` refetches (at most once a minute; otherwise cached 5 min) |
 | GET | `/politicians` | Politicians with disclosed trades |
 | GET | `/politicians/{name}/trades` | One politician's trades |
 | POST | `/politicians/refresh` 🔒 | Pull fresh data from Quiver into the local cache |
 | GET | `/portfolio` 🔒 | List your portfolios |
+| POST | `/portfolio/default` 🔒 | The portfolio the pages use: your most recent one, created with $100,000 on first visit |
 | POST | `/portfolio` 🔒 | Create a portfolio (`name`, `starting_capital`) |
 | POST | `/portfolio/{id}/build` 🔒 | Build it from the top momentum names among the 500 largest stocks |
-| GET | `/portfolio/{id}` 🔒 | Portfolio summary |
+| GET | `/portfolio/{id}` 🔒 | Portfolio summary, stocks valued at live prices, P/L vs deposits |
 | POST | `/portfolio/{id}/mark-to-market` 🔒 | Update with current prices |
 | POST | `/portfolio/{id}/cash` 🔒 | Add cash (`amount` > 0) |
-| POST | `/portfolio/{id}/trade-stock` 🔒 | Buy/sell shares |
+| POST | `/portfolio/{id}/trade-preview` 🔒 | What a market order would do (shares, cost, cash after, or why it's rejected); places nothing |
+| POST | `/portfolio/{id}/trade-stock` 🔒 | Market order: `ticker`, `side` (`BUY`/`SELL`) and either `quantity` (shares) or `amount` (dollars) |
 | POST | `/portfolio/{id}/trade-option` 🔒 | Buy/sell a call or put |
-| GET | `/portfolio/{id}/history` 🔒 | Portfolio value history |
+| GET | `/portfolio/{id}/history` 🔒 | Daily portfolio value history (for the performance chart) |
 | GET | `/portfolio/{id}/trade-history` 🔒 | Trade history |
 
 Example (demo mode):
@@ -140,6 +171,11 @@ curl -X POST http://localhost:8000/portfolio -H "$AUTH" \
 curl -X POST http://localhost:8000/portfolio/1/build -H "$AUTH" \
   -H "Content-Type: application/json" \
   -d '{"max_positions": 5}'
+
+# Invest $100 in AAPL at the market price (fractional shares)
+curl -X POST http://localhost:8000/portfolio/1/trade-stock -H "$AUTH" \
+  -H "Content-Type: application/json" \
+  -d '{"ticker": "AAPL", "side": "BUY", "amount": 100}'
 
 curl http://localhost:8000/portfolio/1 -H "$AUTH"
 ```
