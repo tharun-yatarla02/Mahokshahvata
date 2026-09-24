@@ -251,3 +251,16 @@ def test_unknown_ticker_is_a_clear_404(client, portfolio_id, monkeypatch):
 
     assert res.status_code == 404
     assert "Check the ticker" in res.json()["detail"]
+
+
+def test_dotenv_loader_reads_keys_without_overriding_environment(tmp_path, monkeypatch):
+    env = tmp_path / ".env"
+    env.write_text('# comment\nexport NEW_KEY="abc 123"\nEXISTING=from-file\n\nNOT_A_PAIR\n')
+    monkeypatch.delenv("NEW_KEY", raising=False)
+    monkeypatch.setenv("EXISTING", "from-environment")
+
+    api_main._load_dotenv(env)
+
+    assert api_main.os.environ["NEW_KEY"] == "abc 123"
+    assert api_main.os.environ["EXISTING"] == "from-environment"
+    monkeypatch.delenv("NEW_KEY")

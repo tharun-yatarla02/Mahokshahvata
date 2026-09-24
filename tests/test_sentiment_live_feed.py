@@ -199,3 +199,49 @@ def test_entry_timestamps_are_always_timezone_aware(raw, expected):
     parsed = scraper._get_entry_timestamp({"published": raw})
 
     assert (parsed.isoformat() if parsed else None) == expected
+
+
+class FakeParseClient:
+    """Stands in for anthropic.Anthropic: messages.parse returns a given parsed_output."""
+
+    def __init__(self, parsed, stop_reason="end_turn"):
+        self.calls = []
+        client = self
+
+        class Messages:
+            @staticmethod
+            def parse(**kwargs):
+                client.calls.append(kwargs)
+                return type("Response", (), {"parsed_output": parsed, "stop_reason": stop_reason})
+
+        self.messages = Messages
+
+
+BATCH = [{"title": t, "summary": "", "tickers": "AAPL"} for t in ("a", "b", "c")]
+
+
+def test_classify_batch_uses_structured_output_and_maps_by_id():
+    parsed = scraper.BatchSentiment(results=[
+        scraper.HeadlineSentiment(id=3, sentiment="Negative", confidence=1.7, reasoning="miss"),
+        scraper.HeadlineSentiment(id=1, sentiment="Positive", confidence=0.8, reasoning="beat"),
+    ])
+    client = FakeParseClient(parsed)
+
+    results = scraper.classify_batch(client, BATCH)
+
+    assert client.calls[0]["output_format"] is scraper.BatchSentiment
+    assert client.calls[0]["model"] == "claude-haiku-4-5"
+    assert [r["sentiment"] for r in results] == ["Positive", "Unknown", "Negative"]   # id 2 missing
+    assert results[2]["confidence"] == 1.0                                              # clamped to 0..1
+
+
+def test_classify_batch_handles_refused_or_cut_off_response():
+    results = scraper.classify_batch(FakeParseClient(None, stop_reason="max_tokens"), BATCH)
+
+    assert [r["sentiment"] for r in results] == ["Unknown"] * 3
+
+
+def test_sentiment_schema_only_allows_three_labels():
+    import pydantic
+    with pytest.raises(pydantic.ValidationError):
+        scraper.HeadlineSentiment(id=1, sentiment="Mixed", confidence=0.5, reasoning="x")

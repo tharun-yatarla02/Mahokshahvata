@@ -44,6 +44,26 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field, model_validator
 
+
+def _load_dotenv(path=Path(__file__).parent.parent / ".env"):
+    """Loads KEY=VALUE lines from the project's .env (gitignored) into the
+    environment, so keys like ANTHROPIC_API_KEY work however the server is
+    started. Variables already set in the environment win."""
+    try:
+        lines = path.read_text().splitlines()
+    except OSError:
+        return
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.removeprefix("export ").split("=", 1)
+        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
+# Before the project imports: some modules read their settings at import time.
+_load_dotenv()
+
 from momentum.momentum_engine import latest_price, filter_by_group, search_rows, DEFAULT_SECTOR_LOOKUP
 from momentum.market_data import MarketData
 from paper_trading.paper_trading_engine import (

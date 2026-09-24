@@ -46,6 +46,8 @@ from pathlib import Path
 
 import feedparser
 import requests
+from pydantic import BaseModel
+from typing import Literal
 
 try:
     from anthropic import Anthropic
@@ -101,7 +103,7 @@ MACRO_THEMES = {
 SENTIMENT_BACKEND = os.environ.get("SENTIMENT_BACKEND", "claude")
 
 # Fast, cheap model — plenty accurate for short classification tasks like this.
-ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"
+ANTHROPIC_MODEL = "claude-haiku-4-5"
 BATCH_SIZE = 10  # articles per API call (also used as the local model's batch size)
 
 
@@ -198,19 +200,33 @@ SYSTEM_PROMPT = """You are a financial news sentiment classifier. For each \
 numbered article, decide whether the news is Positive, Negative, or \
 Neutral for the mentioned stock(s), from an investor's perspective — not \
 whether the news itself is happy or sad in a general sense. Consider net \
-effect: an article that beats estimates but cuts guidance is mixed/Neutral \
-or Negative depending on which matters more; a lawsuit against a \
-competitor can be Positive for the company in question.
+effect: an article that beats estimates but cuts guidance is Neutral or \
+Negative depending on which matters more; a lawsuit against a competitor \
+can be Positive for the company in question.
 
-Respond with ONLY a JSON array, one object per article, in the same \
-order as given, with this exact shape:
-[{"id": 1, "sentiment": "Positive", "confidence": 0.8, "reasoning": "short phrase"}, ...]
+Return one result per article, using the article's number as its id. Keep \
+each reasoning to a short phrase."""
 
-No prose, no markdown fences, just the JSON array."""
+
+# The response shape, enforced by the API (structured outputs): the reply is
+# always valid JSON with exactly these fields, and sentiment can only be one
+# of the three labels. Free-text JSON occasionally came back malformed (a
+# stray brace), which lost the whole batch.
+class HeadlineSentiment(BaseModel):
+    id: int
+    sentiment: Literal["Positive", "Negative", "Neutral"]
+    confidence: float
+    reasoning: str
+
+
+class BatchSentiment(BaseModel):
+    results: list[HeadlineSentiment]
 
 
 def classify_batch(client, batch):
-    """batch: list of dicts with 'title', 'summary', and either 'tickers' or 'sectors_affected'"""
+    """batch: list of dicts with 'title', 'summary', and either 'tickers' or 'sectors_affected'.
+    Returns one {"sentiment", "confidence", "reasoning"} dict per article, in order;
+    "Unknown" where the model returned nothing usable (those aren't cached)."""
     lines = []
     for i, a in enumerate(batch, start=1):
         if a.get("tickers"):
@@ -218,34 +234,32 @@ def classify_batch(client, batch):
         else:
             tag = f"Macro theme affecting sectors: {a.get('sectors_affected', 'Unknown')}"
         lines.append(f"{i}. [{tag}] {a['title']} — {a['summary'][:300]}")
-    user_prompt = "\n".join(lines)
 
-    response = client.messages.create(
+    response = client.messages.parse(
         model=ANTHROPIC_MODEL,
-        max_tokens=1500,
+        max_tokens=4096,
         system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": user_prompt}],
+        messages=[{"role": "user", "content": "\n".join(lines)}],
+        output_format=BatchSentiment,
     )
 
-    raw_text = "".join(
-        block.text for block in response.content if block.type == "text"
-    ).strip()
+    parsed = response.parsed_output
+    if parsed is None:  # refusal or cut off at max_tokens: nothing validated
+        print(f"[warn] no structured output (stop_reason={response.stop_reason}), skipping batch", file=sys.stderr)
+        parsed = BatchSentiment(results=[])
 
-    # Defensive parsing in case the model wraps output in a code fence anyway
-    raw_text = re.sub(r"^```(json)?|```$", "", raw_text, flags=re.MULTILINE).strip()
-
-    try:
-        parsed = json.loads(raw_text)
-    except json.JSONDecodeError:
-        print(f"[warn] could not parse LLM response, skipping batch:\n{raw_text}", file=sys.stderr)
-        return [{"sentiment": "Unknown", "confidence": 0.0, "reasoning": "parse error"} for _ in batch]
-
-    # Map back by id, defaulting to Unknown if the model dropped an entry
-    by_id = {item.get("id"): item for item in parsed if isinstance(item, dict)}
+    by_id = {item.id: item for item in parsed.results}
     results = []
     for i in range(1, len(batch) + 1):
-        item = by_id.get(i, {"sentiment": "Unknown", "confidence": 0.0, "reasoning": "missing from response"})
-        results.append(item)
+        item = by_id.get(i)
+        if item is None:
+            results.append({"sentiment": "Unknown", "confidence": 0.0, "reasoning": "missing from response"})
+        else:
+            results.append({
+                "sentiment": item.sentiment,
+                "confidence": round(min(1.0, max(0.0, item.confidence)), 2),
+                "reasoning": item.reasoning,
+            })
     return results
 
 
