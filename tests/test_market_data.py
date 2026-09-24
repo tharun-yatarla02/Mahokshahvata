@@ -97,3 +97,27 @@ def test_search_rows_ranks_ticker_matches_before_names():
     assert [r["ticker"] for r in search_rows(rows, "apple")] == ["AAPL", "APLE"]
     assert [r["ticker"] for r in search_rows(rows, "america")] == ["BAC"]
     assert search_rows(rows, "zzz") == []
+
+
+def test_failed_history_refresh_keeps_existing_data(tmp_path, monkeypatch):
+    data = MarketData(cache_path=tmp_path / "cache.json")
+    data._universe = [{"ticker": t, "name": t, "sector": "Energy", "market_cap": 1, "current_price": 110.0} for t in ("A", "B", "C")]
+    data._history = {t: {"start": 100.0, "last": 105.0} for t in ("A", "B", "C")}
+    data.history_updated_at = "2026-09-23T00:00:00+00:00"
+    data._rebuild()
+
+    monkeypatch.setattr(market_data, "fetch_lookback_prices", lambda tickers, days: {"A": {"start": 90.0, "last": 95.0}})
+    data.refresh_history()   # 1 of 3 stocks came back: treat as an outage
+
+    assert [r["ticker"] for r in data.snapshot()] == ["A", "B", "C"]
+    assert data.lookup("A")["momentum_pct"] == 10.0          # old history kept
+    assert data.history_updated_at == "2026-09-23T00:00:00+00:00"
+    assert "retrying" in data.last_error
+
+    monkeypatch.setattr(market_data, "fetch_lookback_prices",
+                        lambda tickers, days: {"A": {"start": 100.0, "last": 1.0}, "B": {"start": 50.0, "last": 1.0}})
+    data.refresh_history()   # 2 of 3: good enough; C keeps its previous history
+
+    assert data.lookup("B")["momentum_pct"] == 120.0
+    assert data.lookup("C")["momentum_pct"] == 10.0
+    assert data.last_error is None

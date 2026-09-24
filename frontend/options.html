@@ -152,14 +152,14 @@
           const optionType = trade.option_type || '—';
           return `
             <tr>
-              <td><strong>${symbol}</strong></td>
-              <td>${tradeType}</td>
-              <td><span class="trade-side ${side === 'BUY' ? 'buy' : 'sell'}">${side}</span></td>
+              <td><strong>${escapeHtml(symbol)}</strong></td>
+              <td>${escapeHtml(tradeType)}</td>
+              <td><span class="trade-side ${side === 'BUY' ? 'buy' : 'sell'}">${escapeHtml(side)}</span></td>
               <td>${quantity}</td>
               <td>${price !== null && price !== undefined ? `$${Number(price).toFixed(2)}` : '—'}</td>
               <td>${strike}</td>
-              <td>${optionType}</td>
-              <td>${expiry}</td>
+              <td>${escapeHtml(optionType)}</td>
+              <td>${escapeHtml(expiry)}</td>
               <td>${formatTradeDate(trade.timestamp)}</td>
             </tr>
           `;
@@ -199,7 +199,7 @@
         const pnl = Number(summary.total_pl ?? 0);
         const total = Number(summary.total_portfolio_value ?? cash + invested);
         portfolioSummaryBox.innerHTML = `
-          <strong>Portfolio:</strong> ${summary.name || 'Demo'} · 
+          <strong>Portfolio:</strong> ${escapeHtml(summary.name || 'Demo')} · 
           <strong>Cash:</strong> $${cash.toFixed(2)} · 
           <strong>Invested:</strong> $${invested.toFixed(2)} · 
           <strong>P/L:</strong> <span class="${pnl >= 0 ? 'positive' : 'negative'}" style="font-weight:600;">$${pnl.toFixed(2)}</span> · 
@@ -273,7 +273,7 @@
           await refreshPortfolioSummary();
           setOptionsStatus(`Trade placed for ${payload.ticker}. Cash after trade: $${Number((await apiFetch(`/portfolio/${currentPortfolioId}`)).cash_balance ?? 0).toFixed(2)}`, 'success');
         } catch (err) {
-          optionTradeOutput.innerHTML = `<div class="empty-state">${String(err)}</div>`;
+          optionTradeOutput.innerHTML = `<div class="empty-state">${escapeHtml(String(err))}</div>`;
           setOptionsStatus('Option trade could not be placed.', 'error');
         }
       });
@@ -362,7 +362,7 @@
           optionTradeOutput.innerHTML = formatTradeResult(data);
           setOptionsStatus('Trade history loaded successfully.', 'success');
         } catch (err) {
-          optionTradeOutput.innerHTML = `<div class="empty-state">${String(err)}</div>`;
+          optionTradeOutput.innerHTML = `<div class="empty-state">${escapeHtml(String(err))}</div>`;
           setOptionsStatus('Unable to load history right now.', 'error');
         }
       });

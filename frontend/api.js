@@ -18,8 +18,21 @@ async function apiFetch(path, options = {}) {
   const text = await res.text();
   let payload = null;
   try { payload = text ? JSON.parse(text) : null; } catch { payload = text; }
-  if (!res.ok) throw new Error(payload?.detail || payload || `HTTP ${res.status}`);
+  if (!res.ok) throw new Error(errorMessage(payload) || `HTTP ${res.status}`);
   return payload;
+}
+
+// FastAPI sends validation errors (422) as a list of {loc, msg}; show those
+// as text instead of "[object Object]".
+function errorMessage(payload) {
+  const detail = payload?.detail ?? payload;
+  if (Array.isArray(detail)) {
+    return detail.map((err) => {
+      const field = (err.loc || []).filter((part) => part !== 'body').join('.');
+      return field ? `${field}: ${err.msg}` : err.msg;
+    }).join('; ');
+  }
+  return typeof detail === 'string' ? detail : '';
 }
 
 // Anything from a feed or the API goes through these before innerHTML.

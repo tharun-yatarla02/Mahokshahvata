@@ -35,6 +35,7 @@ Extend later:
 """
 
 import csv
+import email.utils
 import html
 import json
 import os
@@ -236,12 +237,11 @@ def classify_all_local(articles):
 
     model_dir = Path(__file__).parent / "model" / "sentiment_model"
     if not model_dir.exists():
-        print(
-            f"[error] No trained model found at {model_dir}. "
-            "Run news_sentiment/model/train_sentiment_model.py first.",
-            file=sys.stderr,
+        # Raise rather than sys.exit(): this runs inside the web server.
+        raise RuntimeError(
+            f"No trained model found at {model_dir}. "
+            "Run news_sentiment/model/train_sentiment_model.py first."
         )
-        sys.exit(1)
 
     classifier = LocalSentimentClassifier(str(model_dir))
     texts = [f"{a['title']}. {a['summary'][:300]}" for a in articles]
@@ -265,22 +265,24 @@ def _coerce_feed_urls(feed_entry):
 
 
 def _get_entry_timestamp(entry):
-    raw_value = entry.get("published") or entry.get("updated") or entry.get("pubDate") or ""
+    """Publish time as a timezone-aware UTC datetime, or None. Always aware:
+    naive and aware datetimes can't be compared, so one feed without a
+    timezone would otherwise break sorting for all of them."""
+    raw_value = (entry.get("published") or entry.get("updated") or entry.get("pubDate") or "").strip()
     if not raw_value:
         return None
+    parsed = None
     try:
-        return datetime.strptime(raw_value, "%a, %d %b %Y %H:%M:%S GMT").replace(tzinfo=timezone.utc)
-    except ValueError:
-        pass
-    try:
-        return datetime.fromisoformat(raw_value.replace("Z", "+00:00"))
-    except ValueError:
-        pass
-    try:
-        parsed = datetime.strptime(raw_value, "%Y-%m-%d %H:%M:%S")
-        return parsed.replace(tzinfo=timezone.utc)
-    except ValueError:
-        return None
+        # RSS dates: "Wed, 23 Sep 2026 10:12:00 GMT" / "... -0400"
+        parsed = email.utils.parsedate_to_datetime(raw_value)
+    except (TypeError, ValueError, IndexError):
+        try:
+            parsed = datetime.fromisoformat(raw_value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 def _clean_text(value):
@@ -344,7 +346,9 @@ def fetch_articles():
 
     deduped = []
     seen = set()
-    for article in sorted(articles, key=lambda a: (a.get("published") or ""), reverse=True):
+    oldest = datetime.min.replace(tzinfo=timezone.utc)
+    # RSS dates are strings like "Wed, 23 Sep 2026 ..." — sort by the parsed time.
+    for article in sorted(articles, key=lambda a: _get_entry_timestamp(a) or oldest, reverse=True):
         key = (article.get("title") or "", article.get("link") or "")
         if key in seen:
             continue
@@ -526,13 +530,14 @@ def collect_sentiment_results():
 
     if not matched:
         demo_results = build_demo_sentiment_results()
-        history = save_history(demo_results)
+        # History is kept on disk for later analysis but not sent to the
+        # browser: no page uses it, and it grows by a full snapshot per refresh.
+        save_history(demo_results)
         return {
             "results": demo_results,
             "summary": summarize_by_ticker(demo_results),
             "sector_summary": summarize_by_sector(demo_results),
             "fallback": True,
-            "history": history,
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
 
@@ -540,52 +545,45 @@ def collect_sentiment_results():
         # Real headlines are available, but the LLM key is missing. In that case
         # we still return the live matches with a lightweight heuristic sentiment
         # instead of silently replacing them with stale demo data.
-        results = []
-        for article in matched:
-            title = f"{article.get('title', '')} {article.get('summary', '')}".strip()
-            if not title:
-                sentiment = "Neutral"
-                confidence = 0.0
-                reasoning = "No headline text available"
-            else:
-                lower_title = title.lower()
-                if any(token in lower_title for token in ["rise", "rally", "beats", "surge", "upgrade", "growth", "strong", "higher", "gain"]):
-                    sentiment = "Positive"
-                elif any(token in lower_title for token in ["drop", "fall", "miss", "slump", "cut", "decline", "weak", "lower", "loss"]):
-                    sentiment = "Negative"
-                else:
-                    sentiment = "Neutral"
-                confidence = 0.65
-                reasoning = "Heuristic sentiment fallback (no Anthropic API key)"
-            results.append({**article, "sentiment": sentiment, "confidence": confidence, "reasoning": reasoning})
-        summary = summarize_by_ticker(results)
-        sector_summary = summarize_by_sector(results)
-        history = save_history(results)
-        return {
-            "results": results,
-            "summary": summary,
-            "sector_summary": sector_summary,
-            "fallback": False,
-            "history": history,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-        }
+        results = heuristic_sentiment(matched, "Heuristic sentiment fallback (no Anthropic API key)")
+    else:
+        try:
+            sentiments = classify_all(client, matched)
+            results = [{**article, **sentiment} for article, sentiment in zip(matched, sentiments)]
+        except Exception as e:  # API error, rate limit, network, missing local model
+            print(f"[warn] sentiment classification failed, using heuristic: {e}", file=sys.stderr)
+            results = heuristic_sentiment(matched, "Heuristic sentiment fallback (classifier unavailable)")
 
-    sentiments = classify_all(client, matched)
-    results = []
-    for article, sentiment in zip(matched, sentiments):
-        results.append({**article, **sentiment})
-
-    summary = summarize_by_ticker(results)
-    sector_summary = summarize_by_sector(results)
-    history = save_history(results)
+    save_history(results)
     return {
         "results": results,
-        "summary": summary,
-        "sector_summary": sector_summary,
+        "summary": summarize_by_ticker(results),
+        "sector_summary": summarize_by_sector(results),
         "fallback": False,
-        "history": history,
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+POSITIVE_WORDS = ["rise", "rally", "beats", "surge", "upgrade", "growth", "strong", "higher", "gain"]
+NEGATIVE_WORDS = ["drop", "fall", "miss", "slump", "cut", "decline", "weak", "lower", "loss"]
+
+
+def heuristic_sentiment(articles, reasoning):
+    """Keyword-based sentiment for when no classifier is available."""
+    results = []
+    for article in articles:
+        text = f"{article.get('title', '')} {article.get('summary', '')}".strip().lower()
+        if not text:
+            results.append({**article, "sentiment": "Neutral", "confidence": 0.0, "reasoning": "No headline text available"})
+            continue
+        if any(word in text for word in POSITIVE_WORDS):
+            sentiment = "Positive"
+        elif any(word in text for word in NEGATIVE_WORDS):
+            sentiment = "Negative"
+        else:
+            sentiment = "Neutral"
+        results.append({**article, "sentiment": sentiment, "confidence": 0.65, "reasoning": reasoning})
+    return results
 
 
 def load_history_store():

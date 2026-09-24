@@ -139,3 +139,63 @@ def test_feed_text_is_plain_text():
     assert scraper._clean_text("S&amp;P 500 hits record") == "S&P 500 hits record"
     assert scraper._clean_text("<p>Stocks <b>rally</b></p>\n after CPI") == "Stocks rally after CPI"
     assert scraper._clean_text(None) == ""
+
+
+APPLE_ARTICLE = {
+    "source": "Yahoo Finance",
+    "title": "Apple stock rallies as iPhone demand stays strong",
+    "summary": "AAPL shares climb.",
+    "link": "https://example.com/aapl",
+    "published": "2026-09-23T12:00:00Z",
+}
+
+
+def test_classifier_failure_falls_back_to_heuristic(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setattr(scraper, "fetch_articles", lambda: [APPLE_ARTICLE])
+    monkeypatch.setattr(scraper, "load_company_map", lambda: [("Apple", "AAPL")])
+
+    def broken_classifier(client, articles):
+        raise RuntimeError("529 overloaded")
+    monkeypatch.setattr(scraper, "classify_all", broken_classifier)
+
+    data = scraper.collect_sentiment_results()
+
+    assert data["results"][0]["sentiment"] == "Positive"   # "rallies" / "strong"
+    assert "fallback" in data["results"][0]["reasoning"].lower()
+    assert "history" not in data                             # saved to disk, not sent to the browser
+    assert scraper.HISTORY_FILE.exists()
+
+
+def test_articles_are_sorted_by_publish_time_not_date_text(monkeypatch):
+    feed = """<?xml version="1.0"?><rss><channel>
+      <item><title>Older (Wednesday)</title><link>https://e.com/1</link><pubDate>Wed, 23 Sep 2026 09:00:00 GMT</pubDate></item>
+      <item><title>Newer (Thursday)</title><link>https://e.com/2</link><pubDate>Thu, 24 Sep 2026 09:00:00 GMT</pubDate></item>
+    </channel></rss>"""
+
+    class Response:
+        content = feed.encode()
+
+        def raise_for_status(self):
+            pass
+
+    monkeypatch.setattr(scraper, "RSS_FEEDS", {"Test": "https://e.com/rss"})
+    monkeypatch.setattr(scraper.requests, "get", lambda *a, **k: Response())
+
+    titles = [a["title"] for a in scraper.fetch_articles()]
+
+    assert titles == ["Newer (Thursday)", "Older (Wednesday)"]   # "W" > "T" alphabetically
+
+
+@pytest.mark.parametrize("raw, expected", [
+    ("Wed, 23 Sep 2026 10:00:00 GMT", "2026-09-23T10:00:00+00:00"),
+    ("Wed, 23 Sep 2026 10:00:00 -0400", "2026-09-23T14:00:00+00:00"),
+    ("2026-09-23T10:00:00Z", "2026-09-23T10:00:00+00:00"),
+    ("2026-09-23T10:00:00", "2026-09-23T10:00:00+00:00"),      # no timezone: assume UTC
+    ("2026-09-23 10:00:00", "2026-09-23T10:00:00+00:00"),
+    ("not a date", None),
+])
+def test_entry_timestamps_are_always_timezone_aware(raw, expected):
+    parsed = scraper._get_entry_timestamp({"published": raw})
+
+    assert (parsed.isoformat() if parsed else None) == expected

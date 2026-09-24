@@ -171,10 +171,9 @@
       function renderBilling(summary) {
         const cashBalance = Number(summary.remaining_balance_to_invest ?? summary.cash_balance ?? 0);
         const totalInvested = Number(summary.total_invested ?? 0);
-        const holdingsValue = Number(summary.holdings_value ?? 0);
-        const latest = summary.latest || {};
-        const totalPortfolioValue = Number(latest.total_value ?? (holdingsValue + cashBalance) ?? 0);
-        const pnl = Number(latest.total_pl ?? (totalPortfolioValue - (totalInvested + cashBalance)) ?? 0);
+        // Value and P/L come from the server (holdings at live prices, P/L vs deposits).
+        const totalPortfolioValue = Number(summary.total_portfolio_value ?? cashBalance + totalInvested);
+        const pnl = Number(summary.total_pl ?? 0);
 
         remainingCashValue.textContent = formatCurrency(cashBalance);
         investedCapitalValue.textContent = formatCurrency(totalInvested);
@@ -205,7 +204,7 @@
         const { summary, cashBalance, totalInvested, totalPortfolioValue, pnl } = lastSummary;
         const holdings = Array.isArray(summary.holdings) ? summary.holdings : [];
         const row = (label, value, className = '') =>
-          `<li><span>${label}</span> <strong${className ? ` class="${className}"` : ''}>${value}</strong></li>`;
+          `<li><span>${escapeHtml(label)}</span> <strong${className ? ` class="${className}"` : ''}>${escapeHtml(value)}</strong></li>`;
         let title;
         let rows;
 

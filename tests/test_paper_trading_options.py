@@ -172,7 +172,7 @@ def test_trade_stock_buy_sell_updates_cash_and_summary(tmp_path):
     assert summary["total_invested"] == 900.0
     assert summary["stock_count"] == 1
     assert summary["total_portfolio_value"] == 10080.0
-    assert summary["total_pl"] == 0.0
+    assert summary["total_pl"] == 80.0  # sold 4 shares $20 above cost
 
 
 def test_legacy_database_allows_stock_and_option_on_same_ticker(tmp_path):
@@ -235,3 +235,64 @@ def test_trade_stock_records_sector_and_backfills_unknown(tmp_path):
 
     assert updated == 1
     assert sectors() == {"PODD": "Healthcare", "AAPL": "Technology"}
+
+
+def _engine_with_portfolio(tmp_path, capital=1000):
+    engine = PaperTradingEngine(str(tmp_path / "pl.db"))
+    user = engine.get_or_create_user("pl-user")
+    return engine, user, engine.create_portfolio(user, "P/L", capital)
+
+
+def test_pl_counts_realized_and_live_unrealized_gains(tmp_path):
+    engine, user, pid = _engine_with_portfolio(tmp_path)
+    engine.trade_stock(pid, user, "AAPL", 2, 100)
+    engine.trade_stock(pid, user, "AAPL", 1, 150, side="SELL")   # +50 realized
+
+    summary = engine.get_portfolio_summary(pid, user, price_for={"AAPL": 120.0}.get)  # +20 unrealized
+
+    assert summary["total_portfolio_value"] == 1070.0
+    assert summary["total_pl"] == 70.0
+    assert summary["total_pl_pct"] == 7.0
+    assert summary["holdings"][0]["current_price"] == 120.0
+    assert summary["holdings"][0]["market_value"] == 120.0
+
+
+def test_deposits_are_not_profit_and_options_keep_their_value(tmp_path):
+    engine, user, pid = _engine_with_portfolio(tmp_path)
+    engine.add_cash_balance(pid, user, 500)
+    engine.trade_option(pid, user, "aapl", "CALL", 200, "2026-12-18", 2, 10)
+
+    summary = engine.get_portfolio_summary(pid, user)
+
+    assert summary["contributed_capital"] == 1500.0
+    assert summary["total_portfolio_value"] == 1500.0   # the $20 option is still worth its cost
+    assert summary["total_invested"] == 20.0
+    assert summary["total_pl"] == 0.0
+    assert summary["holdings"][0]["ticker"] == "AAPL"
+
+
+def test_summary_works_after_mark_to_market(tmp_path):
+    engine, user, pid = _engine_with_portfolio(tmp_path)
+    engine.trade_stock(pid, user, "MSFT", 2, 100)
+    engine.trade_stock(pid, user, "NVDA", 1, 100)
+
+    snapshot = engine.mark_to_market(pid, user, {"MSFT": 110})   # no NVDA quote: stays at cost
+
+    assert snapshot["holdings_value"] == 320.0
+    assert snapshot["total_pl"] == 20.0
+    assert engine.get_portfolio_summary(pid, user)["latest"]["total_pl"] == 20.0
+
+
+def test_contributed_capital_is_backfilled_for_existing_portfolios(tmp_path):
+    engine, user, pid = _engine_with_portfolio(tmp_path)
+    engine.trade_stock(pid, user, "AAPL", 2, 100)
+    engine.trade_stock(pid, user, "AAPL", 1, 150, side="SELL")
+    # Simulate a database from before deposits were tracked: an untracked $300 deposit.
+    engine.conn.execute("UPDATE portfolios SET cash_balance = cash_balance + 300, contributed_capital = NULL")
+    engine.conn.commit()
+
+    reopened = PaperTradingEngine(str(tmp_path / "pl.db"))
+
+    summary = reopened.get_portfolio_summary(pid, user)
+    assert summary["contributed_capital"] == 1300.0
+    assert summary["total_pl"] == 50.0

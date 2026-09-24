@@ -28,6 +28,7 @@ import csv
 import os
 import sqlite3
 import sys
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -78,7 +79,11 @@ def refresh_cache():
     """Fetches fresh data from Quiver and stores it locally, so the dashboard
     can query instantly without hitting the API on every page load."""
     raw_trades = fetch_from_quiver()
-    conn = get_connection()
+    with closing(get_connection()) as conn:
+        return _store_trades(conn, raw_trades)
+
+
+def _store_trades(conn, raw_trades):
     fetched_at = datetime.now(timezone.utc).isoformat()
 
     inserted = 0
@@ -115,23 +120,23 @@ def refresh_cache():
 
 def list_politicians():
     """Returns every politician with at least one disclosed trade, alphabetical."""
-    conn = get_connection()
-    rows = conn.execute(
-        "SELECT DISTINCT politician, party, chamber FROM trades WHERE politician IS NOT NULL ORDER BY politician"
-    ).fetchall()
+    with closing(get_connection()) as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT politician, party, chamber FROM trades WHERE politician IS NOT NULL ORDER BY politician"
+        ).fetchall()
     return [dict(r) for r in rows]
 
 
 def get_trades_for_politician(name):
     """Every trade for one politician, newest transaction date first."""
-    conn = get_connection()
-    rows = conn.execute(
-        """SELECT ticker, transaction_type, transaction_date, disclosure_date, amount_range
-           FROM trades
-           WHERE politician = ?
-           ORDER BY transaction_date DESC""",
-        (name,),
-    ).fetchall()
+    with closing(get_connection()) as conn:
+        rows = conn.execute(
+            """SELECT ticker, transaction_type, transaction_date, disclosure_date, amount_range
+               FROM trades
+               WHERE politician = ?
+               ORDER BY transaction_date DESC""",
+            (name,),
+        ).fetchall()
     return [dict(r) for r in rows]
 
 

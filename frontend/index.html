@@ -201,12 +201,10 @@
       function renderOverviewData(summary = {}) {
         const cashBalance = Number(summary.remaining_balance_to_invest ?? summary.cash_balance ?? 0);
         const totalInvested = Number(summary.total_invested ?? 0);
-        const holdingsValue = Number(summary.holdings_value ?? 0);
-        const latestSnapshot = summary.latest || {};
-        const totalPortfolioValue = Number(latestSnapshot.total_value ?? (holdingsValue + cashBalance) ?? 0);
-        const totalContributedCapital = totalInvested + cashBalance;
-        const pnl = Number(latestSnapshot.total_pl ?? (totalPortfolioValue - totalContributedCapital) ?? 0);
-        const netReturn = Number(latestSnapshot.total_pl_pct ?? (totalContributedCapital > 0 ? (pnl / totalContributedCapital) * 100 : 0) ?? 0);
+        // Value and P/L come from the server (holdings at live prices, P/L vs deposits).
+        const totalPortfolioValue = Number(summary.total_portfolio_value ?? cashBalance + totalInvested);
+        const pnl = Number(summary.total_pl ?? 0);
+        const netReturn = Number(summary.total_pl_pct ?? 0);
         const stockCount = Number(summary.stock_count ?? 0);
         const sectorCount = Number(summary.sector_count ?? 0);
         const riskScore = Math.min(100, Math.max(0, Math.round((totalInvested / Math.max(totalPortfolioValue, 1)) * 100)));
@@ -317,7 +315,7 @@
           list.innerHTML = rows.length
             ? rows.map((item) => {
                 const pct = Number(item.momentum_pct || 0);
-                return `<li><span>${item.ticker}</span> <span class="${pct >= 0 ? 'pos' : 'neg'}">${formatPercent(pct)}</span></li>`;
+                return `<li><span>${escapeHtml(item.ticker)}</span> <span class="${pct >= 0 ? 'pos' : 'neg'}">${formatPercent(pct)}</span></li>`;
               }).join('')
             : '<li><span>No stocks in this group yet.</span></li>';
         } catch (error) {

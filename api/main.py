@@ -34,11 +34,14 @@ import os
 import threading
 import time
 from contextlib import asynccontextmanager
+from datetime import date
 from pathlib import Path
+from typing import Annotated
 
 from fastapi import FastAPI, HTTPException, Depends, Header, Query
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from momentum.momentum_engine import latest_price, filter_by_group, search_rows, DEFAULT_SECTOR_LOOKUP
@@ -89,6 +92,14 @@ app.add_middleware(
 )
 
 
+@app.exception_handler(RequestValidationError)
+async def validation_error(request, exc):
+    # FastAPI's default 422 echoes the rejected input back, and a rejected
+    # Infinity/NaN can't be written as JSON, so the error itself would 500.
+    errors = [{"loc": err.get("loc"), "msg": err.get("msg"), "type": err.get("type")} for err in exc.errors()]
+    return JSONResponse(status_code=422, content={"detail": errors})
+
+
 # ---------------------------------------------------------------------------
 # Auth dependency — every portfolio endpoint requires a valid session token
 # ---------------------------------------------------------------------------
@@ -130,9 +141,25 @@ def get_current_user(authorization: str = Header(None)):
 # Request/response models
 # ---------------------------------------------------------------------------
 
+# Money fields reject Infinity/NaN (Python's JSON parser accepts them, and an
+# infinite cash balance can't be serialized back out, which breaks the
+# portfolio for good) and cap at $1B so a typo can't do the same.
+MAX_AMOUNT = 1_000_000_000
+TICKER_PATTERN = r"^\s*[A-Za-z]{1,5}([.-][A-Za-z]{1,2})?\s*$"
+
+
+def _money(**kwargs):
+    return Field(gt=0, le=MAX_AMOUNT, allow_inf_nan=False, **kwargs)
+
+
+def _normalize_ticker(ticker):
+    # BRK.B and BRK-B are the same stock; the market data spells it BRK-B.
+    return ticker.strip().upper().replace(".", "-")
+
+
 class CreatePortfolioRequest(BaseModel):
     name: str = Field(min_length=1, max_length=100)
-    starting_capital: float = Field(gt=0, description="Must be a positive amount")
+    starting_capital: float = _money(description="Must be a positive amount")
 
 
 class BuildPortfolioRequest(BaseModel):
@@ -141,29 +168,32 @@ class BuildPortfolioRequest(BaseModel):
     max_allocation_per_sector: float = Field(default=0.50, gt=0, le=1.0)
 
 
+Price = Annotated[float, _money()]
+
+
 class MarkToMarketRequest(BaseModel):
-    prices: dict  # {"NVDA": 190.12, "PLTR": 42.5, ...}
-    option_prices: dict | None = None
+    prices: dict[str, Price]  # {"NVDA": 190.12, "PLTR": 42.5, ...}
+    option_prices: dict[str, Price] | None = None
 
 
 class AddCashRequest(BaseModel):
-    amount: float = Field(gt=0, description="Must be a positive amount")
+    amount: float = _money(description="Must be a positive amount")
 
 
 class TradeStockRequest(BaseModel):
-    ticker: str
-    quantity: int = Field(gt=0)
-    price: float = Field(gt=0)
+    ticker: str = Field(pattern=TICKER_PATTERN)
+    quantity: int = Field(gt=0, le=10_000_000)
+    price: float = _money()
     side: str = Field(default="BUY", pattern="^(BUY|SELL)$")
 
 
 class TradeOptionRequest(BaseModel):
-    ticker: str
+    ticker: str = Field(pattern=TICKER_PATTERN)
     option_type: str = Field(..., pattern="^(CALL|PUT)$")
-    strike: float = Field(gt=0)
-    expiry: str
-    quantity: int = Field(gt=0)
-    premium: float = Field(gt=0)
+    strike: float = _money()
+    expiry: date  # YYYY-MM-DD
+    quantity: int = Field(gt=0, le=10_000_000)
+    premium: float = _money()
     side: str = Field(default="BUY", pattern="^(BUY|SELL)$")
 
 
@@ -275,13 +305,18 @@ def build_portfolio(portfolio_id: int, req: BuildPortfolioRequest, user_id: int 
     return {"portfolio_id": portfolio_id, "purchases": purchases}
 
 
+def _live_price(ticker):
+    return (market_data.lookup(ticker) or {}).get("current_price")
+
+
 @app.get("/portfolio/{portfolio_id}")
 def get_portfolio(portfolio_id: int, user_id: int = Depends(get_current_user)):
-    """Returns the portfolio's current state. A freshly created portfolio
-    with no holdings yet is a normal, valid response — not a 404. Only a
-    portfolio that truly doesn't exist (or belongs to someone else) errors."""
+    """Returns the portfolio's current state, with stocks valued at the latest
+    tracked price. A freshly created portfolio with no holdings yet is a
+    normal, valid response — not a 404. Only a portfolio that truly doesn't
+    exist (or belongs to someone else) errors."""
     try:
-        return engine.get_portfolio_summary(portfolio_id, user_id)
+        return engine.get_portfolio_summary(portfolio_id, user_id, price_for=_live_price)
     except PermissionError:
         raise HTTPException(status_code=403, detail="This portfolio doesn't belong to you")
     except ValueError:
@@ -301,7 +336,8 @@ def mark_to_market(portfolio_id: int, req: MarkToMarketRequest, user_id: int = D
 @app.post("/portfolio/{portfolio_id}/cash")
 def add_cash_to_portfolio(portfolio_id: int, req: AddCashRequest, user_id: int = Depends(get_current_user)):
     try:
-        return engine.add_cash_balance(portfolio_id, user_id, req.amount)
+        engine.add_cash_balance(portfolio_id, user_id, req.amount)
+        return engine.get_portfolio_summary(portfolio_id, user_id, price_for=_live_price)
     except PermissionError:
         raise HTTPException(status_code=403, detail="This portfolio doesn't belong to you")
     except ValueError as e:
@@ -315,7 +351,7 @@ MAX_PRICE_DEVIATION = 0.05
 
 @app.post("/portfolio/{portfolio_id}/trade-stock")
 def trade_stock(portfolio_id: int, req: TradeStockRequest, user_id: int = Depends(get_current_user)):
-    ticker = req.ticker.strip().upper()
+    ticker = _normalize_ticker(req.ticker)
     # Tracked stocks use the in-memory snapshot (the same price the dashboard
     # shows); anything else falls back to a one-off yfinance lookup.
     tracked = market_data.lookup(ticker)
@@ -341,19 +377,28 @@ def trade_stock(portfolio_id: int, req: TradeStockRequest, user_id: int = Depend
     except PermissionError:
         raise HTTPException(status_code=403, detail="This portfolio doesn't belong to you")
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise _trade_error(e)
+
+
+def _trade_error(e):
+    # The engine raises ValueError both for a missing portfolio and for a
+    # rejected trade (insufficient cash, not enough to sell, ...).
+    status = 404 if str(e).startswith("No portfolio") else 400
+    return HTTPException(status_code=status, detail=str(e))
 
 
 @app.post("/portfolio/{portfolio_id}/trade-option")
 def trade_option(portfolio_id: int, req: TradeOptionRequest, user_id: int = Depends(get_current_user)):
+    if req.side == "BUY" and req.expiry < date.today():
+        raise HTTPException(status_code=400, detail=f"Option expired on {req.expiry.isoformat()}")
     try:
         return engine.trade_option(
             portfolio_id,
             user_id,
-            req.ticker,
+            _normalize_ticker(req.ticker),
             req.option_type,
             req.strike,
-            req.expiry,
+            req.expiry.isoformat(),
             req.quantity,
             req.premium,
             req.side,
@@ -361,7 +406,7 @@ def trade_option(portfolio_id: int, req: TradeOptionRequest, user_id: int = Depe
     except PermissionError:
         raise HTTPException(status_code=403, detail="This portfolio doesn't belong to you")
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise _trade_error(e)
 
 
 @app.get("/portfolio/{portfolio_id}/history")

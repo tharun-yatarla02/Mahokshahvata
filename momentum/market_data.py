@@ -49,6 +49,8 @@ SCREENER_HEADERS = {
 }
 QUOTE_REFRESH_SECONDS = 5 * 60
 HISTORY_REFRESH_SECONDS = 6 * 60 * 60
+HISTORY_RETRY_SECONDS = 15 * 60  # after a failed history download
+MIN_HISTORY_COVERAGE = 0.5       # a download with less than this is treated as failed
 HISTORY_CHUNK_SIZE = 500
 DEFAULT_CACHE_PATH = Path(__file__).parent / "market_cache.json"
 
@@ -157,6 +159,7 @@ class MarketData:
         self.quotes_updated_at = None
         self.history_updated_at = None
         self.last_error = None
+        self._history_retry_at = 0.0  # time.monotonic() before which not to retry
         self._thread = None
 
     # -- reading -----------------------------------------------------------
@@ -208,11 +211,22 @@ class MarketData:
         full = tickers is None
         tickers = tickers or [s["ticker"] for s in self._universe]
         prices = fetch_lookback_prices(tickers + [BENCHMARK_TICKER], self.lookback_days)
+        if full and len(prices) < len(tickers) * MIN_HISTORY_COVERAGE:
+            # Yahoo down or rate-limiting: keep serving the history we have
+            # rather than replacing it with a near-empty one for 6 hours.
+            self.last_error = f"History refresh got {len(prices)} of {len(tickers)} stocks; retrying in {HISTORY_RETRY_SECONDS // 60} min"
+            log.warning(self.last_error)
+            self._history_retry_at = time.monotonic() + HISTORY_RETRY_SECONDS
+            return
         with self._lock:
             if full:
-                self._history = prices
-                self._no_history = set(tickers) - set(prices)
+                # Keep the previous values for stocks this download happened to miss.
+                current = set(tickers) | {BENCHMARK_TICKER}
+                self._history = {t: h for t, h in self._history.items() if t in current}
+                self._history.update(prices)
+                self._no_history = set(tickers) - set(self._history)
                 self.history_updated_at = _now()
+                self.last_error = None
             else:
                 self._history.update(prices)
                 self._no_history |= set(tickers) - set(prices)
@@ -257,7 +271,8 @@ class MarketData:
                 if _age(self.quotes_updated_at) > QUOTE_REFRESH_SECONDS:
                     self.refresh_quotes()
                 if _age(self.history_updated_at) > HISTORY_REFRESH_SECONDS:
-                    self.refresh_history()
+                    if time.monotonic() >= self._history_retry_at:
+                        self.refresh_history()
                 else:
                     # Stocks that joined the universe since the last full download.
                     missing = [s["ticker"] for s in self._universe

@@ -85,6 +85,7 @@ CREATE TABLE IF NOT EXISTS portfolios (
     name TEXT NOT NULL,
     starting_capital REAL NOT NULL,
     cash_balance REAL NOT NULL,
+    contributed_capital REAL,  -- starting capital + every deposit; P/L is measured against this
     created_at TEXT NOT NULL
 );
 
@@ -181,7 +182,22 @@ class PaperTradingEngine:
                 )
 
         self._rebuild_legacy_holdings_table()
+        self._backfill_contributed_capital()
         self.conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_holdings_portfolio_position ON holdings(portfolio_id, position_key)")
+
+    def _backfill_contributed_capital(self):
+        """Older databases didn't record deposits. Every cash movement other
+        than a deposit is a trade, so: contributed = cash now + spent on buys
+        - received from sells, summed over the transaction log."""
+        columns = {col[1] for col in self.conn.execute("PRAGMA table_info(portfolios)").fetchall()}
+        if "contributed_capital" not in columns:
+            self.conn.execute("ALTER TABLE portfolios ADD COLUMN contributed_capital REAL")
+        self.conn.execute(
+            """UPDATE portfolios SET contributed_capital = ROUND(cash_balance + COALESCE((
+                   SELECT SUM(CASE WHEN type = 'BUY' THEN quantity * price ELSE -quantity * price END)
+                   FROM transactions WHERE transactions.portfolio_id = portfolios.id), 0), 2)
+               WHERE contributed_capital IS NULL"""
+        )
 
     def _rebuild_legacy_holdings_table(self):
         """Databases created before options support have UNIQUE(portfolio_id, ticker)
@@ -261,8 +277,8 @@ class PaperTradingEngine:
         # accounting (tax lots, fees, fractional shares) is ever needed.
         starting_capital = round(starting_capital, 2)
         cur = self.conn.execute(
-            "INSERT INTO portfolios (user_id, name, starting_capital, cash_balance, created_at) VALUES (?, ?, ?, ?, ?)",
-            (user_id, name, starting_capital, starting_capital, datetime.now(timezone.utc).isoformat()),
+            "INSERT INTO portfolios (user_id, name, starting_capital, cash_balance, contributed_capital, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (user_id, name, starting_capital, starting_capital, starting_capital, datetime.now(timezone.utc).isoformat()),
         )
         self.conn.commit()
         return cur.lastrowid
@@ -482,6 +498,9 @@ class PaperTradingEngine:
     @_locked
     def trade_option(self, portfolio_id, user_id, ticker, option_type, strike, expiry, quantity, premium, side="BUY", timestamp=None):
         self._assert_owner(portfolio_id, user_id)
+        ticker = (ticker or "").strip().upper()
+        if not ticker:
+            raise ValueError("Ticker is required")
         if quantity <= 0:
             raise ValueError("Option quantity must be positive")
         if option_type not in {"CALL", "PUT"}:
@@ -578,28 +597,16 @@ class PaperTradingEngine:
             if h["instrument_type"] == "OPTION":
                 key = self._get_position_key(h["ticker"], "OPTION", h["option_type"], h["strike"], h["expiry"])
                 option_price = current_option_prices.get(key)
-                if option_price is None:
-                    option_price = current_prices.get(h["ticker"])
-                if option_price is None:
-                    continue
-                holdings_value += h["quantity"] * float(option_price)
-                continue
-
-            price = current_prices.get(h["ticker"])
-            if price is None:
-                continue
-            holdings_value += h["quantity"] * float(price)
-
-        total_cost_basis = 0.0
-        for h in holdings:
-            if h["quantity"] is None:
-                continue
-            total_cost_basis += float(h["quantity"]) * float(h["avg_buy_price"])
+            else:
+                option_price = None
+            price = option_price if option_price is not None else current_prices.get(h["ticker"])
+            # A holding with no quote keeps its cost basis rather than counting as $0.
+            holdings_value += h["quantity"] * float(price if price is not None else h["avg_buy_price"])
 
         total_value = holdings_value + portfolio["cash_balance"]
-        total_contributed_capital = portfolio["cash_balance"] + total_cost_basis
-        total_pl = total_value - total_contributed_capital
-        total_pl_pct = (total_pl / total_contributed_capital) * 100 if total_contributed_capital else 0
+        contributed = float(portfolio["contributed_capital"] or 0)
+        total_pl = total_value - contributed
+        total_pl_pct = (total_pl / contributed) * 100 if contributed else 0
 
         self.conn.execute(
             """INSERT INTO daily_snapshots (portfolio_id, as_of, total_value, cash_balance, holdings_value, total_pl, total_pl_pct)
@@ -649,14 +656,20 @@ class PaperTradingEngine:
             raise ValueError("Cash amount must be non-negative")
         self._assert_owner(portfolio_id, user_id)
         self.conn.execute(
-            "UPDATE portfolios SET cash_balance = ROUND(cash_balance + ?, 2) WHERE id = ?",
-            (amount, portfolio_id),
+            """UPDATE portfolios SET cash_balance = ROUND(cash_balance + ?, 2),
+                                     contributed_capital = ROUND(contributed_capital + ?, 2)
+               WHERE id = ?""",
+            (amount, amount, portfolio_id),
         )
         self.conn.commit()
         return self.get_portfolio_summary(portfolio_id, user_id)
 
     @_locked
-    def get_portfolio_summary(self, portfolio_id, user_id):
+    def get_portfolio_summary(self, portfolio_id, user_id, price_for=None):
+        """price_for(ticker) -> latest price or None. Stocks are valued at that
+        price (falling back to cost when there's no quote); options are valued
+        at cost, since there's no options price feed. P/L is everything the
+        portfolio is worth now minus everything put into it."""
         self._assert_owner(portfolio_id, user_id)
         portfolio = self.conn.execute(
             "SELECT * FROM portfolios WHERE id = ?", (portfolio_id,)
@@ -671,28 +684,36 @@ class PaperTradingEngine:
         ).fetchone()
 
         total_invested = 0.0
+        holdings_value = 0.0
         sector_totals = {}
         unique_tickers = set()
+        rows = []
         for holding in holdings:
             row = dict(holding)
-            if row.get("instrument_type") == "OPTION":
-                continue
-            invested = float(row["quantity"]) * float(row["avg_buy_price"])
-            total_invested += invested
-            unique_tickers.add(row["ticker"])
+            quantity = float(row["quantity"])
+            cost = quantity * float(row["avg_buy_price"])
+            price = None
+            if row.get("instrument_type") != "OPTION":
+                unique_tickers.add(row["ticker"])
+                price = price_for(row["ticker"]) if price_for else None
+            row["current_price"] = round(float(price), 2) if price else None
+            row["market_value"] = round(quantity * float(price), 2) if price else round(cost, 2)
+            total_invested += cost
+            holdings_value += row["market_value"]
             sector = row.get("sector") or "Unassigned"
-            sector_totals[sector] = sector_totals.get(sector, 0.0) + invested
+            sector_totals[sector] = sector_totals.get(sector, 0.0) + cost
+            rows.append(row)
 
         cash_balance = float(portfolio["cash_balance"])
-        total_holdings_value = float(latest_snapshot.get("holdings_value") or 0.0) if latest_snapshot else total_invested
-        total_portfolio_value = total_holdings_value + cash_balance
-        total_contributed_capital = total_invested + cash_balance
-        total_pl = total_portfolio_value - total_contributed_capital
-        total_pl_pct = (total_pl / total_contributed_capital) * 100 if total_contributed_capital else 0.0
+        contributed = float(portfolio["contributed_capital"] or 0)
+        total_portfolio_value = holdings_value + cash_balance
+        total_pl = total_portfolio_value - contributed
+        total_pl_pct = (total_pl / contributed) * 100 if contributed else 0.0
 
         return {
             "name": portfolio["name"],
             "starting_capital": portfolio["starting_capital"],
+            "contributed_capital": round(contributed, 2),
             "cash_balance": round(cash_balance, 2),
             "remaining_balance_to_invest": round(cash_balance, 2),
             "total_invested": round(total_invested, 2),
@@ -702,9 +723,9 @@ class PaperTradingEngine:
             "sector_breakdown": {sector: round(value, 2) for sector, value in sorted(sector_totals.items())},
             "sector_count": len(sector_totals),
             "stock_count": len(unique_tickers),
-            "holdings": [dict(h) for h in holdings],
+            "holdings": rows,
             "latest": dict(latest_snapshot) if latest_snapshot else None,
-            "holdings_value": round(total_holdings_value, 2),
+            "holdings_value": round(holdings_value, 2),
         }
 
     @_locked
