@@ -207,7 +207,9 @@
         const netReturn = Number(summary.total_pl_pct ?? 0);
         const stockCount = Number(summary.stock_count ?? 0);
         const sectorCount = Number(summary.sector_count ?? 0);
-        const riskScore = Math.min(100, Math.max(0, Math.round((totalInvested / Math.max(totalPortfolioValue, 1)) * 100)));
+        // Share of the account in open positions at market value (same as the Portfolio page's risk dial).
+        const holdingsValue = Number(summary.holdings_value ?? totalInvested);
+        const riskScore = Math.min(100, Math.max(0, Math.round((holdingsValue / Math.max(totalPortfolioValue, 1)) * 100)));
 
         const accountValue = document.getElementById('overviewAccountValue');
         const accountTrend = document.getElementById('overviewAccountTrend');
@@ -234,13 +236,7 @@
 
       async function refreshOverviewData() {
         try {
-          const portfolioList = await apiFetch('/portfolio');
-          const portfolios = Array.isArray(portfolioList?.portfolios) ? portfolioList.portfolios : [];
-          if (!portfolios.length) {
-            renderOverviewData({});
-            return;
-          }
-          const summary = await apiFetch(`/portfolio/${portfolios[0].id}`);
+          const summary = await apiFetch(`/portfolio/${await getPortfolioId()}`);
           renderOverviewData(summary);
         } catch (error) {
           renderOverviewData({});
@@ -317,7 +313,7 @@
                 const pct = Number(item.momentum_pct || 0);
                 return `<li><span>${escapeHtml(item.ticker)}</span> <span class="${pct >= 0 ? 'pos' : 'neg'}">${formatPercent(pct)}</span></li>`;
               }).join('')
-            : '<li><span>No stocks in this group yet.</span></li>';
+            : `<li><span>${data.status?.warming_up ? 'Market data is loading (about 2 minutes on first start)…' : 'No stocks in this group yet.'}</span></li>`;
         } catch (error) {
           if (requestId !== topMoversRequest) return;
           list.innerHTML = '<li><span>Could not load market data.</span></li>';

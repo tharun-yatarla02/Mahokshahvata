@@ -71,7 +71,62 @@
         </div>
       </div>
 
-      <div class="card premium-card">
+      <div class="stats">
+        <div class="stat accent-card">
+          <div class="stat-label">Headlines analysed</div>
+          <div class="stat-value" id="pulseHeadlines">--</div>
+          <div class="stat-sub" id="pulseCoverage">Matched to stocks and sectors</div>
+        </div>
+        <div class="stat success-card">
+          <div class="stat-label">Positive</div>
+          <div class="stat-value positive" id="pulsePositive">--</div>
+          <div class="stat-sub" id="pulsePositiveShare">Share of headlines</div>
+        </div>
+        <div class="stat warning-card">
+          <div class="stat-label">Negative</div>
+          <div class="stat-value negative" id="pulseNegative">--</div>
+          <div class="stat-sub" id="pulseNegativeShare">Share of headlines</div>
+        </div>
+        <div class="stat neutral-card">
+          <div class="stat-label">News updated</div>
+          <div class="stat-value" id="pulseUpdated">--</div>
+          <div class="stat-sub" id="pulseNext">Refreshes every 5 min</div>
+        </div>
+      </div>
+
+      <div class="grid suggestion-grid">
+        <div class="card premium-card">
+          <div class="premium-header">
+            <div>
+              <div class="mini-label">Suggested from today's news</div>
+              <h2>Stocks in the news</h2>
+            </div>
+          </div>
+          <div id="stockSuggestions" class="suggestion-list">
+            <div class="empty-state">Loading suggestions…</div>
+          </div>
+        </div>
+        <div class="card premium-card">
+          <div class="premium-header">
+            <div>
+              <div class="mini-label">Where the news is pointing</div>
+              <h2>Sectors to watch</h2>
+            </div>
+          </div>
+          <div id="sectorSuggestions" class="suggestion-list">
+            <div class="empty-state">Loading sectors…</div>
+          </div>
+        </div>
+      </div>
+      <p class="suggestion-disclaimer">Suggestions combine the tone of recent headlines with each stock's price trend. They're informational, not investment advice. Prices are ~15 minutes delayed.</p>
+
+      <div class="card premium-card" id="newsFeedCard">
+        <div class="premium-header">
+          <div>
+            <div class="mini-label">Latest headlines</div>
+            <h2>News feed</h2>
+          </div>
+        </div>
         <div class="button-row" style="justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;">
           <div class="filter-row" style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center;">
             <input id="sentimentSearch" type="search" placeholder="Search headlines or tickers" aria-label="Search headlines" />
@@ -178,7 +233,7 @@
           }
           button.addEventListener('click', () => {
             sentimentState.currentPage = page;
-            renderSentiment({ results: getFilteredResults() });
+            renderFeed();
           });
           pageGroup.appendChild(button);
         }
@@ -192,15 +247,20 @@
           return bTime - aTime;
         });
 
+        sentimentBadge.textContent = data?.fallback ? 'Demo fallback' : 'Live scan';
+        getSourceOptions(sentimentState.rawResults);
+        renderFeed();
+      }
+
+      // Redraws the feed from the full article list with the current filters.
+      // Filters must never overwrite rawResults, or clearing a search couldn't
+      // bring the other headlines back.
+      function renderFeed() {
         if (!sentimentState.rawResults.length) {
           sentimentOutput.innerHTML = '<div class="sentiment-item"><p class="sentiment-summary">No market headlines matched the current scan.</p></div>';
           document.getElementById('sentimentPagination').style.display = 'none';
           return;
         }
-
-        const isFallback = Boolean(data?.fallback);
-        sentimentBadge.textContent = isFallback ? 'Demo fallback' : 'Live scan';
-        getSourceOptions(sentimentState.rawResults);
         const filtered = getFilteredResults();
         const totalPages = Math.max(1, Math.ceil(filtered.length / sentimentState.pageSize));
         sentimentState.currentPage = Math.min(sentimentState.currentPage, totalPages);
@@ -255,6 +315,122 @@
         }).join('');
       }
 
+      function formatMoney(value) {
+        if (value === null || value === undefined) return '--';
+        return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(value));
+      }
+
+      function formatChange(value, digits = 1) {
+        if (value === null || value === undefined) return '<span>--</span>';
+        const n = Number(value);
+        return `<span class="${n >= 0 ? 'positive' : 'negative'}">${n >= 0 ? '+' : ''}${n.toFixed(digits)}%</span>`;
+      }
+
+      function toneBadge(label) {
+        const cls = label === 'Positive' ? 'positive' : label === 'Negative' ? 'negative' : 'neutral';
+        return `<span class="sentiment-badge ${cls}">${escapeHtml(label)}</span>`;
+      }
+
+      function mentionsText(item) {
+        const parts = [`${item.mentions} headline${item.mentions === 1 ? '' : 's'}`];
+        if (item.positive) parts.push(`${item.positive} positive`);
+        if (item.negative) parts.push(`${item.negative} negative`);
+        return parts.join(' · ');
+      }
+
+      function headlineLink(headline) {
+        if (!headline?.title) return '';
+        const url = safeUrl(headline.link);
+        const title = escapeHtml(headline.title);
+        return `<div class="suggestion-headline">Latest: ${url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${title}</a>` : title}</div>`;
+      }
+
+      function renderSuggestions(data) {
+        const suggestions = data?.suggestions || {};
+        const overview = suggestions.overview || {};
+        const total = Number(overview.headlines || 0);
+        const share = (n) => (total ? `${Math.round((100 * n) / total)}% of headlines` : 'Share of headlines');
+        document.getElementById('pulseHeadlines').textContent = total || '0';
+        document.getElementById('pulseCoverage').textContent =
+          `${overview.stocks_mentioned || 0} stocks · ${overview.sectors_mentioned || 0} sectors mentioned`;
+        document.getElementById('pulsePositive').textContent = overview.positive ?? '0';
+        document.getElementById('pulsePositiveShare').textContent = share(overview.positive || 0);
+        document.getElementById('pulseNegative').textContent = overview.negative ?? '0';
+        document.getElementById('pulseNegativeShare').textContent = share(overview.negative || 0);
+        const generated = data?.generated_at ? new Date(data.generated_at) : null;
+        document.getElementById('pulseUpdated').textContent = generated
+          ? generated.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '--';
+        const nextIn = Number(data?.next_refresh_in ?? 300);
+        document.getElementById('pulseNext').textContent =
+          nextIn > 60 ? `Next news update in ${Math.ceil(nextIn / 60)} min` : 'Next news update in under a minute';
+
+        const stocks = suggestions.stocks || [];
+        document.getElementById('stockSuggestions').innerHTML = stocks.length ? stocks.map((item) => {
+          const c = item.condition;
+          const condition = c
+            ? `${formatMoney(c.current_price)} · Today ${formatChange(c.day_change_pct)} · 90 days ${formatChange(c.momentum_pct)}`
+            : 'No live price (not in the tracked market list)';
+          return `
+            <div class="suggestion-row" role="button" tabindex="0" data-ticker="${escapeHtml(item.ticker)}" title="Show ${escapeHtml(item.ticker)} headlines in the feed">
+              <div class="suggestion-top">
+                <div>
+                  <span class="symbol-badge">${escapeHtml(item.ticker)}</span>
+                  <span class="suggestion-name">${escapeHtml(item.name)}</span>
+                </div>
+                ${toneBadge(item.tone_label)}
+              </div>
+              <div class="suggestion-condition">${condition}</div>
+              <div class="suggestion-signal">${escapeHtml(item.signal)}</div>
+              <div class="suggestion-meta">${escapeHtml(mentionsText(item))}${item.sector ? ` · ${escapeHtml(item.sector)}` : ''}</div>
+              ${headlineLink(item.latest_headline)}
+            </div>
+          `;
+        }).join('') : '<div class="empty-state">No stocks named in the latest headlines.</div>';
+
+        const sectors = suggestions.sectors || [];
+        document.getElementById('sectorSuggestions').innerHTML = sectors.length ? sectors.map((item) => {
+          const c = item.condition;
+          const condition = c
+            ? `Median stock today ${formatChange(c.median_day_change_pct, 2)} · ${c.advancing_pct ?? '--'}% of ${c.stocks_tracked} stocks up · 90 days ${formatChange(c.median_momentum_pct)}`
+            : 'No tracked stocks in this sector';
+          const leaders = (c?.leaders || []).map((l) =>
+            `<span class="leader-chip">${escapeHtml(l.ticker)} ${formatChange(l.momentum_pct, 0)}</span>`).join('');
+          return `
+            <div class="suggestion-row">
+              <div class="suggestion-top">
+                <div><span class="suggestion-name">${escapeHtml(item.sector)}</span></div>
+                ${toneBadge(item.tone_label)}
+              </div>
+              <div class="suggestion-condition">${condition}</div>
+              ${leaders ? `<div class="suggestion-leaders"><span>Leading large caps (90 days):</span>${leaders}</div>` : ''}
+              <div class="suggestion-meta">${escapeHtml(mentionsText(item))} · <a href="/market.html?sector=${encodeURIComponent(item.sector)}">View sector in Market →</a></div>
+              ${headlineLink(item.latest_headline)}
+            </div>
+          `;
+        }).join('') : '<div class="empty-state">No sectors in the latest headlines.</div>';
+      }
+
+      // Clicking a suggested stock narrows the news feed to it.
+      function focusTicker(ticker) {
+        const search = document.getElementById('sentimentSearch');
+        search.value = ticker;
+        sentimentState.currentPage = 1;
+        renderFeed();
+        document.getElementById('newsFeedCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+      document.getElementById('stockSuggestions').addEventListener('click', (event) => {
+        if (event.target.closest('a')) return;
+        const row = event.target.closest('[data-ticker]');
+        if (row) focusTicker(row.dataset.ticker);
+      });
+      document.getElementById('stockSuggestions').addEventListener('keydown', (event) => {
+        const row = event.target.closest('[data-ticker]');
+        if (row && (event.key === 'Enter' || event.key === ' ')) {
+          event.preventDefault();
+          focusTicker(row.dataset.ticker);
+        }
+      });
+
       function setLoadingState(isLoading) {
         const button = document.getElementById('loadSentimentBtn');
         if (!button) return;
@@ -262,11 +438,12 @@
         button.textContent = isLoading ? 'Refreshing...' : 'Refresh feed';
       }
 
-      async function loadSentiment() {
+      async function loadSentiment(refresh = false) {
         setLoadingState(true);
         try {
-          const data = await apiFetch('/news-sentiment');
+          const data = await apiFetch(`/news-sentiment${refresh ? '?refresh=true' : ''}`);
           renderSentiment(data);
+          renderSuggestions(data);
           sentimentBadge.textContent = data.fallback ? 'Demo fallback' : 'Live scan';
         } catch (err) {
           sentimentOutput.innerHTML = `<div class="sentiment-item"><p class="sentiment-summary">${escapeHtml(String(err))}</p></div>`;
@@ -322,7 +499,7 @@
         setTheme(nextTheme);
       }
 
-      document.getElementById('loadSentimentBtn').addEventListener('click', loadSentiment);
+      document.getElementById('loadSentimentBtn').addEventListener('click', () => loadSentiment(true));
       document.querySelectorAll('.sector-pill').forEach((button) => {
         button.addEventListener('click', () => {
           const selected = button.dataset.sentiment || 'all';
@@ -334,37 +511,32 @@
             chip.classList.toggle('active', chip === button);
           });
           sentimentState.currentPage = 1;
-          renderSentiment({ results: getFilteredResults() });
+          renderFeed();
         });
       });
       document.getElementById('sentimentSearch').addEventListener('input', () => {
         sentimentState.currentPage = 1;
-        const filtered = getFilteredResults();
-        if (!filtered.length) {
-          sentimentOutput.innerHTML = '<div class="sentiment-item"><p class="sentiment-summary">No headlines match the selected filters.</p></div>';
-        } else {
-          renderSentiment({ results: filtered });
-        }
+        renderFeed();
       });
       document.getElementById('sentimentFilter').addEventListener('change', () => {
         sentimentState.currentPage = 1;
-        renderSentiment({ results: getFilteredResults() });
+        renderFeed();
       });
       document.getElementById('sourceFilter').addEventListener('change', () => {
         sentimentState.currentPage = 1;
-        renderSentiment({ results: getFilteredResults() });
+        renderFeed();
       });
       document.getElementById('prevPageBtn').addEventListener('click', () => {
         if (sentimentState.currentPage > 1) {
           sentimentState.currentPage -= 1;
-          renderSentiment({ results: getFilteredResults() });
+          renderFeed();
         }
       });
       document.getElementById('nextPageBtn').addEventListener('click', () => {
         const totalPages = Math.max(1, Math.ceil(getFilteredResults().length / sentimentState.pageSize));
         if (sentimentState.currentPage < totalPages) {
           sentimentState.currentPage += 1;
-          renderSentiment({ results: getFilteredResults() });
+          renderFeed();
         }
       });
       document.getElementById('themeToggle').addEventListener('click', () => {
@@ -394,7 +566,8 @@
       renderProfile();
       applyTheme();
       loadSentiment();
-      setInterval(loadSentiment, 20000);
+      // Prices in the suggestions move every few minutes; headlines refresh every 5.
+      setInterval(() => loadSentiment(), 60000);
     </script>
   </body>
 </html>

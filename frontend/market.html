@@ -406,6 +406,7 @@
             : '--';
 
           if (status.warming_up) {
+            marketTableBody.innerHTML = '<tr><td colspan="7">Loading market data…</td></tr>';
             setStatus('Loading market data for the top US stocks. The first start takes about 2 minutes; this page will update on its own.', '');
             warmupTimer = setTimeout(loadMomentumData, 10000);
           } else if (status.last_error) {

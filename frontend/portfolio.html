@@ -70,22 +70,22 @@
         <div class="stat accent-card">
           <div class="stat-label">Invested amount</div>
           <div class="stat-value" id="totalInvestedValue">$0.00</div>
-          <div class="stat-sub">Capital currently allocated</div>
+          <div class="stat-sub">What you paid for open positions</div>
         </div>
         <div class="stat success-card">
           <div class="stat-label">Profit</div>
           <div class="stat-value" id="portfolioProfitValue">+$0.00</div>
-          <div class="stat-sub">Live portfolio gain or loss</div>
+          <div class="stat-sub">Account value minus funds deposited</div>
         </div>
         <div class="stat warning-card">
           <div class="stat-label">Remaining balance</div>
           <div class="stat-value" id="remainingBalanceValue">$0.00</div>
-          <div class="stat-sub">Cash available to deploy</div>
+          <div class="stat-sub">Cash to deploy · <a href="/billing.html">Add funds</a></div>
         </div>
         <div class="stat neutral-card">
           <div class="stat-label">Sectors</div>
           <div class="stat-value" id="sectorCountValue">0</div>
-          <div class="stat-sub">Active sector allocations</div>
+          <div class="stat-sub">Sectors across your stocks</div>
         </div>
       </div>
 
@@ -98,6 +98,7 @@
             </div>
             <div class="mini-chip positive" id="performanceTrendChip">+0.00%</div>
           </div>
+          <p class="sparkline-note" id="sparklineNote"></p>
           <div class="sparkline-wrap">
             <svg id="portfolioSparkline" class="sparkline" viewBox="0 0 320 120" preserveAspectRatio="none" aria-label="Portfolio performance trend"></svg>
             <div id="sparklineTooltip" class="sparkline-tooltip" hidden></div>
@@ -126,14 +127,14 @@
             <small>Available to deploy</small>
           </div>
           <div class="trend-tile accent">
-            <span class="tile-label">Cash used</span>
+            <span class="tile-label">Holdings value</span>
             <strong id="cashUsedTile">$0.00</strong>
-            <small>Capital allocated</small>
+            <small>Open positions at market</small>
           </div>
           <div class="trend-tile warning">
             <span class="tile-label">Risk dial</span>
             <strong id="riskTile">0 / 100</strong>
-            <small>Portfolio exposure</small>
+            <small>Share of account invested</small>
           </div>
         </div>
       </div>
@@ -181,36 +182,37 @@
           </div>
 
           <div class="action-panel">
-            <h3>Billing</h3>
+            <h3>Trade stocks</h3>
+            <label class="label" for="tradeTicker">Stock</label>
+            <input id="tradeTicker" type="text" value="AAPL" placeholder="Search ticker or company" />
+            <div class="market-price-line" id="tradeMarketPrice">Market price: loading…</div>
+            <div class="form-grid">
+              <div>
+                <label class="label" for="tradeSide">Action</label>
+                <select id="tradeSide">
+                  <option value="BUY">Buy</option>
+                  <option value="SELL">Sell</option>
+                </select>
+              </div>
+              <div>
+                <label class="label" for="tradeMode">Order by</label>
+                <select id="tradeMode">
+                  <option value="quantity">Shares</option>
+                  <option value="amount">Dollar amount</option>
+                </select>
+              </div>
+            </div>
+            <label class="label" for="tradeSize" id="tradeSizeLabel">Shares</label>
             <div class="inline-add-cash">
-              <input id="addCashAmount" type="number" min="0" step="50" value="250" placeholder="Add funds to portfolio" />
-              <button id="addCashBtn" class="secondary">Add funds</button>
+              <input id="tradeSize" type="number" min="0" step="any" value="1" inputmode="decimal" />
+              <button id="tradeMaxBtn" class="secondary" type="button">Max</button>
             </div>
-
-            <h3 style="margin-top: 18px;">Portfolio actions</h3>
-            <label class="label" for="tradeTicker">Trade ticker</label>
-            <input id="tradeTicker" type="text" value="AAPL" placeholder="Search or select stock" />
-            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
-              <div>
-                <label class="label" for="tradeQuantity">Qty</label>
-                <input id="tradeQuantity" type="number" min="1" step="1" value="10" />
-              </div>
-              <div>
-                <label class="label" for="tradePrice">Price</label>
-                <input id="tradePrice" type="number" min="0.01" step="0.01" value="150" />
-              </div>
-            </div>
-            <label class="label" for="tradeTriggerPrice">Trigger / limit price (optional)</label>
-            <input id="tradeTriggerPrice" type="number" min="0.01" step="0.01" placeholder="Buy when price reaches" />
-            <label class="label" for="tradeSide">Action</label>
-            <select id="tradeSide">
-              <option value="BUY">BUY</option>
-              <option value="SELL">SELL</option>
-            </select>
+            <div class="trade-preview" id="tradePreview" aria-live="polite">Enter an order to see the cost.</div>
             <div class="button-row stacked-actions">
-              <button id="tradeStockBtn">Execute trade</button>
-              <button id="useLivePriceBtn" class="secondary" type="button">Use live market price</button>
+              <button id="tradeStockBtn" type="button" disabled>Buy at market price</button>
             </div>
+            <p class="order-rules">Orders fill at the market price (~15 min delayed quote). Fractional shares to 6 decimals, $1 minimum.</p>
+          </div>
           </div>
 
           <div class="output-panel">
@@ -218,7 +220,7 @@
               <h3>Portfolio output</h3>
               <button id="tradeHistoryBtn" class="secondary small-btn" type="button">History</button>
             </div>
-            <pre id="portfolioOutput">No portfolio yet.</pre>
+            <pre id="portfolioOutput">Loading portfolio…</pre>
             <div class="history-table-wrap">
               <table class="history-table">
                 <thead>
@@ -303,7 +305,7 @@
         }).join(' ');
       }
 
-      function renderSparkline(series) {
+      function renderSparkline(series, labels = []) {
         const path = buildSparklinePath(series);
         portfolioSparkline.innerHTML = `
           <defs>
@@ -329,7 +331,7 @@
         const points = series.map((point, index) => {
           const x = (index / (series.length - 1)) * width;
           const y = height - ((point - min) / range) * (height - 16) - 8;
-          return { x, y, value: point };
+          return { x, y, value: point, label: labels[index] };
         });
 
         points.forEach((point, index) => {
@@ -342,7 +344,7 @@
           circle.style.cursor = 'pointer';
           circle.addEventListener('mouseenter', (event) => {
             sparklineTooltip.hidden = false;
-            sparklineTooltip.innerHTML = `${formatCurrency(point.value)}<span>Portfolio snapshot</span>`;
+            sparklineTooltip.innerHTML = `${formatCurrency(point.value)}<span>${escapeHtml(point.label ? String(point.label).slice(0, 10) : 'Account value')}</span>`;
             const rect = portfolioSparkline.getBoundingClientRect();
             sparklineTooltip.style.left = `${event.clientX - rect.left + 12}px`;
             sparklineTooltip.style.top = `${event.clientY - rect.top - 10}px`;
@@ -365,7 +367,10 @@
           ...(Object.keys(window.__portfolioSectorSummary || {})),
         ])];
 
-        const chips = ['All', ...sectors].slice(0, 6);
+        // Every sector gets a chip (largest first), so none is unreachable.
+        const sectorValue = window.__portfolioSectorSummary || {};
+        sectors.sort((a, b) => (sectorValue[b] || 0) - (sectorValue[a] || 0));
+        const chips = ['All', ...sectors];
         const activeValue = activeHoldingsFilter === 'all' ? 'All' : activeHoldingsFilter;
         holdingFilterChips.innerHTML = chips.map((sector) => {
           const normalized = sector === 'All' ? 'all' : sector;
@@ -405,7 +410,7 @@
               <div class="sector-bar">
                 <span style="width: ${width}%"></span>
               </div>
-              <small>${pct}% of total portfolio allocation</small>
+              <small>${pct}% of holdings value</small>
             </div>
           `;
         }).join('');
@@ -414,6 +419,10 @@
       function renderHoldingsTable(holdings) {
         const rows = Array.isArray(holdings) ? holdings : [];
         activePortfolioHoldings = rows;
+        // A sector with nothing left in it (e.g. after selling out) falls back to All.
+        if (activeHoldingsFilter !== 'all' && !rows.some((row) => (row.sector || 'Unassigned') === activeHoldingsFilter)) {
+          activeHoldingsFilter = 'all';
+        }
         const filteredRows = activeHoldingsFilter === 'all'
           ? rows
           : rows.filter((row) => (row.sector || 'Unassigned') === activeHoldingsFilter);
@@ -426,7 +435,8 @@
 
         // The server values stocks at the latest tracked price (options at cost).
         const marketValue = (row) => Number(row.market_value ?? Number(row.quantity || 0) * Number(row.avg_buy_price || 0));
-        const totalValue = filteredRows.reduce((sum, row) => sum + marketValue(row), 0) || 1;
+        // Weight is each position's share of all holdings, so it doesn't change with the filter.
+        const totalValue = rows.reduce((sum, row) => sum + marketValue(row), 0) || 1;
         holdingsTableBody.innerHTML = filteredRows.map((row) => {
           const quantity = Number(row.quantity || 0);
           const price = Number(row.current_price ?? row.avg_buy_price ?? 0);
@@ -438,7 +448,7 @@
             <tr>
               <td><div class="symbol-badge">${escapeHtml(symbol)}</div></td>
               <td>${escapeHtml(sector)}</td>
-              <td>${quantity}</td>
+              <td>${formatShares(quantity)}</td>
               <td>${formatCurrency(price)}</td>
               <td>${formatCurrency(value)}</td>
               <td>
@@ -464,15 +474,7 @@
         const pnl = Number(summary.total_pl ?? 0);
         const netReturn = Number(summary.total_pl_pct ?? 0);
         const portfolioProfitValue = document.getElementById('portfolioProfitValue');
-        const sparkSeries = [
-          Math.max(40, totalPortfolioValue * 0.62),
-          Math.max(42, totalPortfolioValue * 0.68),
-          Math.max(48, totalPortfolioValue * 0.74),
-          Math.max(55, totalPortfolioValue * 0.82),
-          Math.max(68, totalPortfolioValue * 0.9),
-          Math.max(70, totalPortfolioValue * 0.96),
-          totalPortfolioValue,
-        ];
+        const holdingsValue = Number(summary.holdings_value ?? totalInvested);
 
         window.__portfolioSectorSummary = summary.sector_breakdown || {};
         remainingBalanceValue.textContent = formatCurrency(cashBalance);
@@ -491,11 +493,33 @@
         netReturnTile.textContent = formatPercent(netReturn);
         netReturnNote.textContent = `${formatSignedCurrency(pnl)} total P/L`;
         buyingPowerTile.textContent = formatCurrency(cashBalance);
-        cashUsedTile.textContent = formatCurrency(totalInvested);
-        riskTile.textContent = `${Math.min(100, Math.max(10, Math.round((totalInvested / Math.max(totalPortfolioValue, 1)) * 100)))} / 100`;
-        renderSparkline(sparkSeries);
+        cashUsedTile.textContent = formatCurrency(holdingsValue);
+        // Share of the account in open positions (at market value): 0 = all cash.
+        const exposure = totalPortfolioValue > 0 ? Math.round((holdingsValue / totalPortfolioValue) * 100) : 0;
+        riskTile.textContent = `${Math.min(100, Math.max(0, exposure))} / 100`;
         renderSectorBreakdown(summary.sector_breakdown || {});
         renderHoldingsTable(summary.holdings || []);
+      }
+
+      // The chart plots one recorded value per day (saved whenever the
+      // portfolio is viewed), not made-up points.
+      async function refreshPerformanceHistory() {
+        const note = document.getElementById('sparklineNote');
+        try {
+          const data = await apiFetch(`/portfolio/${currentPortfolioId}/history`);
+          const history = (data.history || []).filter((row) => row.total_value != null);
+          if (history.length < 2) {
+            renderSparkline([]);
+            note.textContent = 'Tracking started. The chart fills in as daily values are recorded.';
+            return;
+          }
+          renderSparkline(history.map((row) => Number(row.total_value)), history.map((row) => row.as_of));
+          const first = history[0].as_of.slice(0, 10);
+          note.textContent = `Daily account value since ${new Date(`${first}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+        } catch {
+          renderSparkline([]);
+          note.textContent = '';
+        }
       }
 
       async function refreshPortfolioData() {
@@ -511,6 +535,7 @@
           const data = await apiFetch(`/portfolio/${currentPortfolioId}`);
           renderPortfolioSummary(data);
           renderPortfolioStatus(data);
+          await refreshPerformanceHistory();
         } catch (err) {
           portfolioOutput.textContent = String(err);
         }
@@ -518,110 +543,137 @@
 
       async function initializePortfolio() {
         try {
-          const data = await apiFetch('/portfolio');
-          if (data.portfolios && data.portfolios.length) {
-            currentPortfolioId = data.portfolios[0].id;
-          }
+          currentPortfolioId = await getPortfolioId();
           await refreshPortfolioData();
+          refreshTradePreview();
         } catch (err) {
           portfolioOutput.textContent = String(err);
         }
       }
 
-      async function syncLiveTradePrice() {
-        const tickerInput = document.getElementById('tradeTicker');
-        const priceInput = document.getElementById('tradePrice');
-        const ticker = tickerInput.value.trim();
-        if (!ticker) return;
-        const priceAtRequest = priceInput.value;
+      // --- Trade stocks: market orders by shares or dollars ------------------
+      const $ = (id) => document.getElementById(id);
+      let tradePlan = null;
+      let previewRequest = 0;
+      let previewTimer = null;
+
+      function formatShares(value) {
+        return Number(value || 0).toLocaleString('en-US', { maximumFractionDigits: 6 });
+      }
+
+      function readOrder(sizeOverride) {
+        const mode = $('tradeMode').value;
+        const size = Number(sizeOverride ?? $('tradeSize').value);
+        const order = { ticker: $('tradeTicker').value.trim().toUpperCase(), side: $('tradeSide').value };
+        order[mode] = size;
+        return order;
+      }
+
+      function syncTradeLabels() {
+        const buying = $('tradeSide').value === 'BUY';
+        $('tradeSizeLabel').textContent = $('tradeMode').value === 'amount'
+          ? `Amount to ${buying ? 'invest' : 'sell'} ($)` : 'Shares';
+        $('tradeStockBtn').textContent = `${buying ? 'Buy' : 'Sell'} at market price`;
+      }
+
+      function renderTradePreview(plan, error) {
+        const box = $('tradePreview');
+        const button = $('tradeStockBtn');
+        box.classList.remove('over-budget');
+        if (error) {
+          box.textContent = error;
+          box.classList.add('over-budget');
+          button.disabled = true;
+          return;
+        }
+        $('tradeMarketPrice').innerHTML = `Market price: <strong>${formatCurrency(plan.market_price)}</strong> · ${escapeHtml(plan.price_source)}`
+          + (plan.shares_owned ? ` · You own ${formatShares(plan.shares_owned)}` : '');
+        if (!plan.ok) {
+          // The server's message already says how many shares the cash buys;
+          // add the whole-share count and how to use it.
+          const shortOnCash = plan.side === 'BUY' && plan.value > plan.cash_balance;
+          const canAfford = shortOnCash
+            ? (plan.max_buy_quantity > 0
+              ? `<span>That's ${plan.max_buy_whole_shares} whole share${plan.max_buy_whole_shares === 1 ? '' : 's'}. Press Max to buy what your cash allows.</span>`
+              : '<span>Add funds on the <a href="/billing.html">Billing page</a> to buy more.</span>')
+            : '';
+          box.innerHTML = `<span>${escapeHtml(plan.message)}</span>${canAfford}`;
+          box.classList.add('over-budget');
+          button.disabled = true;
+          return;
+        }
+        const verb = plan.side === 'BUY' ? "You'll get" : "You'll sell";
+        box.innerHTML = `<span>${verb} <strong>${formatShares(plan.quantity)} ${escapeHtml(plan.ticker)}</strong> for <strong>${formatCurrency(plan.value)}</strong></span>`
+          + `<span>Cash after ${formatCurrency(plan.cash_after)}</span>`;
+        button.disabled = false;
+      }
+
+      async function refreshTradePreview() {
+        const requestId = ++previewRequest;
+        tradePlan = null;
+        $('tradeStockBtn').disabled = true;
+        const order = readOrder();
+        if (!currentPortfolioId || !order.ticker) {
+          renderTradePreview(null, currentPortfolioId ? 'Pick a stock.' : 'No portfolio yet.');
+          return;
+        }
+        const size = order.quantity ?? order.amount;
+        if (!(size > 0)) {
+          renderTradePreview(null, 'Enter how many shares, or a dollar amount.');
+          return;
+        }
         try {
-          const data = await apiFetch(`/momentum?q=${encodeURIComponent(ticker)}&top=5`);
-          // The lookup is slow: drop the result if the user has since changed the
-          // ticker or typed their own price, so a late response can't overwrite it.
-          if (tickerInput.value.trim() !== ticker || priceInput.value !== priceAtRequest) return;
-          const match = (data.results || []).find((item) => (item.ticker || '').toUpperCase() === ticker.toUpperCase());
-          if (match) {
-            priceInput.value = Number(match.current_price || 0).toFixed(2);
-          }
-        } catch (error) {
-          // Ignore and keep the manually entered value.
+          const plan = await apiFetch(`/portfolio/${currentPortfolioId}/trade-preview`, { method: 'POST', body: JSON.stringify(order) });
+          if (requestId !== previewRequest) return;  // a newer edit won
+          tradePlan = plan;
+          renderTradePreview(plan);
+        } catch (err) {
+          if (requestId === previewRequest) renderTradePreview(null, String(err.message || err));
         }
       }
 
-      let tickerLookupTimer = null;
-      document.getElementById('tradeTicker').addEventListener('change', syncLiveTradePrice);
-      document.getElementById('tradeTicker').addEventListener('input', () => {
-        clearTimeout(tickerLookupTimer);
-        const value = document.getElementById('tradeTicker').value.trim();
-        if (value && value.length >= 2) {
-          tickerLookupTimer = setTimeout(syncLiveTradePrice, 400);
+      function schedulePreview() {
+        clearTimeout(previewTimer);
+        syncTradeLabels();
+        previewTimer = setTimeout(refreshTradePreview, 250);
+      }
+
+      ['tradeSide', 'tradeMode'].forEach((id) => $(id).addEventListener('change', schedulePreview));
+      $('tradeSize').addEventListener('input', schedulePreview);
+      $('tradeTicker').addEventListener('change', schedulePreview);
+
+      // Max: everything your cash buys, or everything you own.
+      $('tradeMaxBtn').addEventListener('click', async () => {
+        if (!currentPortfolioId || !$('tradeTicker').value.trim()) return;
+        try {
+          const context = await apiFetch(`/portfolio/${currentPortfolioId}/trade-preview`, {
+            method: 'POST', body: JSON.stringify({ ...readOrder(), quantity: 1, amount: undefined }),
+          });
+          const buying = context.side === 'BUY';
+          const shares = buying ? context.max_buy_quantity : context.shares_owned;
+          $('tradeSize').value = $('tradeMode').value === 'amount'
+            ? (buying ? context.cash_balance : Math.floor(shares * context.market_price * 100) / 100)
+            : shares;
+          schedulePreview();
+        } catch (err) {
+          renderTradePreview(null, String(err.message || err));
         }
       });
 
-      document.getElementById('useLivePriceBtn').addEventListener('click', async () => {
-        await syncLiveTradePrice();
-        const trigger = document.getElementById('tradeTriggerPrice');
-        if (trigger && !trigger.value) {
-          const price = Number(document.getElementById('tradePrice').value || 0);
-          if (price > 0) trigger.value = price.toFixed(2);
-        }
-      });
-
-      document.getElementById('tradeStockBtn').addEventListener('click', async () => {
-        if (!currentPortfolioId) {
-          portfolioOutput.textContent = 'Create a portfolio first.';
-          return;
-        }
-        const triggerPrice = Number(document.getElementById('tradeTriggerPrice').value || 0);
-        const payload = {
-          ticker: document.getElementById('tradeTicker').value.trim().toUpperCase(),
-          quantity: Number(document.getElementById('tradeQuantity').value || 0),
-          price: Number(document.getElementById('tradePrice').value || 0),
-          side: document.getElementById('tradeSide').value,
-        };
-
-        if (!payload.ticker || payload.quantity <= 0 || payload.price <= 0) {
-          portfolioOutput.textContent = 'Enter a valid ticker, quantity, and price.';
-          return;
-        }
-
-        if (triggerPrice > 0) {
-          portfolioOutput.textContent = `${payload.side} ${payload.ticker} trigger set for ${formatCurrency(triggerPrice)} • Qty ${payload.quantity} • Live price ${formatCurrency(payload.price)}`;
-          await refreshPortfolioData();
-          return;
-        }
-
+      $('tradeStockBtn').addEventListener('click', async () => {
+        if (!tradePlan || !tradePlan.ok) return;
+        const button = $('tradeStockBtn');
+        button.disabled = true;
         try {
           const data = await apiFetch(`/portfolio/${currentPortfolioId}/trade-stock`, {
-            method: 'POST',
-            body: JSON.stringify(payload),
+            method: 'POST', body: JSON.stringify(readOrder()),
           });
-          portfolioOutput.textContent = `${data?.summary || `${payload.side} ${payload.ticker}` } • ${payload.quantity} shares @ ${formatCurrency(payload.price)}`;
           await refreshPortfolioData();
+          portfolioOutput.textContent = `${data.side === 'BUY' ? 'Bought' : 'Sold'} ${formatShares(data.quantity)} ${data.ticker} at ${formatCurrency(data.price)} for ${formatCurrency(data.value)} • Cash now ${formatCurrency(data.cash_balance)}`;
         } catch (err) {
-          portfolioOutput.textContent = String(err);
-        }
-      });
-
-      document.getElementById('addCashBtn').addEventListener('click', async () => {
-        if (!currentPortfolioId) {
-          portfolioOutput.textContent = 'Create a portfolio first.';
-          return;
-        }
-        const amount = Number(document.getElementById('addCashAmount').value || 0);
-        if (!amount || amount <= 0) {
-          portfolioOutput.textContent = 'Enter a valid billing amount.';
-          return;
-        }
-        try {
-          const data = await apiFetch(`/portfolio/${currentPortfolioId}/cash`, {
-            method: 'POST',
-            body: JSON.stringify({ amount }),
-          });
-          portfolioOutput.textContent = `Funds added successfully • ${formatCurrency(amount)} credited to the account`;
-          await refreshPortfolioData();
-        } catch (err) {
-          portfolioOutput.textContent = String(err);
+          portfolioOutput.textContent = String(err.message || err);
+        } finally {
+          refreshTradePreview();
         }
       });
 
@@ -740,7 +792,7 @@
               <td>${timestamp}</td>
               <td><span class="trade-pill ${sideClass}">${escapeHtml(side)}</span></td>
               <td>${escapeHtml(symbol)}</td>
-              <td>${quantity} shares<br><small>${formatCurrency(price)}</small></td>
+              <td>${formatShares(quantity)} shares<br><small>${formatCurrency(price)} each · ${formatCurrency(quantity * price)}</small></td>
             </tr>
           `;
         }).join('');
@@ -766,8 +818,11 @@
           historyTableBody.innerHTML = '<tr><td colspan="4" class="empty-table-row">Create a portfolio first.</td></tr>';
           return;
         }
-        const data = await apiFetch(`/portfolio/${currentPortfolioId}/trade-history`);
-        renderTradeHistory(data);
+        try {
+          renderTradeHistory(await apiFetch(`/portfolio/${currentPortfolioId}/trade-history`));
+        } catch (err) {
+          historyTableBody.innerHTML = `<tr><td colspan="4" class="empty-table-row">${escapeHtml(String(err.message || err))}</td></tr>`;
+        }
       });
 
       document.addEventListener('click', (event) => {
@@ -789,8 +844,7 @@
         document.getElementById('tradeTicker').value = pendingTicker;
         localStorage.removeItem('pendingTradeTicker');
       }
-      // Start from the live price: trades more than 5% off it are rejected.
-      syncLiveTradePrice();
+      syncTradeLabels();
 
       renderProfile();
       applyTheme();

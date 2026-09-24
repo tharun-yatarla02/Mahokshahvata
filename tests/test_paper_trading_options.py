@@ -296,3 +296,29 @@ def test_contributed_capital_is_backfilled_for_existing_portfolios(tmp_path):
     summary = reopened.get_portfolio_summary(pid, user)
     assert summary["contributed_capital"] == 1300.0
     assert summary["total_pl"] == 50.0
+
+
+def test_sector_breakdown_uses_market_value_and_counts_stock_sectors_only(tmp_path):
+    engine, user, pid = _engine_with_portfolio(tmp_path, capital=10000)
+    engine.trade_stock(pid, user, "AAPL", 10, 100, sector="Technology")
+    engine.trade_stock(pid, user, "XOM", 10, 100, sector="Energy")
+    engine.trade_option(pid, user, "AAPL", "CALL", 200, "2099-12-18", 1, 50)
+
+    summary = engine.get_portfolio_summary(pid, user, price_for={"AAPL": 150.0, "XOM": 90.0}.get)
+
+    assert summary["sector_breakdown"] == {"Energy": 900.0, "Options": 50.0, "Technology": 1500.0}
+    assert sum(summary["sector_breakdown"].values()) == summary["holdings_value"] == 2450.0
+    assert summary["sector_count"] == 2
+    assert summary["total_pl"] == 400.0   # +500 AAPL, -100 XOM, option at cost
+
+
+def test_daily_snapshot_is_one_row_per_day(tmp_path):
+    engine, user, pid = _engine_with_portfolio(tmp_path)
+    summary = engine.get_portfolio_summary(pid, user)
+    engine.record_daily_snapshot(pid, summary, as_of="2026-09-22")
+    engine.record_daily_snapshot(pid, summary, as_of="2026-09-23")
+    engine.record_daily_snapshot(pid, {**summary, "total_portfolio_value": 1234.0}, as_of="2026-09-23")
+
+    history = engine.get_history(pid, user)
+
+    assert [(h["as_of"], h["total_value"]) for h in history] == [("2026-09-22", 1000.0), ("2026-09-23", 1234.0)]

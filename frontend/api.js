@@ -22,6 +22,13 @@ async function apiFetch(path, options = {}) {
   return payload;
 }
 
+// The portfolio every page works with: the user's most recent one, created
+// with $100,000 on first visit (the server makes sure only one gets created).
+async function getPortfolioId() {
+  const data = await apiFetch('/portfolio/default', { method: 'POST' });
+  return data.portfolio_id;
+}
+
 // FastAPI sends validation errors (422) as a list of {loc, msg}; show those
 // as text instead of "[object Object]".
 function errorMessage(payload) {

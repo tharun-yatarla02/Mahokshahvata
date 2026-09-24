@@ -64,18 +64,20 @@ def test_cors_allows_local_dev_origin(client):
     assert res.headers["access-control-allow-origin"] == "http://localhost:5500"
 
 
-def test_trade_rejects_price_far_from_market(client, portfolio_id, monkeypatch):
+def test_trade_executes_at_market_price_not_the_clients(client, portfolio_id, monkeypatch):
     monkeypatch.setattr(api_main, "latest_price", lambda ticker: 200.0)
     res = client.post(f"/portfolio/{portfolio_id}/trade-stock",
                       json={"ticker": "AAPL", "quantity": 1, "price": 0.01}, headers=AUTH)
 
-    assert res.status_code == 400
+    assert res.status_code == 200
+    assert res.json()["price"] == 200.0
+    assert res.json()["cash_balance"] == 800.0
 
 
-def test_trade_near_market_price_stores_sector_and_uppercase_ticker(client, portfolio_id, monkeypatch):
+def test_trade_stores_sector_and_uppercase_ticker(client, portfolio_id, monkeypatch):
     monkeypatch.setattr(api_main, "latest_price", lambda ticker: 200.0)
     res = client.post(f"/portfolio/{portfolio_id}/trade-stock",
-                      json={"ticker": "aapl", "quantity": 1, "price": 202}, headers=AUTH)
+                      json={"ticker": "aapl", "quantity": 1}, headers=AUTH)
 
     assert res.status_code == 200
     holding = client.get(f"/portfolio/{portfolio_id}", headers=AUTH).json()["holdings"][0]
@@ -107,7 +109,7 @@ def test_concurrent_buys_cannot_overspend(tmp_path):
 def test_news_sentiment_is_cached(client, monkeypatch):
     calls = []
     monkeypatch.setattr(api_main, "_sentiment_cache", {"data": None, "at": 0.0})
-    monkeypatch.setattr(api_main, "collect_sentiment_results", lambda: calls.append(1) or {"results": []})
+    monkeypatch.setattr(api_main, "collect_sentiment_results", lambda **kwargs: calls.append(1) or {"results": []})
 
     client.get("/news-sentiment")
     client.get("/news-sentiment")
@@ -149,10 +151,103 @@ def test_portfolio_is_valued_at_the_tracked_price(client, portfolio_id, monkeypa
     monkeypatch.setattr(api_main.market_data, "lookup", lambda ticker: tracked.get(ticker))
 
     bought = client.post(f"/portfolio/{portfolio_id}/trade-stock",
-                         json={"ticker": "brk.b", "quantity": 2, "price": 108}, headers=AUTH)
+                         json={"ticker": "brk.b", "quantity": 2}, headers=AUTH)
+    tracked["BRK-B"] = {"current_price": 112.0, "sector": "Financials"}   # the market moves
     summary = client.get(f"/portfolio/{portfolio_id}", headers=AUTH).json()
 
-    assert bought.status_code == 200
+    assert bought.status_code == 200 and bought.json()["price"] == 110.0
     holding = summary["holdings"][0]
-    assert (holding["ticker"], holding["sector"], holding["current_price"]) == ("BRK-B", "Financials", 110.0)
-    assert summary["total_pl"] == 4.0   # bought 2 at 108, now 110
+    assert (holding["ticker"], holding["sector"], holding["current_price"]) == ("BRK-B", "Financials", 112.0)
+    assert summary["total_pl"] == 4.0   # bought 2 at 110, now 112
+
+
+@pytest.fixture
+def market_at_192(monkeypatch):
+    # AAPL tracked at $192.31; the portfolio fixture starts with $1,000.
+    monkeypatch.setattr(api_main.market_data, "lookup",
+                        lambda t: {"current_price": 192.31, "sector": "Technology"} if t == "AAPL" else None)
+
+
+def trade(client, pid, path="trade-stock", **body):
+    return client.post(f"/portfolio/{pid}/{path}", json={"ticker": "AAPL", **body}, headers=AUTH)
+
+
+def test_buy_by_dollar_amount_gets_fractional_shares(client, portfolio_id, market_at_192):
+    res = trade(client, portfolio_id, amount=100)
+
+    assert res.status_code == 200
+    assert res.json()["quantity"] == 0.519993        # $100 / $192.31, truncated to 6 decimals
+    assert res.json()["value"] == 100.0
+    assert res.json()["cash_balance"] == 900.0
+
+
+def test_buying_more_than_cash_allows_explains_how_many_you_can_get(client, portfolio_id, market_at_192):
+    preview = trade(client, portfolio_id, "trade-preview", quantity=10).json()
+    res = trade(client, portfolio_id, quantity=10)
+
+    assert preview["ok"] is False
+    assert preview["max_buy_quantity"] == 5.199937 and preview["max_buy_whole_shares"] == 5
+    assert "costs $1,923.10, you have $1,000.00. That buys up to 5.199937 shares" in preview["message"]
+    assert res.status_code == 400 and res.json()["detail"] == preview["message"]
+    assert client.get(f"/portfolio/{portfolio_id}", headers=AUTH).json()["cash_balance"] == 1000.0
+
+
+def test_preview_does_not_trade_and_matches_the_trade(client, portfolio_id, market_at_192):
+    preview = trade(client, portfolio_id, "trade-preview", quantity=2.5).json()
+    assert client.get(f"/portfolio/{portfolio_id}", headers=AUTH).json()["holdings"] == []
+
+    placed = trade(client, portfolio_id, quantity=2.5).json()
+
+    assert preview["ok"] and preview["value"] == 480.78     # 2.5 x 192.31 = 480.775, rounded up for a buy
+    assert (placed["quantity"], placed["value"], placed["cash_balance"]) == (2.5, 480.78, 519.22)
+
+
+def test_minimum_order_and_selling_rules(client, portfolio_id, market_at_192):
+    assert trade(client, portfolio_id, quantity=0.001).status_code == 400          # $0.19 order
+    assert "You don't own any AAPL" in trade(client, portfolio_id, quantity=1, side="SELL").json()["detail"]
+
+    trade(client, portfolio_id, amount=500)                                          # 2.599968 shares
+    too_many = trade(client, portfolio_id, quantity=3, side="SELL")
+    sell_all = trade(client, portfolio_id, quantity=2.599968, side="SELL")
+
+    assert too_many.status_code == 400 and "You own 2.599968 AAPL" in too_many.json()["detail"]
+    assert sell_all.status_code == 200
+    summary = client.get(f"/portfolio/{portfolio_id}", headers=AUTH).json()
+    assert summary["holdings"] == []
+    assert summary["cash_balance"] == 999.99      # the buy rounds up and the sell rounds down: never free money
+
+
+@pytest.mark.parametrize("body", [{}, {"quantity": 1, "amount": 100}, {"quantity": 0}, {"amount": "Infinity"}])
+def test_order_needs_exactly_one_valid_size(client, portfolio_id, market_at_192, body):
+    assert trade(client, portfolio_id, **body).status_code == 422
+
+
+def test_default_portfolio_is_created_once(client):
+    first = client.post("/portfolio/default", headers=AUTH).json()["portfolio_id"]
+    again = client.post("/portfolio/default", headers=AUTH).json()["portfolio_id"]
+
+    portfolios = client.get("/portfolio", headers=AUTH).json()["portfolios"]
+    assert first == again
+    assert [(p["id"], p["starting_capital"]) for p in portfolios] == [(first, 100000.0)]
+
+
+def test_a_small_leftover_position_can_always_be_sold(client, portfolio_id, market_at_192, monkeypatch):
+    trade(client, portfolio_id, amount=1.50)                                   # 0.0078 shares, worth $1.50
+    monkeypatch.setattr(api_main.market_data, "lookup",                         # price drops: now worth ~$0.39
+                        lambda t: {"current_price": 50.0, "sector": "Technology"} if t == "AAPL" else None)
+    owned = client.get(f"/portfolio/{portfolio_id}", headers=AUTH).json()["holdings"][0]["quantity"]
+
+    partial = trade(client, portfolio_id, quantity=owned / 2, side="SELL")
+    everything = trade(client, portfolio_id, quantity=owned, side="SELL")
+
+    assert partial.status_code == 400 and "Minimum order" in partial.json()["detail"]
+    assert everything.status_code == 200
+    assert client.get(f"/portfolio/{portfolio_id}", headers=AUTH).json()["holdings"] == []
+
+
+def test_unknown_ticker_is_a_clear_404(client, portfolio_id, monkeypatch):
+    monkeypatch.setattr(api_main, "latest_price", lambda ticker: None)
+    res = client.post(f"/portfolio/{portfolio_id}/trade-preview", json={"ticker": "ZZZZ", "quantity": 1}, headers=AUTH)
+
+    assert res.status_code == 404
+    assert "Check the ticker" in res.json()["detail"]

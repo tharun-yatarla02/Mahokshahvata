@@ -42,14 +42,17 @@ from fastapi import FastAPI, HTTPException, Depends, Header, Query
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from momentum.momentum_engine import latest_price, filter_by_group, search_rows, DEFAULT_SECTOR_LOOKUP
 from momentum.market_data import MarketData
-from paper_trading.paper_trading_engine import PaperTradingEngine, RiskRules
+from paper_trading.paper_trading_engine import (
+    MIN_ORDER_VALUE, PaperTradingEngine, RiskRules, format_shares, order_value, round_shares, shares_for_amount,
+)
 from politician_trades.politician_trades import list_politicians, get_trades_for_politician, refresh_cache
 from auth.firebase_auth import verify_firebase_token
 from news_sentiment.news_sentiment_scraper import collect_sentiment_results
+from news_sentiment.suggestions import build_suggestions, company_aliases
 
 @asynccontextmanager
 async def lifespan(app):
@@ -181,10 +184,20 @@ class AddCashRequest(BaseModel):
 
 
 class TradeStockRequest(BaseModel):
+    """A market order: give either `quantity` (shares, fractions allowed) or
+    `amount` (dollars to invest or to sell). It always executes at the
+    current market price; `price` is accepted from older clients but ignored."""
     ticker: str = Field(pattern=TICKER_PATTERN)
-    quantity: int = Field(gt=0, le=10_000_000)
-    price: float = _money()
+    quantity: float | None = Field(default=None, gt=0, le=10_000_000, allow_inf_nan=False)
+    amount: float | None = _money(default=None)
+    price: float | None = None
     side: str = Field(default="BUY", pattern="^(BUY|SELL)$")
+
+    @model_validator(mode="after")
+    def quantity_or_amount(self):
+        if (self.quantity is None) == (self.amount is None):
+            raise ValueError("Give either quantity (shares) or amount (dollars)")
+        return self
 
 
 class TradeOptionRequest(BaseModel):
@@ -254,6 +267,13 @@ def list_my_portfolios(user_id: int = Depends(get_current_user)):
     return {"portfolios": engine.list_portfolios_for_user(user_id)}
 
 
+@app.post("/portfolio/default")
+def default_portfolio(user_id: int = Depends(get_current_user)):
+    """The portfolio the dashboard pages work with: the user's most recent
+    one, created with $100,000 on first visit."""
+    return {"portfolio_id": engine.get_or_create_default_portfolio(user_id)}
+
+
 @app.post("/portfolio")
 def create_portfolio(req: CreatePortfolioRequest, user_id: int = Depends(get_current_user)):
     portfolio_id = engine.create_portfolio(user_id, req.name, req.starting_capital)
@@ -316,11 +336,14 @@ def get_portfolio(portfolio_id: int, user_id: int = Depends(get_current_user)):
     normal, valid response — not a 404. Only a portfolio that truly doesn't
     exist (or belongs to someone else) errors."""
     try:
-        return engine.get_portfolio_summary(portfolio_id, user_id, price_for=_live_price)
+        summary = engine.get_portfolio_summary(portfolio_id, user_id, price_for=_live_price)
     except PermissionError:
         raise HTTPException(status_code=403, detail="This portfolio doesn't belong to you")
     except ValueError:
         raise HTTPException(status_code=404, detail="Portfolio not found")
+    if market_data.status()["tracked"]:  # only record values backed by live prices
+        engine.record_daily_snapshot(portfolio_id, summary)
+    return summary
 
 
 @app.post("/portfolio/{portfolio_id}/mark-to-market")
@@ -344,33 +367,105 @@ def add_cash_to_portfolio(portfolio_id: int, req: AddCashRequest, user_id: int =
         raise HTTPException(status_code=400, detail=str(e))
 
 
-# How far a submitted trade price may drift from the latest market price.
-# Covers intraday moves; stops a client from buying at $0.01.
-MAX_PRICE_DEVIATION = 0.05
+FALLBACK_PRICE_TTL_SECONDS = 60
+_fallback_prices = {}  # ticker -> (monotonic time, price or None)
+
+
+def _market_price(ticker):
+    """(price, source) for a market order: the tracked quote the dashboard
+    shows, or for untracked tickers a yfinance lookup, cached briefly so a
+    live order preview doesn't download on every keystroke."""
+    tracked = market_data.lookup(ticker)
+    if tracked:
+        return tracked["current_price"], "live quote (~15 min delayed)"
+    cached = _fallback_prices.get(ticker)
+    if cached and time.monotonic() - cached[0] < FALLBACK_PRICE_TTL_SECONDS:
+        price = cached[1]
+    else:
+        price = latest_price(ticker)
+        _fallback_prices[ticker] = (time.monotonic(), price)
+    return (round(price, 2), "latest close") if price else (None, None)
+
+
+def _plan_order(portfolio_id, user_id, req):
+    """Works out a market order without placing it: shares, value, and
+    whether cash or holdings cover it. Shared by the preview and the trade,
+    so the preview always matches what the trade will do."""
+    ticker = _normalize_ticker(req.ticker)
+    price, source = _market_price(ticker)
+    if price is None:
+        raise HTTPException(status_code=404, detail=f"No market price found for {ticker}. Check the ticker symbol.")
+    try:
+        context = engine.order_context(portfolio_id, user_id, ticker)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="This portfolio doesn't belong to you")
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    cash, owned = context["cash"], context["owned"]
+    if req.amount is not None:
+        quantity = shares_for_amount(req.amount, price) if req.side == "BUY" else round_shares(req.amount / price)
+    else:
+        quantity = round_shares(req.quantity)
+    value = order_value(quantity, price, req.side)
+    max_buy = shares_for_amount(cash, price)
+
+    selling_everything = req.side == "SELL" and owned > 0 and abs(quantity - owned) < 1e-6
+    if selling_everything:
+        quantity, value = owned, order_value(owned, price, "SELL")
+    problem = None
+    if quantity <= 0 or (value < MIN_ORDER_VALUE and not selling_everything):
+        problem = f"Minimum order is ${MIN_ORDER_VALUE:,.2f}"
+    elif req.side == "BUY" and value > cash:
+        problem = (f"Not enough cash: {format_shares(quantity)} {ticker} costs ${value:,.2f}, "
+                   f"you have ${cash:,.2f}. That buys up to {format_shares(max_buy)} shares.")
+    elif req.side == "SELL" and owned == 0:
+        problem = f"You don't own any {ticker}."
+    elif req.side == "SELL" and quantity > owned + 1e-9:
+        problem = f"You own {format_shares(owned)} {ticker}; can't sell {format_shares(quantity)}."
+
+    cash_after = cash - value if req.side == "BUY" else cash + value
+    return {
+        "ticker": ticker,
+        "side": req.side,
+        "market_price": price,
+        "price_source": source,
+        "quantity": quantity,
+        "value": value,
+        "cash_balance": cash,
+        "cash_after": round(cash_after, 2),
+        "shares_owned": owned,
+        "max_buy_quantity": max_buy,
+        "max_buy_whole_shares": int(max_buy),
+        "ok": problem is None,
+        "message": problem or (
+            f"{'Buy' if req.side == 'BUY' else 'Sell'} {format_shares(quantity)} {ticker} at ${price:,.2f} "
+            f"for ${value:,.2f}"
+        ),
+    }
+
+
+@app.post("/portfolio/{portfolio_id}/trade-preview")
+def preview_trade(portfolio_id: int, req: TradeStockRequest, user_id: int = Depends(get_current_user)):
+    """What a market order would do right now, without placing it."""
+    return _plan_order(portfolio_id, user_id, req)
 
 
 @app.post("/portfolio/{portfolio_id}/trade-stock")
 def trade_stock(portfolio_id: int, req: TradeStockRequest, user_id: int = Depends(get_current_user)):
-    ticker = _normalize_ticker(req.ticker)
-    # Tracked stocks use the in-memory snapshot (the same price the dashboard
-    # shows); anything else falls back to a one-off yfinance lookup.
-    tracked = market_data.lookup(ticker)
-    market_price = tracked["current_price"] if tracked else latest_price(ticker)
-    sector = (tracked or {}).get("sector") or DEFAULT_SECTOR_LOOKUP.get(ticker, "Unknown")
-    if market_price is None:
-        raise HTTPException(status_code=502, detail=f"Could not fetch a market price for {ticker}")
-    if abs(req.price - market_price) / market_price > MAX_PRICE_DEVIATION:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Price ${req.price:.2f} is more than {MAX_PRICE_DEVIATION:.0%} away from the market price ${market_price:.2f}",
-        )
+    """Places a market order at the current market price (see TradeStockRequest)."""
+    plan = _plan_order(portfolio_id, user_id, req)
+    if not plan["ok"]:
+        raise HTTPException(status_code=400, detail=plan["message"])
+    sector = ((market_data.lookup(plan["ticker"]) or {}).get("sector")
+              or DEFAULT_SECTOR_LOOKUP.get(plan["ticker"], "Unknown"))
     try:
-        return engine.trade_stock(
+        result = engine.trade_stock(
             portfolio_id,
             user_id,
-            ticker,
-            req.quantity,
-            req.price,
+            plan["ticker"],
+            plan["quantity"],
+            plan["market_price"],
             req.side,
             sector=sector,
         )
@@ -378,6 +473,7 @@ def trade_stock(portfolio_id: int, req: TradeStockRequest, user_id: int = Depend
         raise HTTPException(status_code=403, detail="This portfolio doesn't belong to you")
     except ValueError as e:
         raise _trade_error(e)
+    return {**result, "value": plan["value"], "price_source": plan["price_source"]}
 
 
 def _trade_error(e):
@@ -501,6 +597,12 @@ def ticker_picker_js():
     raise HTTPException(status_code=404, detail="Script not found")
 
 
+@app.get("/favicon.ico")
+@app.get("/favicon.svg")
+def favicon():
+    return FileResponse(frontend_dir / "favicon.svg", media_type="image/svg+xml")
+
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
@@ -510,21 +612,39 @@ def health():
 # re-fetched all RSS feeds, re-ran Claude, and rewrote the history file.
 # The lock also means only one request at a time writes sentiment_history.json.
 SENTIMENT_TTL_SECONDS = 300
+SENTIMENT_MIN_REFRESH_SECONDS = 60  # a manual refresh can't refetch more often than this
 _sentiment_cache = {"data": None, "at": 0.0}
 _sentiment_lock = threading.Lock()
 
 
 @app.get("/news-sentiment")
-def get_news_sentiment():
-    """Returns current news sentiment for tracked tickers and sector themes.
-    If the live RSS feed yields no relevant headlines, this returns a curated
-    demo fallback so the frontend still shows meaningful sentiment.
-    Results are cached for SENTIMENT_TTL_SECONDS."""
+def get_news_sentiment(refresh: bool = False):
+    """Returns current news sentiment for tracked tickers and sector themes,
+    plus `suggestions`: the stocks and sectors in the news next to their
+    present market condition. If the live RSS feed yields no relevant
+    headlines, this returns a curated demo fallback so the frontend still
+    shows meaningful sentiment.
+
+    Headlines are cached for SENTIMENT_TTL_SECONDS; refresh=true refetches
+    sooner, but not more than once a minute. Suggestions are rebuilt on every
+    request so prices are always the latest snapshot."""
+    rows = market_data.snapshot()
     with _sentiment_lock:
-        if _sentiment_cache["data"] is None or time.monotonic() - _sentiment_cache["at"] > SENTIMENT_TTL_SECONDS:
-            _sentiment_cache["data"] = collect_sentiment_results()
+        age = time.monotonic() - _sentiment_cache["at"]
+        stale = age > (SENTIMENT_MIN_REFRESH_SECONDS if refresh else SENTIMENT_TTL_SECONDS)
+        if _sentiment_cache["data"] is None or stale:
+            _sentiment_cache["data"] = collect_sentiment_results(
+                extra_companies=company_aliases(rows),
+                known_tickers={row["ticker"] for row in rows} or None,
+            )
             _sentiment_cache["at"] = time.monotonic()
-        return _sentiment_cache["data"]
+            age = 0.0
+        data = _sentiment_cache["data"]
+    return {
+        **data,
+        "suggestions": build_suggestions(data["results"], market_data.lookup, rows),
+        "next_refresh_in": max(0, round(SENTIMENT_TTL_SECONDS - age)),
+    }
 
 
 # ---------------------------------------------------------------------------

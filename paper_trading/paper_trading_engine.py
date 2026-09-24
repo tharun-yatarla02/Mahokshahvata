@@ -29,6 +29,48 @@ import sqlite3
 import threading
 from datetime import datetime, timezone
 from dataclasses import dataclass
+from decimal import ROUND_DOWN, ROUND_UP, Decimal
+
+
+# ---------------------------------------------------------------------------
+# Order rules for stock trades (paper trading, market orders only)
+#   - Trades execute at the market price the caller supplies (the API passes
+#     the latest tracked quote; users can't pick their own price).
+#   - Fractional shares down to 6 decimals, so "$100 of AAPL" works.
+#   - Money is in cents. Buys round the cost UP to the cent and sells round
+#     the proceeds DOWN, so rounding can never create free money.
+#   - Every order must be worth at least MIN_ORDER_VALUE; otherwise a tiny
+#     fraction (0.000001 shares) would cost $0.00 after rounding.
+# ---------------------------------------------------------------------------
+
+SHARE_DECIMALS = 6
+MIN_ORDER_VALUE = 1.00
+_SHARE_STEP = Decimal(1).scaleb(-SHARE_DECIMALS)
+_CENT = Decimal("0.01")
+
+
+def round_shares(quantity):
+    """Share count truncated to SHARE_DECIMALS (never rounds up)."""
+    return float(Decimal(str(quantity)).quantize(_SHARE_STEP, rounding=ROUND_DOWN))
+
+
+def order_value(quantity, price, side="BUY"):
+    """Cash for an order in dollars: cost rounded up for buys, proceeds
+    rounded down for sells."""
+    rounding = ROUND_UP if side == "BUY" else ROUND_DOWN
+    return float((Decimal(str(quantity)) * Decimal(str(price))).quantize(_CENT, rounding=rounding))
+
+
+def shares_for_amount(amount, price):
+    """How many shares a dollar amount buys at this price (whole cents never exceeded)."""
+    quantity = round_shares(Decimal(str(amount)) / Decimal(str(price)))
+    while quantity > 0 and order_value(quantity, price, "BUY") > amount:
+        quantity = round_shares(quantity - float(_SHARE_STEP))
+    return quantity
+
+
+def format_shares(quantity):
+    return f"{quantity:,.{SHARE_DECIMALS}f}".rstrip("0").rstrip(".")
 
 
 def _locked(method):
@@ -269,6 +311,21 @@ class PaperTradingEngine:
     # Portfolio creation
     # -----------------------------------------------------------------
 
+    DEFAULT_PORTFOLIO_NAME = "Demo Portfolio"
+    DEFAULT_STARTING_CAPITAL = 100_000.0
+
+    @_locked
+    def get_or_create_default_portfolio(self, user_id):
+        """The user's most recent portfolio, creating a $100,000 one on first
+        use. Runs under the lock so two pages opening at once can't both
+        create one."""
+        row = self.conn.execute(
+            "SELECT id FROM portfolios WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 1", (user_id,)
+        ).fetchone()
+        if row:
+            return row["id"]
+        return self.create_portfolio(user_id, self.DEFAULT_PORTFOLIO_NAME, self.DEFAULT_STARTING_CAPITAL)
+
     @_locked
     def create_portfolio(self, user_id, name, starting_capital):
         # Cash is kept rounded to cents at every write so float error can't
@@ -416,19 +473,33 @@ class PaperTradingEngine:
         return purchases
 
     @_locked
+    def order_context(self, portfolio_id, user_id, ticker):
+        """Cash available and shares of `ticker` held, for order previews."""
+        self._assert_owner(portfolio_id, user_id)
+        cash = self.conn.execute("SELECT cash_balance FROM portfolios WHERE id = ?", (portfolio_id,)).fetchone()[0]
+        held = self.conn.execute(
+            "SELECT quantity FROM holdings WHERE portfolio_id = ? AND position_key = ?",
+            (portfolio_id, self._get_position_key((ticker or "").strip().upper(), instrument_type="STOCK")),
+        ).fetchone()
+        return {"cash": round(float(cash), 2), "owned": float(held[0]) if held else 0.0}
+
+    @_locked
     def trade_stock(self, portfolio_id, user_id, ticker, quantity, price, side="BUY", timestamp=None, sector="Unknown"):
+        """Market order for `quantity` shares (fractional allowed) at `price`,
+        which must be the current market price. See the order rules above."""
         self._assert_owner(portfolio_id, user_id)
         ticker = (ticker or "").strip().upper()
         if not ticker:
             raise ValueError("Ticker is required")
-        if quantity <= 0:
-            raise ValueError("Stock quantity must be positive")
         if side not in {"BUY", "SELL"}:
             raise ValueError("side must be BUY or SELL")
 
         trade_price = float(price)
         if trade_price <= 0:
             raise ValueError("Stock price must be positive")
+        quantity = round_shares(quantity)
+        if quantity <= 0:
+            raise ValueError(f"Quantity must be at least {format_shares(float(_SHARE_STEP))} shares")
 
         ts = _normalize_timestamp(timestamp)
         portfolio = self.conn.execute(
@@ -437,16 +508,27 @@ class PaperTradingEngine:
         if portfolio is None:
             raise ValueError(f"No portfolio with id {portfolio_id}")
 
-        trade_value = round(quantity * trade_price, 2)
         position_key = self._get_position_key(ticker, instrument_type="STOCK")
         existing = self.conn.execute(
             "SELECT * FROM holdings WHERE portfolio_id = ? AND position_key = ?",
             (portfolio_id, position_key),
         ).fetchone()
+        if side == "SELL" and existing is not None and abs(existing["quantity"] - quantity) < float(_SHARE_STEP):
+            quantity = float(existing["quantity"])  # "sell all" despite float noise
+
+        trade_value = order_value(quantity, trade_price, side)
+        selling_everything = side == "SELL" and existing is not None and quantity == float(existing["quantity"])
+        if trade_value < MIN_ORDER_VALUE and not selling_everything:  # a small leftover position can always be sold
+            raise ValueError(f"Minimum order is ${MIN_ORDER_VALUE:,.2f}; {format_shares(quantity)} {ticker} is ${trade_value:,.2f}")
 
         if side == "BUY":
-            if portfolio["cash_balance"] < trade_value:
-                raise ValueError("Insufficient cash to buy this stock")
+            cash = float(portfolio["cash_balance"])
+            if cash < trade_value:
+                affordable = shares_for_amount(cash, trade_price)
+                raise ValueError(
+                    f"Not enough cash: {format_shares(quantity)} {ticker} at ${trade_price:,.2f} costs ${trade_value:,.2f}, "
+                    f"but you have ${cash:,.2f}. That buys up to {format_shares(affordable)} shares."
+                )
             self.conn.execute(
                 """INSERT INTO holdings (portfolio_id, ticker, sector, instrument_type, position_key, quantity, avg_buy_price)
                    VALUES (?, ?, ?, 'STOCK', ?, ?, ?)
@@ -462,9 +544,10 @@ class PaperTradingEngine:
                 (trade_value, portfolio_id),
             )
         else:
-            if existing is None or existing["quantity"] < quantity:
-                raise ValueError("Not enough shares to sell")
-            remaining_qty = existing["quantity"] - quantity
+            owned = float(existing["quantity"]) if existing else 0.0
+            if quantity > owned:
+                raise ValueError(f"You own {format_shares(owned)} {ticker}; can't sell {format_shares(quantity)}")
+            remaining_qty = round_shares(owned - quantity)
             if remaining_qty <= 0:
                 self.conn.execute("DELETE FROM holdings WHERE portfolio_id = ? AND position_key = ?", (portfolio_id, position_key))
             else:
@@ -685,7 +768,8 @@ class PaperTradingEngine:
 
         total_invested = 0.0
         holdings_value = 0.0
-        sector_totals = {}
+        sector_totals = {}   # current market value per sector (options at cost)
+        stock_sectors = set()
         unique_tickers = set()
         rows = []
         for holding in holdings:
@@ -693,15 +777,16 @@ class PaperTradingEngine:
             quantity = float(row["quantity"])
             cost = quantity * float(row["avg_buy_price"])
             price = None
+            sector = row.get("sector") or "Unassigned"
             if row.get("instrument_type") != "OPTION":
                 unique_tickers.add(row["ticker"])
+                stock_sectors.add(sector)
                 price = price_for(row["ticker"]) if price_for else None
             row["current_price"] = round(float(price), 2) if price else None
             row["market_value"] = round(quantity * float(price), 2) if price else round(cost, 2)
             total_invested += cost
             holdings_value += row["market_value"]
-            sector = row.get("sector") or "Unassigned"
-            sector_totals[sector] = sector_totals.get(sector, 0.0) + cost
+            sector_totals[sector] = sector_totals.get(sector, 0.0) + row["market_value"]
             rows.append(row)
 
         cash_balance = float(portfolio["cash_balance"])
@@ -721,12 +806,32 @@ class PaperTradingEngine:
             "total_pl": round(total_pl, 2),
             "total_pl_pct": round(total_pl_pct, 2),
             "sector_breakdown": {sector: round(value, 2) for sector, value in sorted(sector_totals.items())},
-            "sector_count": len(sector_totals),
+            "sector_count": len(stock_sectors),  # options aren't a sector
             "stock_count": len(unique_tickers),
             "holdings": rows,
             "latest": dict(latest_snapshot) if latest_snapshot else None,
             "holdings_value": round(holdings_value, 2),
         }
+
+    @_locked
+    def record_daily_snapshot(self, portfolio_id, summary, as_of=None):
+        """Stores today's value from a summary, one row per portfolio per day
+        (later calls the same day overwrite it). This is what the
+        performance chart plots."""
+        as_of = as_of or datetime.now(timezone.utc).date().isoformat()
+        self.conn.execute(
+            """INSERT INTO daily_snapshots (portfolio_id, as_of, total_value, cash_balance, holdings_value, total_pl, total_pl_pct)
+               VALUES (?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(portfolio_id, as_of) DO UPDATE SET
+                 total_value = excluded.total_value,
+                 cash_balance = excluded.cash_balance,
+                 holdings_value = excluded.holdings_value,
+                 total_pl = excluded.total_pl,
+                 total_pl_pct = excluded.total_pl_pct""",
+            (portfolio_id, as_of, summary["total_portfolio_value"], summary["cash_balance"],
+             summary["holdings_value"], summary["total_pl"], summary["total_pl_pct"]),
+        )
+        self.conn.commit()
 
     @_locked
     def get_history(self, portfolio_id, user_id):

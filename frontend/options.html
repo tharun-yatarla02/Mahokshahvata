@@ -61,10 +61,9 @@
           </div>
         </div>
         <div class="hero-bottom-row">
-          <div class="hero-pill-row">
-            <button class="sector-pill active" type="button" data-option-type="CALL">Calls</button>
-            <button class="sector-pill" type="button" data-option-type="PUT">Puts</button>
-            <button class="sector-pill" type="button" data-option-type="COVERED">Covered</button>
+          <div class="hero-pill-row" aria-label="Option type">
+            <button class="sector-pill active" type="button" data-option-type="CALL" aria-pressed="true">Calls</button>
+            <button class="sector-pill" type="button" data-option-type="PUT" aria-pressed="false">Puts</button>
           </div>
           <span class="badge">Desk</span>
         </div>
@@ -72,37 +71,96 @@
 
       <div class="grid">
         <div class="card premium-card">
-          <h2>New option trade</h2>
-          <div id="portfolioSummaryBox" class="status" style="margin-bottom: 12px;">Loading portfolio summary...</div>
-          <div class="button-row">
-            <button id="tradeOptionBtn">Trade option</button>
-            <button id="loadPortfolioBtn" class="secondary">Load portfolio</button>
-            <button id="tradeHistoryBtn" class="secondary">Load history</button>
+          <div class="premium-header">
+            <div>
+              <div class="mini-label">Paper options</div>
+              <h2>New option trade</h2>
+            </div>
+            <span class="underlying-quote" id="underlyingQuote"></span>
           </div>
 
-          <label class="label" for="optionTicker">Ticker</label>
-          <input id="optionTicker" type="text" value="AAPL" />
-          <label class="label" for="optionType">Option type</label>
-          <select id="optionType">
-            <option value="CALL">CALL</option>
-            <option value="PUT">PUT</option>
-          </select>
-          <label class="label" for="optionStrike">Strike</label>
-          <input id="optionStrike" type="number" value="200" min="1" step="0.01" />
-          <label class="label" for="optionExpiry">Expiry</label>
-          <input id="optionExpiry" type="text" value="2026-12-18" />
-          <label class="label" for="optionQuantity">Quantity</label>
-          <input id="optionQuantity" type="number" value="2" min="1" step="1" />
-          <label class="label" for="optionPremium">Premium</label>
-          <input id="optionPremium" type="number" value="8.5" min="0.01" step="0.01" />
-          <label class="label" for="optionSide">Side</label>
-          <select id="optionSide">
-            <option value="BUY">BUY</option>
-            <option value="SELL">SELL</option>
-          </select>
+          <div class="form-grid">
+            <div class="span-2">
+              <label class="label" for="optionTicker">Underlying stock</label>
+              <input id="optionTicker" type="text" value="AAPL" placeholder="Search ticker or company" />
+            </div>
+            <div>
+              <label class="label" for="optionType">Option type</label>
+              <select id="optionType">
+                <option value="CALL">Call</option>
+                <option value="PUT">Put</option>
+              </select>
+            </div>
+            <div>
+              <label class="label" for="optionSide">Action</label>
+              <select id="optionSide">
+                <option value="BUY">Buy to open</option>
+                <option value="SELL">Sell to close</option>
+              </select>
+            </div>
+            <div>
+              <label class="label" for="optionStrike">Strike price ($)</label>
+              <input id="optionStrike" type="number" value="200" min="0.01" step="0.01" inputmode="decimal" />
+            </div>
+            <div>
+              <label class="label" for="optionExpiry">Expiry date</label>
+              <input id="optionExpiry" type="date" />
+            </div>
+            <div>
+              <label class="label" for="optionQuantity">Contracts</label>
+              <input id="optionQuantity" type="number" value="2" min="1" step="1" inputmode="numeric" />
+            </div>
+            <div>
+              <label class="label" for="optionPremium">Premium per contract ($)</label>
+              <input id="optionPremium" type="number" value="8.5" min="0.01" step="0.01" inputmode="decimal" />
+            </div>
+          </div>
 
-          <div class="status" id="optionsStatus" style="margin-top: 16px;">Ready for a new option trade.</div>
-          <div id="optionTradeOutput" class="trade-output">No option trades yet.</div>
+          <div class="trade-preview" id="optionCostPreview" aria-live="polite"></div>
+          <div class="status" id="optionsStatus">Ready for a new option trade.</div>
+          <div class="button-row">
+            <button id="tradeOptionBtn" type="button">Place trade</button>
+            <button id="resetOptionBtn" type="button" class="secondary">Reset</button>
+          </div>
+        </div>
+
+        <div class="side-stack">
+          <div class="card premium-card">
+            <div class="compact-header">
+              <div>
+                <div class="mini-label" id="accountName">Portfolio</div>
+                <h2>Account</h2>
+              </div>
+            </div>
+            <ul class="list" id="optionAccountList">
+              <li><span>Loading portfolio…</span></li>
+            </ul>
+          </div>
+
+          <div class="card premium-card">
+            <div class="compact-header">
+              <div>
+                <div class="mini-label">Holdings</div>
+                <h2>Open option positions</h2>
+              </div>
+            </div>
+            <div id="openPositions" class="open-positions">
+              <div class="empty-state">No open option positions.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card premium-card" style="margin-top: 20px;">
+        <div class="premium-header">
+          <div>
+            <div class="mini-label">Activity</div>
+            <h2>Option trade history</h2>
+          </div>
+          <button id="tradeHistoryBtn" type="button" class="secondary small-btn">Refresh</button>
+        </div>
+        <div id="optionTradeOutput" class="trade-output">
+          <div class="empty-state">Loading trade history…</div>
         </div>
       </div>
     </div>
@@ -110,76 +168,229 @@
     <script src="/api.js"></script>
     <script src="/ticker-picker.js"></script>
     <script>
-      const optionTradeOutput = document.getElementById('optionTradeOutput');
-      const optionsStatus = document.getElementById('optionsStatus');
-      const portfolioSummaryBox = document.getElementById('portfolioSummaryBox');
+      const $ = (id) => document.getElementById(id);
+      const optionTradeOutput = $('optionTradeOutput');
+      const optionsStatus = $('optionsStatus');
       let currentPortfolioId = null;
+      let currentCash = null;
+      let quoteRequest = 0;
 
       function setOptionsStatus(message, kind = 'success') {
-        if (!optionsStatus) return;
         optionsStatus.textContent = message;
         optionsStatus.className = 'status';
         if (kind) optionsStatus.classList.add(kind);
       }
 
-      function formatTradeDate(value) {
-        if (!value) return '—';
-        const date = new Date(value);
-        if (Number.isNaN(date.getTime())) return value;
-        return new Intl.DateTimeFormat('en-US', {
-          month: 'short',
-          day: 'numeric',
-          year: 'numeric',
-          hour: 'numeric',
-          minute: '2-digit',
-        }).format(date);
+      function formatCurrency(value) {
+        return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(value || 0));
       }
 
-      function formatTradeResult(payload) {
-        const trades = Array.isArray(payload?.trades) ? payload.trades : [];
-        if (!trades.length) {
-          return '<div class="empty-state">No trade history yet.</div>';
-        }
+      function formatSignedCurrency(value) {
+        const amount = Number(value || 0);
+        return `${amount >= 0 ? '+' : '-'}${formatCurrency(Math.abs(amount))}`;
+      }
 
-        const rows = trades.map((trade) => {
-          const side = (trade.type || trade.side || 'BUY').toUpperCase();
-          const symbol = trade.ticker || 'N/A';
-          const quantity = Number(trade.quantity ?? 0);
-          const price = trade.price ?? trade.premium ?? 0;
-          const strike = trade.strike != null ? `$${Number(trade.strike).toFixed(2)}` : '—';
-          const expiry = trade.expiry || '—';
-          const tradeType = trade.instrument_type === 'OPTION' || trade.option_type ? 'Option' : 'Stock';
-          const optionType = trade.option_type || '—';
+      function formatExpiry(value) {
+        const date = new Date(`${value}T00:00:00`);
+        if (!value || Number.isNaN(date.getTime())) return value || '—';
+        return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      }
+
+      function formatTradeDate(value) {
+        const date = new Date(value);
+        if (!value || Number.isNaN(date.getTime())) return value || '—';
+        return date.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+      }
+
+      function isoDate(date) {
+        return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+      }
+
+      // Monthly options expire on the third Friday; default to the one two months out.
+      function defaultExpiry() {
+        const date = new Date();
+        date.setMonth(date.getMonth() + 2, 1);
+        date.setDate(1 + ((5 - date.getDay() + 7) % 7) + 14);
+        return isoDate(date);
+      }
+
+      function contractLabel(item) {
+        const type = item.option_type === 'PUT' ? 'Put' : 'Call';
+        return `${item.ticker || '—'} ${type} ${formatCurrency(item.strike)} · ${formatExpiry(item.expiry)}`;
+      }
+
+      // --- form ---------------------------------------------------------------
+
+      function readForm() {
+        return {
+          ticker: $('optionTicker').value.trim().toUpperCase(),
+          option_type: $('optionType').value,
+          strike: Number($('optionStrike').value),
+          expiry: $('optionExpiry').value,
+          quantity: Number($('optionQuantity').value),
+          premium: Number($('optionPremium').value),
+          side: $('optionSide').value,
+        };
+      }
+
+      function syncTypePills() {
+        const type = $('optionType').value;
+        document.querySelectorAll('.hero-pill-row .sector-pill').forEach((pill) => {
+          const active = pill.dataset.optionType === type;
+          pill.classList.toggle('active', active);
+          pill.setAttribute('aria-pressed', String(active));
+        });
+      }
+
+      function renderCostPreview() {
+        const { quantity, premium, side } = readForm();
+        const preview = $('optionCostPreview');
+        if (!(quantity > 0) || !(premium > 0)) {
+          preview.textContent = 'Enter contracts and premium to see the total.';
+          preview.classList.remove('over-budget');
+          return;
+        }
+        const total = quantity * premium;
+        const label = side === 'BUY' ? 'Total cost' : 'Proceeds';
+        let detail = `${quantity} × ${formatCurrency(premium)}`;
+        let over = false;
+        if (currentCash !== null) {
+          const after = side === 'BUY' ? currentCash - total : currentCash + total;
+          over = after < 0;
+          detail += ` · Cash after ${formatCurrency(after)}`;
+        }
+        preview.innerHTML = `<span>${label} <strong>${formatCurrency(total)}</strong></span><span>${escapeHtml(detail)}</span>`;
+        preview.classList.toggle('over-budget', over);
+      }
+
+      async function refreshUnderlyingQuote() {
+        const ticker = $('optionTicker').value.trim().toUpperCase();
+        const quote = $('underlyingQuote');
+        const requestId = ++quoteRequest;
+        if (!ticker) { quote.textContent = ''; return; }
+        try {
+          const data = await apiFetch(`/momentum?q=${encodeURIComponent(ticker)}&top=5`);
+          if (requestId !== quoteRequest) return;
+          const match = (data.results || []).find((row) => row.ticker === ticker);
+          quote.innerHTML = match
+            ? `${escapeHtml(ticker)} <strong>${formatCurrency(match.current_price)}</strong>`
+            : `${escapeHtml(ticker)} · no live price`;
+        } catch {
+          if (requestId === quoteRequest) quote.textContent = '';
+        }
+      }
+
+      function resetForm() {
+        $('optionType').value = 'CALL';
+        $('optionSide').value = 'BUY';
+        $('optionQuantity').value = '2';
+        $('optionPremium').value = '8.5';
+        $('optionExpiry').value = defaultExpiry();
+        syncTypePills();
+        renderCostPreview();
+        setOptionsStatus('Ready for a new option trade.', 'success');
+      }
+
+      // --- account + positions ------------------------------------------------
+
+      function renderAccount(summary) {
+        const list = $('optionAccountList');
+        if (!summary) {
+          list.innerHTML = '<li><span>Portfolio unavailable. Refresh the page to try again.</span></li>';
+          return;
+        }
+        currentCash = Number(summary.cash_balance ?? 0);
+        const pnl = Number(summary.total_pl ?? 0);
+        const options = (summary.holdings || []).filter((h) => h.instrument_type === 'OPTION');
+        const optionsValue = options.reduce((sum, h) => sum + Number(h.market_value ?? h.quantity * h.avg_buy_price), 0);
+        $('accountName').textContent = summary.name || 'Portfolio';
+        list.innerHTML = [
+          ['Available cash', formatCurrency(currentCash), ''],
+          ['Options at cost', formatCurrency(optionsValue), ''],
+          ['Account value', formatCurrency(summary.total_portfolio_value), ''],
+          ['Total P/L', `${formatSignedCurrency(pnl)} (${Number(summary.total_pl_pct || 0).toFixed(2)}%)`, pnl >= 0 ? 'pos' : 'neg'],
+        ].map(([label, value, cls]) => `<li><span>${label}</span> <strong class="${cls}">${escapeHtml(value)}</strong></li>`).join('');
+        renderPositions(options);
+        renderCostPreview();
+      }
+
+      function renderPositions(options) {
+        const box = $('openPositions');
+        if (!options.length) {
+          box.innerHTML = '<div class="empty-state">No open option positions.</div>';
+          return;
+        }
+        box.innerHTML = options.map((h, index) => `
+          <div class="position-row">
+            <div>
+              <div class="position-title">${escapeHtml(contractLabel(h))}</div>
+              <small>${Number(h.quantity)} contract${Number(h.quantity) === 1 ? '' : 's'} · avg ${formatCurrency(h.avg_buy_price)}</small>
+            </div>
+            <button type="button" class="secondary small-btn" data-close-index="${index}" ${h.ticker ? '' : 'disabled title="Missing ticker; this position predates validation"'}>Close</button>
+          </div>
+        `).join('');
+        box.querySelectorAll('[data-close-index]').forEach((button) => {
+          button.addEventListener('click', () => prefillClose(options[Number(button.dataset.closeIndex)]));
+        });
+      }
+
+      // Fill the form to sell an open position back.
+      function prefillClose(position) {
+        $('optionTicker').value = position.ticker;
+        $('optionType').value = position.option_type;
+        $('optionSide').value = 'SELL';
+        $('optionStrike').value = Number(position.strike);
+        $('optionExpiry').value = position.expiry;
+        $('optionQuantity').value = Number(position.quantity);
+        $('optionPremium').value = Number(position.avg_buy_price);
+        syncTypePills();
+        renderCostPreview();
+        refreshUnderlyingQuote();
+        setOptionsStatus(`Ready to close ${contractLabel(position)}. Adjust the premium to the current price, then place the trade.`, 'warning');
+        $('optionPremium').focus();
+      }
+
+      async function refreshAccount() {
+        if (!currentPortfolioId) {
+          renderAccount(null);
+          renderPositions([]);
+          return;
+        }
+        try {
+          renderAccount(await apiFetch(`/portfolio/${currentPortfolioId}`));
+        } catch (err) {
+          setOptionsStatus(String(err.message || err), 'error');
+        }
+      }
+
+      // --- history ------------------------------------------------------------
+
+      function renderHistory(trades) {
+        const options = trades.filter((t) => t.instrument_type === 'OPTION');
+        if (!options.length) {
+          optionTradeOutput.innerHTML = '<div class="empty-state">No option trades yet.</div>';
+          return;
+        }
+        const rows = options.map((trade) => {
+          const side = trade.type === 'SELL' ? 'SELL' : 'BUY';
+          const quantity = Number(trade.quantity || 0);
+          const premium = Number(trade.price || 0);
           return `
             <tr>
-              <td><strong>${escapeHtml(symbol)}</strong></td>
-              <td>${escapeHtml(tradeType)}</td>
-              <td><span class="trade-side ${side === 'BUY' ? 'buy' : 'sell'}">${escapeHtml(side)}</span></td>
-              <td>${quantity}</td>
-              <td>${price !== null && price !== undefined ? `$${Number(price).toFixed(2)}` : '—'}</td>
-              <td>${strike}</td>
-              <td>${escapeHtml(optionType)}</td>
-              <td>${escapeHtml(expiry)}</td>
               <td>${formatTradeDate(trade.timestamp)}</td>
+              <td><span class="trade-side ${side === 'BUY' ? 'buy' : 'sell'}">${side}</span></td>
+              <td>${escapeHtml(contractLabel(trade))}</td>
+              <td>${quantity}</td>
+              <td>${formatCurrency(premium)}</td>
+              <td>${formatCurrency(quantity * premium)}</td>
             </tr>
           `;
         }).join('');
-
-        return `
+        optionTradeOutput.innerHTML = `
           <div class="table-wrap">
-            <table class="trade-table">
+            <table class="history-table options-history">
               <thead>
-                <tr>
-                  <th>Stock</th>
-                  <th>Type</th>
-                  <th>Action</th>
-                  <th>Qty</th>
-                  <th>Price</th>
-                  <th>Strike</th>
-                  <th>Option</th>
-                  <th>Expiry</th>
-                  <th>Trade Time</th>
-                </tr>
+                <tr><th>Time</th><th>Action</th><th>Contract</th><th>Contracts</th><th>Premium</th><th>Total</th></tr>
               </thead>
               <tbody>${rows}</tbody>
             </table>
@@ -187,94 +398,69 @@
         `;
       }
 
-      function renderPortfolioSummary(summary) {
-        if (!portfolioSummaryBox) return;
-        if (!summary) {
-          portfolioSummaryBox.textContent = 'No portfolio loaded yet.';
-          portfolioSummaryBox.className = 'status';
-          return;
-        }
-        const cash = Number(summary.cash_balance ?? 0);
-        const invested = Number(summary.total_invested ?? 0);
-        const pnl = Number(summary.total_pl ?? 0);
-        const total = Number(summary.total_portfolio_value ?? cash + invested);
-        portfolioSummaryBox.innerHTML = `
-          <strong>Portfolio:</strong> ${escapeHtml(summary.name || 'Demo')} · 
-          <strong>Cash:</strong> $${cash.toFixed(2)} · 
-          <strong>Invested:</strong> $${invested.toFixed(2)} · 
-          <strong>P/L:</strong> <span class="${pnl >= 0 ? 'positive' : 'negative'}" style="font-weight:600;">$${pnl.toFixed(2)}</span> · 
-          <strong>Total:</strong> $${total.toFixed(2)}
-        `;
-      }
-
-      async function refreshPortfolioSummary() {
+      async function refreshHistory() {
         if (!currentPortfolioId) {
-          renderPortfolioSummary(null);
+          optionTradeOutput.innerHTML = '<div class="empty-state">No portfolio yet.</div>';
           return;
         }
         try {
-          const summary = await apiFetch(`/portfolio/${currentPortfolioId}`);
-          renderPortfolioSummary(summary);
+          const data = await apiFetch(`/portfolio/${currentPortfolioId}/trade-history`);
+          renderHistory(Array.isArray(data?.trades) ? data.trades : []);
         } catch (err) {
-          renderPortfolioSummary(null);
-          setOptionsStatus(String(err), 'error');
+          optionTradeOutput.innerHTML = `<div class="empty-state">${escapeHtml(String(err.message || err))}</div>`;
         }
       }
 
       async function initializePortfolio() {
         try {
-          const data = await apiFetch('/portfolio');
-          if (data.portfolios && data.portfolios.length) {
-            currentPortfolioId = data.portfolios[0].id;
-          }
-          await refreshPortfolioSummary();
+          currentPortfolioId = await getPortfolioId();
         } catch (err) {
-          optionTradeOutput.textContent = String(err);
+          setOptionsStatus(String(err.message || err), 'error');
         }
+        await Promise.all([refreshAccount(), refreshHistory()]);
       }
 
-      document.getElementById('loadPortfolioBtn').addEventListener('click', refreshPortfolioSummary);
+      // --- events -------------------------------------------------------------
 
-      document.querySelectorAll('.sector-pill').forEach((button) => {
-        button.addEventListener('click', () => {
-          const selectedType = button.dataset.optionType || 'CALL';
-          const optionTypeSelect = document.getElementById('optionType');
-          if (optionTypeSelect) {
-            optionTypeSelect.value = selectedType;
-          }
-          document.querySelectorAll('.sector-pill').forEach((chip) => {
-            chip.classList.toggle('active', chip === button);
-          });
+      document.querySelectorAll('.hero-pill-row .sector-pill').forEach((pill) => {
+        pill.addEventListener('click', () => {
+          $('optionType').value = pill.dataset.optionType;
+          syncTypePills();
         });
       });
+      $('optionType').addEventListener('change', syncTypePills);
+      ['optionQuantity', 'optionPremium', 'optionSide'].forEach((id) => {
+        $(id).addEventListener('input', renderCostPreview);
+        $(id).addEventListener('change', renderCostPreview);
+      });
+      $('optionTicker').addEventListener('change', refreshUnderlyingQuote);
+      $('resetOptionBtn').addEventListener('click', resetForm);
+      $('tradeHistoryBtn').addEventListener('click', () => Promise.all([refreshAccount(), refreshHistory()]));
 
-      document.getElementById('tradeOptionBtn').addEventListener('click', async () => {
+      $('tradeOptionBtn').addEventListener('click', async () => {
         if (!currentPortfolioId) {
-          optionTradeOutput.innerHTML = '<div class="empty-state">Create or load portfolio first.</div>';
-          setOptionsStatus('No portfolio selected yet.', 'error');
+          setOptionsStatus('Portfolio unavailable. Refresh the page to try again.', 'error');
           return;
         }
-        const payload = {
-          ticker: document.getElementById('optionTicker').value.trim().toUpperCase(),
-          option_type: document.getElementById('optionType').value,
-          strike: Number(document.getElementById('optionStrike').value),
-          expiry: document.getElementById('optionExpiry').value,
-          quantity: Number(document.getElementById('optionQuantity').value),
-          premium: Number(document.getElementById('optionPremium').value),
-          side: document.getElementById('optionSide').value,
-        };
-
+        const payload = readForm();
+        if (!payload.ticker || !(payload.strike > 0) || !payload.expiry || !(payload.quantity > 0) || !(payload.premium > 0)) {
+          setOptionsStatus('Fill in the stock, strike, expiry, contracts and premium.', 'error');
+          return;
+        }
+        const button = $('tradeOptionBtn');
+        button.disabled = true;
         try {
-          const data = await apiFetch(`/portfolio/${currentPortfolioId}/trade-option`, {
+          const trade = await apiFetch(`/portfolio/${currentPortfolioId}/trade-option`, {
             method: 'POST',
             body: JSON.stringify(payload),
           });
-          optionTradeOutput.innerHTML = formatTradeResult({ trades: [data] });
-          await refreshPortfolioSummary();
-          setOptionsStatus(`Trade placed for ${payload.ticker}. Cash after trade: $${Number((await apiFetch(`/portfolio/${currentPortfolioId}`)).cash_balance ?? 0).toFixed(2)}`, 'success');
+          const verb = payload.side === 'BUY' ? 'Bought' : 'Sold';
+          setOptionsStatus(`${verb} ${payload.quantity} × ${contractLabel(trade)}. Cash now ${formatCurrency(trade.cash_balance)}.`, 'success');
+          await Promise.all([refreshAccount(), refreshHistory()]);
         } catch (err) {
-          optionTradeOutput.innerHTML = `<div class="empty-state">${escapeHtml(String(err))}</div>`;
-          setOptionsStatus('Option trade could not be placed.', 'error');
+          setOptionsStatus(String(err.message || err), 'error');
+        } finally {
+          button.disabled = false;
         }
       });
 
@@ -351,27 +537,13 @@
         }
       });
 
-      document.getElementById('tradeHistoryBtn').addEventListener('click', async () => {
-        if (!currentPortfolioId) {
-          optionTradeOutput.innerHTML = '<div class="empty-state">Create or load portfolio first.</div>';
-          setOptionsStatus('No portfolio selected yet.', 'error');
-          return;
-        }
-        try {
-          const data = await apiFetch(`/portfolio/${currentPortfolioId}/trade-history`);
-          optionTradeOutput.innerHTML = formatTradeResult(data);
-          setOptionsStatus('Trade history loaded successfully.', 'success');
-        } catch (err) {
-          optionTradeOutput.innerHTML = `<div class="empty-state">${escapeHtml(String(err))}</div>`;
-          setOptionsStatus('Unable to load history right now.', 'error');
-        }
-      });
-
       renderProfile();
       applyTheme();
+      attachTickerPicker($('optionTicker'));
+      $('optionExpiry').min = isoDate(new Date());
+      resetForm();
+      refreshUnderlyingQuote();
       initializePortfolio();
-      setOptionsStatus('Ready for a new option trade.', 'success');
-      attachTickerPicker(document.getElementById('optionTicker'));
     </script>
   </body>
 </html>

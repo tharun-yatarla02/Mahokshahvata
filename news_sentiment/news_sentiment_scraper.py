@@ -76,8 +76,8 @@ HISTORY_RETENTION_DAYS = 5
 # Ukraine tensions" never says "Exxon," but every Energy stock is affected.
 # This catches what company-name matching alone would miss.
 MACRO_THEMES = {
-    "war": ["Energy", "Defense", "Financials"],
-    "invasion": ["Energy", "Defense"],
+    "war": ["Energy", "Industrials", "Financials"],   # Industrials includes defense
+    "invasion": ["Energy", "Industrials"],
     "sanctions": ["Energy", "Financials"],
     "oil price": ["Energy"],
     "opec": ["Energy"],
@@ -109,24 +109,71 @@ BATCH_SIZE = 10  # articles per API call (also used as the local model's batch s
 # Company / ticker matching
 # ---------------------------------------------------------------------------
 
+# Company names that are also everyday words in market news ("raises price
+# target", "block trade", "shell company", "snap election"). Headlines don't
+# get tagged by these names; an explicit ticker mention like "(NYSE: TGT)"
+# or "$TGT" still tags them.
+AMBIGUOUS_NAMES = {
+    "Target", "Block", "Square", "Snap", "Zoom", "Shell", "Arm", "Sea", "Nu",
+    "Strategy", "Booking", "Progressive", "Southern", "Marsh", "Match", "Gap",
+    "Ball", "Chart", "Carrier", "Sun", "Mobile", "Global", "Capital", "Digital",
+    "Energy", "General", "American", "United", "National", "First",
+    "International", "Coherent", "Fair", "Tapestry", "Globe", "Delta", "Equity",
+    "Realty", "Crown", "Ross", "Dollar", "Discover", "Genuine", "Waters",
+    "Graham", "Paramount", "Fox", "News", "Trade", "Service", "Universal",
+    "Public", "Prudential", "Principal", "Travelers", "Hartford", "Corning",
+    "Southwest", "Alaska", "Frontier", "Spirit", "Rocket", "Lucid", "Toast",
+    "Wise", "Ford", "Popular", "Northern", "Nova", "Crane", "Dover", "Flex",
+    "Freedom", "Grab", "Trip", "Viking", "Reliance", "Carlisle", "Woodward",
+    "Equitable", "Elastic", "Affirm",
+}
+
+# "$NVDA", "(NASDAQ: NVDA)", "(NYSE:BRK.B)"
+TICKER_MENTION = re.compile(
+    r"\$([A-Z]{1,5}(?:[.-][A-Z])?)\b"
+    r"|\((?:NYSE|NASDAQ|Nasdaq|NYSE American|NYSEArca|NYSEARCA|AMEX|OTC)\s*:\s*([A-Z]{1,5}(?:[.-][A-Z])?)\)"
+)
+
+
+def _normalize_ticker(ticker):
+    return ticker.strip().upper().replace(".", "-")  # BRK.B -> BRK-B, as in the market data
+
+
 def load_company_map():
     mapping = []
     with open(TICKER_CSV, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            mapping.append((row["company"].strip(), row["ticker"].strip()))
-    # Longest names first so "JPMorgan Chase" is tried before "JPMorgan"
-    mapping.sort(key=lambda x: -len(x[0]))
+            mapping.append((row["company"].strip(), _normalize_ticker(row["ticker"])))
     return mapping
 
 
-def find_tickers(text, company_map):
-    found = {}
-    lower_text = text.lower()
+def build_matcher(company_map, known_tickers=None):
+    """Compiles company names into one case-sensitive pattern (so "apple the
+    fruit" doesn't match Apple), skipping AMBIGUOUS_NAMES. known_tickers, if
+    given, limits explicit ticker mentions to real tracked symbols."""
+    names = {}
     for name, ticker in company_map:
-        pattern = r"\b" + re.escape(name.lower()) + r"\b"
-        if re.search(pattern, lower_text):
-            found[ticker] = name
+        if name and name not in AMBIGUOUS_NAMES:
+            names.setdefault(name, ticker)  # first listing of a name wins
+    # Longest first so "JPMorgan Chase" is tried before "JPMorgan".
+    alternation = "|".join(re.escape(n) for n in sorted(names, key=len, reverse=True))
+    pattern = re.compile(rf"(?<![\w&])(?:{alternation})(?![\w&])") if names else None
+    return {"pattern": pattern, "names": names, "known_tickers": set(known_tickers) if known_tickers else None}
+
+
+def find_tickers(text, matcher):
+    """{ticker: matched name or symbol} for companies named in the text."""
+    if not isinstance(matcher, dict):  # a plain [(name, ticker)] list
+        matcher = build_matcher(matcher)
+    found = {}
+    if matcher["pattern"]:
+        for match in matcher["pattern"].finditer(text):
+            found.setdefault(matcher["names"][match.group(0)], match.group(0))
+    for match in TICKER_MENTION.finditer(text):
+        ticker = _normalize_ticker(match.group(1) or match.group(2))
+        if matcher["known_tickers"] is None or ticker in matcher["known_tickers"]:
+            found.setdefault(ticker, ticker)
     return found
 
 
@@ -336,12 +383,14 @@ def fetch_articles():
             published = entry.get("published") or entry.get("updated") or entry.get("pubDate") or ""
             if not title and not summary:
                 continue
+            timestamp = _get_entry_timestamp(entry)
             articles.append({
                 "source": source,
                 "title": title,
                 "summary": summary,
                 "link": link,
                 "published": published,
+                "published_ts": timestamp.isoformat() if timestamp else "",  # sortable UTC time
             })
 
     deduped = []
@@ -357,11 +406,12 @@ def fetch_articles():
     return deduped
 
 
-def match_tickers(articles, company_map):
+def match_tickers(articles, company_map, known_tickers=None):
+    matcher = build_matcher(company_map, known_tickers)
     matched = []
     for a in articles:
         text = f"{a['title']}. {a['summary']}"
-        tickers = find_tickers(text, company_map)
+        tickers = find_tickers(text, matcher)
         themes, sectors = find_macro_themes(text)
 
         if tickers:
@@ -511,8 +561,13 @@ def build_demo_sentiment_results():
     ]
 
 
-def collect_sentiment_results():
+def collect_sentiment_results(extra_companies=(), known_tickers=None):
     """Return the latest relevant sentiment data from the live RSS feed.
+
+    extra_companies: more (name, ticker) pairs to recognize in headlines on
+    top of company_tickers.csv (the API passes the largest tracked stocks).
+    known_tickers: tracked symbols that explicit mentions like "$NVDA" may
+    match.
 
     The app should prefer real RSS headlines whenever they match tracked names or
     macro themes. A curated demo dataset is only used as a last-resort fallback
@@ -524,9 +579,9 @@ def collect_sentiment_results():
         if api_key:
             client = Anthropic(api_key=api_key)
 
-    company_map = load_company_map()
+    company_map = load_company_map() + list(extra_companies)
     articles = fetch_articles()
-    matched = match_tickers(articles, company_map)
+    matched = match_tickers(articles, company_map, known_tickers)
 
     if not matched:
         demo_results = build_demo_sentiment_results()

@@ -151,21 +151,7 @@
       }
 
       async function ensurePortfolio() {
-        const list = await apiFetch('/portfolio');
-        if (list.portfolios && list.portfolios.length) {
-          currentPortfolioId = list.portfolios[0].id;
-          return;
-        }
-
-        const created = await apiFetch('/portfolio', {
-          method: 'POST',
-          body: JSON.stringify({
-            name: 'Demo Portfolio',
-            starting_capital: 100000,
-          }),
-        });
-
-        currentPortfolioId = created.portfolio_id;
+        currentPortfolioId = await getPortfolioId();
       }
 
       function renderBilling(summary) {
@@ -183,7 +169,8 @@
         pnlValue.classList.toggle('negative', pnl < 0);
 
         billingStatusBadge.textContent = cashBalance > 0 ? 'Funded' : 'Low cash';
-        lastSummary = { summary, cashBalance, totalInvested, totalPortfolioValue, pnl };
+        const holdingsValue = Number(summary.holdings_value ?? totalInvested);
+        lastSummary = { summary, cashBalance, totalInvested, holdingsValue, totalPortfolioValue, pnl };
         renderSummaryView();
       }
 
@@ -201,7 +188,9 @@
       // The Cash / Portfolio / Risk pills switch what the summary card shows.
       function renderSummaryView() {
         if (!lastSummary) return;
-        const { summary, cashBalance, totalInvested, totalPortfolioValue, pnl } = lastSummary;
+        // Allocation and risk use market value (what positions are worth now),
+        // the same basis as the sector breakdown the server sends.
+        const { summary, cashBalance, totalInvested, holdingsValue, totalPortfolioValue, pnl } = lastSummary;
         const holdings = Array.isArray(summary.holdings) ? summary.holdings : [];
         const row = (label, value, className = '') =>
           `<li><span>${escapeHtml(label)}</span> <strong${className ? ` class="${className}"` : ''}>${escapeHtml(value)}</strong></li>`;
@@ -216,22 +205,22 @@
             row('Stock positions', String(Number(summary.stock_count ?? 0))),
             row('Option positions', String(optionCount)),
             ...(sectors.length
-              ? sectors.map(([sector, value]) => row(sector, `${formatCurrency(value)} · ${formatShare(value, totalInvested)}`))
+              ? sectors.map(([sector, value]) => row(sector, `${formatCurrency(value)} · ${formatShare(value, holdingsValue)}`))
               : [row('Sectors', 'No holdings yet')]),
           ];
         } else if (summaryView === 'risk') {
           title = 'Risk overview';
-          const exposure = totalPortfolioValue > 0 ? (totalInvested / totalPortfolioValue) * 100 : 0;
+          const exposure = totalPortfolioValue > 0 ? (holdingsValue / totalPortfolioValue) * 100 : 0;
           const largest = holdings
-            .map((h) => ({ name: h.ticker || h.position_key || 'Unknown', value: Number(h.quantity || 0) * Number(h.avg_buy_price || 0) }))
+            .map((h) => ({ name: h.ticker || h.position_key || 'Unknown', value: Number(h.market_value ?? Number(h.quantity || 0) * Number(h.avg_buy_price || 0)) }))
             .sort((a, b) => b.value - a.value)[0];
           const topSector = Object.entries(summary.sector_breakdown || {}).sort((a, b) => b[1] - a[1])[0];
           rows = [
             row('Risk level', totalPortfolioValue > 0 ? getRiskLabel(exposure) : '--'),
-            row('Market exposure', formatShare(totalInvested, totalPortfolioValue)),
+            row('Market exposure', formatShare(holdingsValue, totalPortfolioValue)),
             row('Cash reserve', formatShare(cashBalance, totalPortfolioValue)),
             row('Largest position', largest ? `${largest.name} · ${formatShare(largest.value, totalPortfolioValue)}` : 'None'),
-            row('Top sector', topSector ? `${topSector[0]} · ${formatShare(topSector[1], totalInvested)} of invested` : 'None'),
+            row('Top sector', topSector ? `${topSector[0]} · ${formatShare(topSector[1], holdingsValue)} of holdings` : 'None'),
           ];
         } else {
           title = 'Funding summary';
