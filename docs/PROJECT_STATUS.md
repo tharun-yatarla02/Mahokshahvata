@@ -2,6 +2,9 @@
 
 _Last updated: 2026-09-24 (after the Claude structured-outputs update)_
 
+Picking this up? Read [HANDOFF.md](HANDOFF.md) first (setup, architecture,
+gotchas, and a starting point for each open task).
+
 ## Where we are
 
 **Feature-complete demo, running locally.** All six pages work end to end with

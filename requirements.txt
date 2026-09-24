@@ -5,7 +5,7 @@ pandas>=2.0
 # News sentiment
 feedparser>=6.0
 requests>=2.32
-anthropic>=0.40
+anthropic>=1.8  # messages.parse structured outputs
 
 # Auth (Firebase)
 firebase-admin>=6.5

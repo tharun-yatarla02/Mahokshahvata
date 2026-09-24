@@ -7,6 +7,10 @@ serves a multi-page web dashboard.
 
 No real money is traded — every portfolio is simulated.
 
+> **New to the project?** Start with [docs/HANDOFF.md](docs/HANDOFF.md):
+> setup from a fresh clone, how the code fits together, gotchas, and where
+> to pick up. Progress and open work: [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md).
+
 ## Project layout
 
 ```
@@ -38,6 +42,7 @@ ai_stock_platform/
 ├── politician_trades/
 │   └── politician_trades.py         # congressional trade disclosures via Quiver Quantitative
 ├── docs/
+│   ├── HANDOFF.md                   # developer guide: setup, architecture, gotchas, next tasks
 │   └── PROJECT_STATUS.md            # current status and roadmap
 ├── tests/                           # pytest suite
 ├── requirements.txt
