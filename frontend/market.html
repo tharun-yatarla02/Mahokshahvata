@@ -32,12 +32,12 @@
               <div class="profile-card">
                 <span id="profileMenuAvatar" class="profile-avatar">U</span>
                 <div>
-                  <p id="profileName" class="profile-name">Demo User</p>
-                  <p id="profileEmail" class="profile-email">demo@mahokshahvata.ai</p>
+                  <p id="profileName" class="profile-name"></p>
+                  <p id="profileEmail" class="profile-email"></p>
                 </div>
               </div>
               <div class="profile-menu-actions">
-                <button type="button" class="secondary">Account</button>
+                <button id="accountButton" type="button" class="secondary">Profile</button>
                 <button id="logoutButton" type="button" class="logout-btn">Logout</button>
               </div>
             </div>
@@ -86,7 +86,7 @@
         <div class="stat neutral-card">
           <div class="stat-label">Last update</div>
           <div class="stat-value" id="lastUpdateValue">--</div>
-          <div class="stat-sub">Prices refresh every 5 min, ~15 min delayed</div>
+          <div class="stat-sub" id="priceSourceNote">Prices refresh every 5 min</div>
         </div>
       </div>
 
@@ -191,7 +191,6 @@
         return '--';
       }
 
-
       function setStatus(message, kind = '') {
         statusEl.textContent = message;
         statusEl.className = 'status';
@@ -228,20 +227,11 @@
           return;
         }
 
+        marketDetail.classList.remove('empty-state');  // its centered placeholder style
         const ticker = item.ticker || 'STOCK';
         const currentPrice = Number(item.current_price || 0);
-        const chartSeries = [
-          Math.max(0.01, currentPrice * 0.92),
-          Math.max(0.01, currentPrice * 0.94),
-          Math.max(0.01, currentPrice * 0.97),
-          currentPrice * 0.99,
-          currentPrice,
-          Math.max(0.01, currentPrice * 1.02),
-          Math.max(0.01, currentPrice * 1.04),
-        ];
-        const spark = buildSparkline(chartSeries); 
         const positive = (item.momentum_pct || 0) >= 0;
-        const priceChange = Number(item.relative_strength || 0);
+        const relativeStrength = item.relative_strength;
 
         marketDetail.innerHTML = `
           <div class="detail-grid">
@@ -253,12 +243,13 @@
                 </div>
                 <span class="badge ${positive ? 'positive' : 'negative'}">${Number(item.momentum_pct || 0).toFixed(2)}%</span>
               </div>
-              <svg viewBox="0 0 260 110" width="100%" height="110" style="background: var(--surface-2); border-radius: 14px;">
-                <path d="${spark}" fill="none" style="stroke: var(${positive ? '--pos' : '--neg'});" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></path>
+              <svg viewBox="0 0 260 110" width="100%" height="110" preserveAspectRatio="none" style="background: var(--surface-2); border-radius: 14px;" role="img" aria-label="${escapeHtml(ticker)} daily closing prices, last 90 trading days">
+                <path data-price-path d="" fill="none" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"></path>
               </svg>
+              <div data-price-range style="color: var(--muted); margin-top: 6px; font-size: 0.75rem;">Loading 90-day prices…</div>
               <div style="display:flex; justify-content:space-between; color: var(--muted); margin-top: 8px; font-size: 0.8rem;">
-                <span>Relative strength</span>
-                <strong class="${positive ? 'positive' : 'negative'}">${priceChange.toFixed(2)}%</strong>
+                <span>Relative strength vs S&amp;P 500</span>
+                <strong class="${relativeStrength == null ? '' : changeClass(relativeStrength)}">${relativeStrength == null ? '--' : formatSignedPercent(relativeStrength)}</strong>
               </div>
             </div>
             <div>
@@ -274,22 +265,107 @@
               </ul>
             </div>
           </div>
+          <div data-fundamentals><div class="mini-label" style="margin-top: 16px;">Fundamentals · SEC filings</div><div class="empty-state">Loading SEC filings…</div></div>
         `;
 
         detailTickerTitle.textContent = ticker;
         selectedMarketTicker = ticker;
+        getPriceHistory(ticker, currentPrice);
+        getFundamentals(ticker);
         getRelatedNews(ticker);
+      }
+
+      // Real daily closes (see /price-history); the line is colored by the
+      // change it actually shows, first close to last.
+      async function getPriceHistory(ticker, livePrice) {
+        const path = marketDetail.querySelector('[data-price-path]');
+        const label = marketDetail.querySelector('[data-price-range]');
+        let text;
+        try {
+          const data = await apiFetch(`/price-history/${encodeURIComponent(ticker)}`);
+          if (selectedMarketTicker !== ticker || !path.isConnected) return;
+          const points = data.points || [];
+          // End on the live price, as momentum does, so the line and the badge agree.
+          const closes = [...points.map((p) => Number(p.close)), ...(livePrice > 0 ? [livePrice] : [])];
+          path.setAttribute('d', buildSparkline(closes));
+          const change = closes.length > 1 ? (closes[closes.length - 1] - closes[0]) / closes[0] * 100 : 0;
+          path.style.stroke = `var(${change >= 0 ? '--pos' : '--neg'})`;
+          const fmt = (iso) => new Date(`${iso}T00:00:00`).toLocaleDateString([], { month: 'short', day: 'numeric' });
+          text = points.length
+            ? `${fmt(points[0].date)} – now · ${points.length} daily closes + live price · ${formatSignedPercent(change)}`
+            : 'No price history available.';
+        } catch (error) {
+          if (selectedMarketTicker !== ticker || !path.isConnected) return;
+          text = 'Price history unavailable right now.';
+        }
+        label.textContent = text;
+      }
+
+      function formatReported(point) {
+        if (!point) return '--';
+        const value = Number(point.value);
+        if (point.unit === 'USD/shares') return `$${value.toFixed(2)}`;
+        const abs = Math.abs(value);
+        const scaled = abs >= 1e12 ? `${(abs / 1e12).toFixed(2)}T` : abs >= 1e9 ? `${(abs / 1e9).toFixed(1)}B`
+          : abs >= 1e6 ? `${(abs / 1e6).toFixed(0)}M` : abs.toLocaleString();
+        const sign = value < 0 ? '-' : '';
+        return point.unit === 'USD' ? `${sign}$${scaled}` : `${sign}${scaled} ${escapeHtml(point.unit || '')}`;
+      }
+
+      function yearOverYear(series) {
+        if (!series || series.length < 2 || !Number(series[1].value)) return '';
+        const pct = (series[0].value - series[1].value) / Math.abs(series[1].value) * 100;
+        return `<span class="${changeClass(pct)}">${formatSignedPercent(pct, 1)}</span>`;
+      }
+
+      // Revenue, earnings, cash flow and debt from SEC EDGAR (see fundamentals/sec_edgar.py).
+      async function getFundamentals(ticker) {
+        const box = marketDetail.querySelector('[data-fundamentals]');
+        let body;
+        try {
+          const data = await apiFetch(`/fundamentals/${encodeURIComponent(ticker)}`);
+          const annual = data.annual || {};
+          const quarter = data.quarterly || {};
+          const row = (label, series) => series && series.length
+            ? `<li>${label}: <strong>${formatReported(series[0])}</strong> <span class="tag">FY ending ${escapeHtml(series[0].period_end)}</span> ${yearOverYear(series)}</li>`
+            : '';
+          const lines = [
+            row('Revenue', annual.revenue),
+            row('Net income', annual.net_income),
+            row('Diluted EPS', annual.eps_diluted),
+            row('Operating cash flow', annual.operating_cash_flow),
+            data.latest?.long_term_debt
+              ? `<li>Long-term debt: <strong>${formatReported(data.latest.long_term_debt)}</strong> <span class="tag">as of ${escapeHtml(data.latest.long_term_debt.period_end)}</span></li>` : '',
+            quarter.revenue?.length
+              ? `<li>Latest quarter (${escapeHtml(quarter.revenue[0].period_end)}): revenue ${formatReported(quarter.revenue[0])}, net income ${formatReported(quarter.net_income?.[0])}</li>` : '',
+          ].join('');
+          const filings = (data.filings || [])
+            .filter((f) => String(f.url || '').startsWith('https://www.sec.gov/'))
+            .slice(0, 5)
+            .map((f) => `<li><a href="${escapeHtml(f.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(f.form)}</a> <span class="tag">filed ${escapeHtml(f.filed)}</span></li>`)
+            .join('');
+          body = `
+            <ul style="margin: 8px 0 0; padding-left: 18px; color: var(--muted); line-height: 1.7;">${lines || '<li>No financial statements in XBRL for this company.</li>'}</ul>
+            ${filings ? `<div class="mini-label" style="margin-top: 12px;">Original filings</div><ul style="margin: 8px 0 0; padding-left: 18px; line-height: 1.7;">${filings}</ul>` : ''}`;
+        } catch (error) {
+          body = `<div class="empty-state">${escapeHtml(error.message || 'SEC filings unavailable right now.')}</div>`;
+        }
+        if (selectedMarketTicker !== ticker || !box.isConnected) return;  // user picked another stock meanwhile
+        box.innerHTML = `<div class="mini-label" style="margin-top: 16px;">Fundamentals · SEC filings</div>${body}`;
       }
 
       async function getRelatedNews(ticker) {
         try {
           const data = await apiFetch('/news-sentiment');
-          const headlineMatches = (data?.results || []).filter((item) => {
-            const text = `${item.tickers || ''} ${item.title || ''} ${item.summary || ''}`.toLowerCase();
-            return text.includes((ticker || '').toLowerCase());
-          });
-
-          const items = headlineMatches.length ? headlineMatches.slice(0, 3) : (data?.results || []).slice(0, 3);
+          if (selectedMarketTicker !== ticker) return;  // user picked another stock meanwhile
+          // Articles the server tagged with this ticker, or that write it as a
+          // standalone symbol ("NVDA"). A plain substring test matched short
+          // tickers like ON or IT inside ordinary words.
+          const symbol = new RegExp(`(^|[^A-Za-z])\\$?${ticker.replace(/[.-]/g, '[.-]')}([^A-Za-z]|$)`);
+          const items = (data?.results || []).filter((item) => {
+            const tagged = String(item.tickers || '').split(',').map((t) => t.trim().toUpperCase());
+            return tagged.includes(ticker.toUpperCase()) || symbol.test(`${item.title || ''} ${item.summary || ''}`);
+          }).slice(0, 3);
           const newsHtml = items.map((item) => {
             const source = escapeHtml(item.source || 'News Feed');
             const title = escapeHtml(item.title || 'Market update');
@@ -304,7 +380,7 @@
           }).join('');
 
           const noteBlock = document.createElement('div');
-          noteBlock.innerHTML = `<div class="mini-label" style="margin-top: 16px;">Related news</div>${newsHtml || '<div class="empty-state">No related news available yet.</div>'}`;
+          noteBlock.innerHTML = `<div class="mini-label" style="margin-top: 16px;">Related news</div>${newsHtml || `<div class="empty-state">No recent headlines mention ${escapeHtml(ticker)}.</div>`}`;
           const previousNews = marketDetail.querySelector('[data-related-news]');
           if (previousNews) previousNews.remove();
           noteBlock.setAttribute('data-related-news', 'true');
@@ -404,13 +480,15 @@
           document.getElementById('lastUpdateValue').textContent = status.quotes_updated_at
             ? new Date(status.quotes_updated_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
             : '--';
+          document.getElementById('priceSourceNote').textContent = `Refreshes every 5 min · ${status.price_source || 'delayed quotes'}`;
 
           if (status.warming_up) {
             marketTableBody.innerHTML = '<tr><td colspan="7">Loading market data…</td></tr>';
             setStatus('Loading market data for the top US stocks. The first start takes about 2 minutes; this page will update on its own.', '');
             warmupTimer = setTimeout(loadMomentumData, 10000);
-          } else if (status.last_error) {
-            setStatus(`Showing the last saved market data. ${status.last_error}`, 'error');
+          } else if (status.stale || status.last_error) {
+            const asOf = status.quotes_updated_at ? new Date(status.quotes_updated_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : 'unknown';
+            setStatus(`Prices may be out of date (last refresh ${asOf}). ${status.last_error || ''}`.trim(), 'error');
           } else {
             setStatus(`Tracking ${Number(status.tracked || 0).toLocaleString()} US stocks.`, 'success');
           }
@@ -419,38 +497,6 @@
           marketTableBody.innerHTML = `<tr><td colspan="7" class="negative">${escapeHtml(String(err))}</td></tr>`;
           setStatus(err.message, 'error');
         }
-      }
-
-      function getInitials(name) {
-        const clean = (name || 'Demo User').trim();
-        if (!clean) return 'DU';
-        const parts = clean.split(/\s+/).filter(Boolean);
-        return parts.length >= 2 ? `${parts[0][0]}${parts[1][0]}`.toUpperCase() : clean.slice(0, 2).toUpperCase();
-      }
-
-      function getUserProfile() {
-        const fallback = { name: 'Demo User', email: 'demo@mahokshahvata.ai', image: '' };
-        const stored = JSON.parse(localStorage.getItem('mahokshahvata_user') || 'null');
-        const user = stored || fallback;
-        const finalUser = { name: user.name || fallback.name, email: user.email || fallback.email, image: user.image || '' };
-        localStorage.setItem('mahokshahvata_user', JSON.stringify(finalUser));
-        return finalUser;
-      }
-
-      function renderProfile() {
-        const user = getUserProfile();
-        const avatarText = getInitials(user.name);
-        const buttonAvatar = document.querySelector('#profileButton .profile-avatar');
-        const profileLabel = document.getElementById('profileLabel');
-        const profileMenuAvatar = document.getElementById('profileMenuAvatar');
-        const profileName = document.getElementById('profileName');
-        const profileEmail = document.getElementById('profileEmail');
-
-        if (buttonAvatar) buttonAvatar.textContent = avatarText;
-        if (profileLabel) profileLabel.textContent = user.name.split(' ')[0] || 'Profile';
-        if (profileMenuAvatar) profileMenuAvatar.textContent = avatarText;
-        if (profileName) profileName.textContent = user.name;
-        if (profileEmail) profileEmail.textContent = user.email;
       }
 
       function setTheme(nextTheme) {
@@ -470,28 +516,6 @@
       document.getElementById('themeToggle').addEventListener('click', () => {
         const currentTheme = document.body.dataset.theme === 'light' ? 'light' : 'dark';
         setTheme(currentTheme === 'light' ? 'dark' : 'light');
-      });
-
-      document.getElementById('profileButton').addEventListener('click', () => {
-        document.getElementById('profileMenu').classList.toggle('open');
-      });
-
-      document.getElementById('logoutButton').addEventListener('click', () => {
-        localStorage.setItem('mahokshahvata_user', JSON.stringify({
-          name: 'Demo User',
-          email: 'demo@mahokshahvata.ai',
-          image: '',
-        }));
-        renderProfile();
-        document.getElementById('profileMenu').classList.remove('open');
-      });
-
-      document.addEventListener('click', (event) => {
-        const profileButton = document.getElementById('profileButton');
-        const profileMenu = document.getElementById('profileMenu');
-        if (profileButton && profileMenu && !profileButton.contains(event.target) && !profileMenu.contains(event.target)) {
-          profileMenu.classList.remove('open');
-        }
       });
 
       marketTableBody.addEventListener('click', (event) => {
@@ -556,7 +580,6 @@
         sectorFilter.value = option.value;
       }
 
-      renderProfile();
       applyTheme();
       // Deep link from the Overview page, e.g. /market.html?sector=AI
       const linkedSector = new URLSearchParams(window.location.search).get('sector') || '';

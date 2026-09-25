@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mahokshahvata | Sign in</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <style>
+      .auth-wrap { min-height: calc(100vh - 64px); display: grid; place-items: center; padding: 32px 16px; }
+      .auth-card { width: 100%; max-width: 420px; }
+      .auth-card form { display: grid; gap: 6px; margin-top: 12px; }
+      .auth-card input { width: 100%; }
+      .auth-card button[type="submit"] { width: 100%; margin-top: 12px; }
+      .auth-switch { margin-top: 16px; color: var(--muted); font-size: 0.9375rem; }
+      .auth-switch button { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; cursor: pointer; }
+      .auth-divider { margin: 20px 0 12px; text-align: center; color: var(--muted); font-size: 0.8125rem; }
+      .auth-demo { width: 100%; }
+      .navbar .nav-actions { margin-left: auto; }  /* no nav links on this page to push it right */
+    </style>
+  </head>
+  <body>
+    <nav class="navbar">
+      <div class="nav-inner">
+        <div class="brand">
+          <div class="brand-mark">M</div>
+          <span>Mahokshahvata</span>
+        </div>
+        <div class="nav-actions">
+          <button id="themeToggle" class="theme-toggle" type="button" aria-label="Switch color mode">Light mode</button>
+        </div>
+      </div>
+    </nav>
+
+    <main class="auth-wrap">
+      <div class="card premium-card auth-card">
+        <span class="eyebrow">Paper trading, no real money</span>
+        <h2 id="authTitle">Sign in</h2>
+        <p id="authSubtitle">Welcome back. Your portfolios are waiting.</p>
+
+        <form id="authForm" novalidate>
+          <div id="nameField" hidden>
+            <label class="label" for="authName">Name</label>
+            <input id="authName" type="text" autocomplete="name" maxlength="100" />
+          </div>
+          <label class="label" for="authEmail">Email</label>
+          <input id="authEmail" type="email" autocomplete="email" maxlength="254" required />
+          <label class="label" for="authPassword">Password</label>
+          <input id="authPassword" type="password" autocomplete="current-password" minlength="8" maxlength="128" required />
+          <button id="authSubmit" type="submit">Sign in</button>
+        </form>
+        <div class="status" id="authStatus" role="alert" style="margin-top: 14px; display: none;"></div>
+
+        <p class="auth-switch">
+          <span id="switchPrompt">New here?</span>
+          <button id="switchMode" type="button">Create an account</button>
+        </p>
+
+        <div class="auth-divider">or</div>
+        <button id="demoButton" class="secondary auth-demo" type="button">Continue with demo account</button>
+      </div>
+    </main>
+
+    <script src="/api.js"></script>
+    <script>
+      const next = safeNextPath(new URLSearchParams(window.location.search).get('next'));
+      if (getAuthToken()) window.location.replace(next);  // already signed in
+
+      let mode = 'login';
+      const form = document.getElementById('authForm');
+      const statusEl = document.getElementById('authStatus');
+      const submit = document.getElementById('authSubmit');
+
+      function setMode(nextMode) {
+        mode = nextMode;
+        const registering = mode === 'register';
+        document.getElementById('authTitle').textContent = registering ? 'Create your account' : 'Sign in';
+        document.getElementById('authSubtitle').textContent = registering
+          ? 'Start with a simulated portfolio. Your data is saved to your account.'
+          : 'Welcome back. Your portfolios are waiting.';
+        document.getElementById('nameField').hidden = !registering;
+        document.getElementById('authPassword').autocomplete = registering ? 'new-password' : 'current-password';
+        submit.textContent = registering ? 'Create account' : 'Sign in';
+        document.getElementById('switchPrompt').textContent = registering ? 'Already have an account?' : 'New here?';
+        document.getElementById('switchMode').textContent = registering ? 'Sign in' : 'Create an account';
+        showStatus('');
+      }
+
+      function showStatus(message, kind = 'error') {
+        statusEl.textContent = message;
+        statusEl.className = message ? `status ${kind}` : 'status';
+        statusEl.style.display = message ? '' : 'none';
+      }
+
+      document.getElementById('switchMode').addEventListener('click', () => setMode(mode === 'login' ? 'register' : 'login'));
+
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const email = document.getElementById('authEmail').value.trim();
+        const password = document.getElementById('authPassword').value;
+        const name = document.getElementById('authName').value.trim();
+        if (mode === 'register' && !name) return showStatus('Enter your name.');
+        if (!email || !password) return showStatus('Enter your email and password.');
+        if (mode === 'register' && password.length < 8) return showStatus('Use a password of at least 8 characters.');
+
+        submit.disabled = true;
+        submit.textContent = mode === 'register' ? 'Creating account…' : 'Signing in…';
+        try {
+          const body = mode === 'register' ? { name, email, password } : { email, password };
+          const session = await apiFetch(`/auth/${mode}`, { method: 'POST', body: JSON.stringify(body) });
+          setAuthToken(session.token);
+          window.location.replace(next);
+        } catch (error) {
+          showStatus(error.message);
+          submit.disabled = false;
+          submit.textContent = mode === 'register' ? 'Create account' : 'Sign in';
+        }
+      });
+
+      document.getElementById('demoButton').addEventListener('click', async () => {
+        setAuthToken('demo-token');
+        try {
+          await apiFetch('/auth/me');
+          window.location.replace(next);
+        } catch {
+          setAuthToken(null);
+          showStatus('The demo account is turned off on this server (USE_DEMO_AUTH).');
+        }
+      });
+
+      function setTheme(nextTheme) {
+        document.body.setAttribute('data-theme', nextTheme);
+        try { localStorage.setItem('theme', nextTheme); } catch {}
+        document.getElementById('themeToggle').textContent = nextTheme === 'dark' ? 'Light mode' : 'Dark mode';
+      }
+      let savedTheme = null;
+      try { savedTheme = localStorage.getItem('theme'); } catch {}
+      setTheme(savedTheme || (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'));
+      document.getElementById('themeToggle').addEventListener('click', () => {
+        setTheme(document.body.dataset.theme === 'light' ? 'dark' : 'light');
+      });
+    </script>
+  </body>
+</html>

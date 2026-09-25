@@ -32,12 +32,12 @@
               <div class="profile-card">
                 <span id="profileMenuAvatar" class="profile-avatar">U</span>
                 <div>
-                  <p id="profileName" class="profile-name">Demo User</p>
-                  <p id="profileEmail" class="profile-email">demo@mahokshahvata.ai</p>
+                  <p id="profileName" class="profile-name"></p>
+                  <p id="profileEmail" class="profile-email"></p>
                 </div>
               </div>
               <div class="profile-menu-actions">
-                <button type="button" class="secondary">Account</button>
+                <button id="accountButton" type="button" class="secondary">Profile</button>
                 <button id="logoutButton" type="button" class="logout-btn">Logout</button>
               </div>
             </div>
@@ -677,38 +677,6 @@
         }
       });
 
-      function getInitials(name) {
-        const clean = (name || 'Demo User').trim();
-        if (!clean) return 'DU';
-        const parts = clean.split(/\s+/).filter(Boolean);
-        return parts.length >= 2 ? `${parts[0][0]}${parts[1][0]}`.toUpperCase() : clean.slice(0, 2).toUpperCase();
-      }
-
-      function getUserProfile() {
-        const fallback = { name: 'Demo User', email: 'demo@mahokshahvata.ai', image: '' };
-        const stored = JSON.parse(localStorage.getItem('mahokshahvata_user') || 'null');
-        const user = stored || fallback;
-        const finalUser = { name: user.name || fallback.name, email: user.email || fallback.email, image: user.image || '' };
-        localStorage.setItem('mahokshahvata_user', JSON.stringify(finalUser));
-        return finalUser;
-      }
-
-      function renderProfile() {
-        const user = getUserProfile();
-        const avatarText = getInitials(user.name);
-        const buttonAvatar = document.querySelector('#profileButton .profile-avatar');
-        const profileLabel = document.getElementById('profileLabel');
-        const profileMenuAvatar = document.getElementById('profileMenuAvatar');
-        const profileName = document.getElementById('profileName');
-        const profileEmail = document.getElementById('profileEmail');
-
-        if (buttonAvatar) buttonAvatar.textContent = avatarText;
-        if (profileLabel) profileLabel.textContent = user.name.split(' ')[0] || 'Profile';
-        if (profileMenuAvatar) profileMenuAvatar.textContent = avatarText;
-        if (profileName) profileName.textContent = user.name;
-        if (profileEmail) profileEmail.textContent = user.email;
-      }
-
       function setTheme(nextTheme) {
         document.body.setAttribute('data-theme', nextTheme);
         localStorage.setItem('theme', nextTheme);
@@ -729,28 +697,6 @@
       });
 
       document.getElementById('refreshHoldingsBtn').addEventListener('click', refreshPortfolioData);
-
-      document.getElementById('profileButton').addEventListener('click', () => {
-        document.getElementById('profileMenu').classList.toggle('open');
-      });
-
-      document.getElementById('logoutButton').addEventListener('click', () => {
-        localStorage.setItem('mahokshahvata_user', JSON.stringify({
-          name: 'Demo User',
-          email: 'demo@mahokshahvata.ai',
-          image: '',
-        }));
-        renderProfile();
-        document.getElementById('profileMenu').classList.remove('open');
-      });
-
-      document.addEventListener('click', (event) => {
-        const profileButton = document.getElementById('profileButton');
-        const profileMenu = document.getElementById('profileMenu');
-        if (profileButton && profileMenu && !profileButton.contains(event.target) && !profileMenu.contains(event.target)) {
-          profileMenu.classList.remove('open');
-        }
-      });
 
       function renderTradeHistory(data) {
         const trades = Array.isArray(data?.trades) ? data.trades : [];
@@ -846,7 +792,6 @@
       }
       syncTradeLabels();
 
-      renderProfile();
       applyTheme();
       initializePortfolio();
       attachTickerPicker(document.getElementById('tradeTicker'));

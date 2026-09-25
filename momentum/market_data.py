@@ -20,8 +20,15 @@ rankings move with every quote refresh without re-downloading history.
 Everything is saved to market_cache.json, so a restart serves data
 immediately; only the very first run waits for the initial download.
 
+With MASSIVE_API_KEY set, prices come from Massive (formerly Polygon.io)
+instead: its full-market snapshot replaces the screener's price, change and
+volume, and two "grouped daily" requests (all US stocks for one date each)
+replace the yfinance download. Nasdaq still supplies the universe, names,
+sectors and market caps. If Massive fails, the free sources are used.
+
 Config (env vars):
     MARKET_UNIVERSE_SIZE   number of stocks to track (default 3000)
+    MASSIVE_API_KEY        optional; use Massive for quotes and history
 """
 
 import json
@@ -30,7 +37,7 @@ import os
 import re
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -144,6 +151,72 @@ def fetch_lookback_prices(tickers, lookback_days):
     return prices
 
 
+MASSIVE_BASE_URL = "https://api.massive.com"
+MASSIVE_BENCHMARK = "SPY"  # grouped daily has no index bars; SPY tracks the S&P 500
+# ponytail: calendar approximation of N trading days (252 per 365); use a
+# market calendar if momentum must match yfinance to the exact day.
+TRADING_TO_CALENDAR = 365 / 252
+
+
+def _massive_get(path, api_key, params=None):
+    res = requests.get(f"{MASSIVE_BASE_URL}{path}", params=params,
+                       headers={"Authorization": f"Bearer {api_key}"}, timeout=30)
+    res.raise_for_status()
+    return res.json()
+
+
+def _massive_ticker(symbol):
+    return symbol.replace(".", "-")  # Massive spells BRK.B, the app uses BRK-B
+
+
+def fetch_massive_quotes(api_key):
+    """{ticker: {current_price, day_change_pct, volume, quote_time}} for every
+    US stock, from Massive's full-market snapshot."""
+    data = _massive_get("/v2/snapshot/locale/us/markets/stocks/tickers", api_key)
+    quotes = {}
+    for item in data.get("tickers") or []:
+        price = ((item.get("lastTrade") or {}).get("p") or (item.get("min") or {}).get("c")
+                 or (item.get("day") or {}).get("c") or (item.get("prevDay") or {}).get("c"))
+        if not item.get("ticker") or not price:
+            continue
+        updated = item.get("updated")  # nanoseconds since epoch
+        quotes[_massive_ticker(item["ticker"])] = {
+            "current_price": float(price),
+            "day_change_pct": item.get("todaysChangePerc"),
+            "volume": int((item.get("day") or {}).get("v") or 0),
+            "quote_time": datetime.fromtimestamp(updated / 1e9, timezone.utc).isoformat() if updated else None,
+        }
+    return quotes
+
+
+def _grouped_closes(api_key, day, max_back=7):
+    """Closes for all US stocks on `day`, stepping back over weekends and
+    holidays. Returns (trading date, {ticker: close})."""
+    for _ in range(max_back):
+        data = _massive_get(f"/v2/aggs/grouped/locale/us/market/stocks/{day.isoformat()}", api_key,
+                            params={"adjusted": "true"})
+        results = data.get("results") or []
+        if results:
+            return day, {_massive_ticker(r["T"]): float(r["c"]) for r in results if r.get("T") and r.get("c")}
+        day -= timedelta(days=1)
+    return None, {}
+
+
+def fetch_lookback_prices_massive(tickers, lookback_days, api_key, today=None):
+    """Same shape as fetch_lookback_prices, from two grouped-daily requests."""
+    today = today or date.today()
+    last_day, last = _grouped_closes(api_key, today)
+    if not last_day:
+        return {}
+    _, start = _grouped_closes(api_key, last_day - timedelta(days=round(lookback_days * TRADING_TO_CALENDAR)))
+    prices = {}
+    for ticker in tickers:
+        source = MASSIVE_BENCHMARK if ticker == BENCHMARK_TICKER else ticker
+        if start.get(source) and last.get(source):
+            prices[ticker] = {"start": round(start[source], 4), "last": round(last[source], 4)}
+    return prices
+
+
 class MarketData:
     def __init__(self, cache_path=DEFAULT_CACHE_PATH, universe_size=None, lookback_days=90):
         self.cache_path = Path(cache_path)
@@ -159,6 +232,7 @@ class MarketData:
         self.quotes_updated_at = None
         self.history_updated_at = None
         self.last_error = None
+        self.price_source = "Nasdaq screener (~15 min delayed)"
         self._history_retry_at = 0.0  # time.monotonic() before which not to retry
         self._thread = None
 
@@ -182,7 +256,11 @@ class MarketData:
             "quotes_updated_at": self.quotes_updated_at,
             "history_updated_at": self.history_updated_at,
             "warming_up": not self._rows,
+            # The loop refreshes quotes every 5 min; missing two refreshes
+            # means the screener is failing and prices are getting old.
+            "stale": bool(self._rows) and _age(self.quotes_updated_at) > 2 * QUOTE_REFRESH_SECONDS,
             "last_error": self.last_error,
+            "price_source": self.price_source,
         }
 
     # -- refreshing --------------------------------------------------------
@@ -201,16 +279,45 @@ class MarketData:
                          "day_change_pct": None, "volume": 0} for t in DEFAULT_UNIVERSE]
         else:
             self.last_error = None
+            universe = self._overlay_massive_quotes(universe)
         with self._lock:
             self._universe = universe
             self.quotes_updated_at = _now()
             self._rebuild()
         self._save()
 
+    def _overlay_massive_quotes(self, universe):
+        """Massive's prices on top of the screener rows, when a key is set."""
+        api_key = os.environ.get("MASSIVE_API_KEY")
+        self.price_source = "Nasdaq screener (~15 min delayed)"
+        if not api_key:
+            return universe
+        try:
+            quotes = fetch_massive_quotes(api_key)
+        except Exception as e:  # bad key, plan without snapshots, outage
+            # The Nasdaq prices are still fresh, so this isn't a last_error
+            # (which the UI shows as "prices may be out of date").
+            log.warning("Massive quotes unavailable, using Nasdaq prices: %s", e)
+            self.price_source += "; Massive unavailable"
+            return universe
+        self.price_source = "Massive"
+        return [{**stock, **quotes[stock["ticker"]]} if stock["ticker"] in quotes else stock for stock in universe]
+
+    def _fetch_history(self, tickers):
+        api_key = os.environ.get("MASSIVE_API_KEY")
+        if api_key:
+            try:
+                prices = fetch_lookback_prices_massive(tickers, self.lookback_days, api_key)
+                if prices:
+                    return prices
+            except Exception as e:
+                log.warning("Massive history unavailable, using yfinance: %s", e)
+        return fetch_lookback_prices(tickers, self.lookback_days)
+
     def refresh_history(self, tickers=None):
         full = tickers is None
         tickers = tickers or [s["ticker"] for s in self._universe]
-        prices = fetch_lookback_prices(tickers + [BENCHMARK_TICKER], self.lookback_days)
+        prices = self._fetch_history(tickers + [BENCHMARK_TICKER])
         if full and len(prices) < len(tickers) * MIN_HISTORY_COVERAGE:
             # Yahoo down or rate-limiting: keep serving the history we have
             # rather than replacing it with a near-empty one for 6 hours.

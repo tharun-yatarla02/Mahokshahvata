@@ -1,6 +1,7 @@
 import os
 
 import pytest
+from fastapi import HTTPException
 
 from api.main import get_current_user
 from auth.firebase_auth import verify_firebase_token
@@ -21,12 +22,13 @@ def test_demo_auth_rejects_invalid_token(monkeypatch):
         verify_firebase_token("")
 
 
-def test_demo_auth_missing_header_falls_back_to_demo_user(monkeypatch):
+def test_missing_header_is_rejected_even_in_demo_mode(monkeypatch):
+    # A signed-out browser sends no token; it must not land in the demo
+    # account (and see its portfolios) just because demo mode is on.
     monkeypatch.setenv("USE_DEMO_AUTH", "true")
-    user_id = get_current_user(None)
-
-    assert isinstance(user_id, int)
-    assert user_id > 0
+    with pytest.raises(HTTPException) as err:
+        get_current_user(None)
+    assert err.value.status_code == 401
 
 
 def test_demo_auth_rejects_other_tokens(monkeypatch):

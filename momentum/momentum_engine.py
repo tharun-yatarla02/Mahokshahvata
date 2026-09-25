@@ -62,13 +62,42 @@ DEFAULT_SECTOR_LOOKUP = {
     "DIS": "Communication Services",
 }
 
-# Short filter names the dashboard uses. A theme is a hand-picked ticker list
-# that cuts across sectors; an alias is just a shorter name for one sector.
+# Short filter names the dashboard uses. A theme is a rule that cuts across
+# sectors; an alias is just a shorter name for one sector.
 # Edit these to change what the AI / Growth / Tech / Health / Finance filters show.
-THEME_TICKERS = {
-    "ai": ["NVDA", "MSFT", "GOOGL", "META", "AVGO", "PLTR", "AMZN"],
-    "growth": ["TSLA", "NVDA", "PLTR", "CRWD", "AMZN", "ISRG", "META"],
+
+# AI: large companies in the chip, software, data-processing, hardware and
+# networking industries (Nasdaq's industry names), plus anchors whose
+# industry label hides their AI business (Amazon is filed under retail).
+AI_INDUSTRIES = {
+    "Semiconductors",
+    "Computer Software: Prepackaged Software",
+    "Computer Software: Programming Data Processing",
+    "EDP Services",
+    "Computer Manufacturing",
+    "Computer Communications Equipment",
 }
+AI_MIN_MARKET_CAP = 20e9
+AI_ANCHORS = {"NVDA", "MSFT", "GOOGL", "META", "AVGO", "PLTR", "AMZN"}
+
+# Growth: established companies ($10B+) up at least 20% over the lookback
+# window and beating the S&P 500. Recomputed on every refresh.
+GROWTH_MIN_MARKET_CAP = 10e9
+GROWTH_MIN_MOMENTUM_PCT = 20
+
+
+def _is_ai(row):
+    return row.get("ticker") in AI_ANCHORS or (
+        row.get("industry") in AI_INDUSTRIES and (row.get("market_cap") or 0) >= AI_MIN_MARKET_CAP)
+
+
+def _is_growth(row):
+    return ((row.get("market_cap") or 0) >= GROWTH_MIN_MARKET_CAP
+            and (row.get("momentum_pct") or 0) >= GROWTH_MIN_MOMENTUM_PCT
+            and (row.get("relative_strength") or 0) > 0)
+
+
+THEMES = {"ai": _is_ai, "growth": _is_growth}
 
 SECTOR_ALIASES = {
     "tech": "Technology",
@@ -81,9 +110,8 @@ def filter_by_group(ranked, group):
     """Filters ranked momentum rows by a sector name, a sector alias
     ("Tech"), or a theme ("AI"). Matching is case-insensitive."""
     key = group.strip().lower()
-    if key in THEME_TICKERS:
-        tickers = set(THEME_TICKERS[key])
-        return [item for item in ranked if item.get("ticker") in tickers]
+    if key in THEMES:
+        return [item for item in ranked if THEMES[key](item)]
     sector = SECTOR_ALIASES.get(key, group).lower()
     return [item for item in ranked if item.get("sector", "Unknown").lower() == sector]
 

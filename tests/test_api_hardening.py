@@ -264,3 +264,27 @@ def test_dotenv_loader_reads_keys_without_overriding_environment(tmp_path, monke
     assert api_main.os.environ["NEW_KEY"] == "abc 123"
     assert api_main.os.environ["EXISTING"] == "from-environment"
     monkeypatch.delenv("NEW_KEY")
+
+
+def test_price_history_returns_momentum_window_and_caches(client, monkeypatch):
+    import pandas as pd
+    days = pd.bdate_range("2026-05-01", periods=100)
+    calls = []
+
+    def fake_history(tickers, lookback_days):
+        calls.append(tickers)
+        return pd.DataFrame({tickers[0]: [100.0 + i for i in range(100)]}, index=days)
+
+    monkeypatch.setattr(api_main, "fetch_price_history", fake_history)
+    monkeypatch.setattr(api_main, "_price_history_cache", {})
+
+    points = client.get("/price-history/brk.b").json()["points"]
+
+    assert calls == [["BRK-B"]]
+    assert len(points) == 90                     # same window as momentum_pct
+    assert points[0]["close"] == 110.0 and points[-1]["close"] == 199.0
+    client.get("/price-history/BRK-B")
+    assert len(calls) == 1                       # second request served from cache
+
+    monkeypatch.setattr(api_main, "fetch_price_history", lambda tickers, lookback_days: pd.DataFrame())
+    assert client.get("/price-history/ZZZZ").status_code == 404

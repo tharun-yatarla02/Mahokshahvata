@@ -25,6 +25,7 @@ See demo.py for a full runnable walkthrough.
 
 import functools
 import re
+import secrets
 import sqlite3
 import threading
 from datetime import datetime, timezone
@@ -160,6 +161,16 @@ CREATE TABLE IF NOT EXISTS transactions (
     timestamp TEXT NOT NULL
 );
 
+-- Local email/password sign-in: one row per signed-in browser. Only the
+-- SHA-256 of the token is stored (see auth/passwords.py).
+CREATE TABLE IF NOT EXISTS sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    token_hash TEXT UNIQUE NOT NULL,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS daily_snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     portfolio_id INTEGER NOT NULL REFERENCES portfolios(id),
@@ -225,6 +236,7 @@ class PaperTradingEngine:
 
         self._rebuild_legacy_holdings_table()
         self._backfill_contributed_capital()
+        self._add_local_accounts()
         self.conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_holdings_portfolio_position ON holdings(portfolio_id, position_key)")
 
     def _backfill_contributed_capital(self):
@@ -240,6 +252,18 @@ class PaperTradingEngine:
                    FROM transactions WHERE transactions.portfolio_id = portfolios.id), 0), 2)
                WHERE contributed_capital IS NULL"""
         )
+
+    def _add_local_accounts(self):
+        """Email/password accounts live in the same users table as Firebase
+        and demo users; a password_hash marks a local account. Emails are
+        stored lowercased and must be unique among local accounts."""
+        columns = {col[1] for col in self.conn.execute("PRAGMA table_info(users)").fetchall()}
+        if "password_hash" not in columns:
+            self.conn.execute("ALTER TABLE users ADD COLUMN password_hash TEXT")
+        self.conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_local_email ON users(email) WHERE password_hash IS NOT NULL"
+        )
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)")
 
     def _rebuild_legacy_holdings_table(self):
         """Databases created before options support have UNIQUE(portfolio_id, ticker)
@@ -286,6 +310,98 @@ class PaperTradingEngine:
         )
         self.conn.commit()
         return cur.lastrowid
+
+    @_locked
+    def create_local_user(self, email, name, password_hash):
+        """New email/password account. Raises ValueError if the email is taken.
+        firebase_uid is required by the schema, so local users get a random
+        "local:" id that can never collide with a Firebase uid."""
+        try:
+            cur = self.conn.execute(
+                "INSERT INTO users (firebase_uid, email, name, password_hash, created_at) VALUES (?, ?, ?, ?, ?)",
+                (f"local:{secrets.token_hex(12)}", email, name, password_hash, datetime.now(timezone.utc).isoformat()),
+            )
+        except sqlite3.IntegrityError:
+            raise ValueError("An account with this email already exists")
+        self.conn.commit()
+        return cur.lastrowid
+
+    @_locked
+    def get_local_login(self, email):
+        """(user_id, password_hash) for a local account, or None."""
+        row = self.conn.execute(
+            "SELECT id, password_hash FROM users WHERE email = ? AND password_hash IS NOT NULL", (email,)
+        ).fetchone()
+        return (row["id"], row["password_hash"]) if row else None
+
+    @_locked
+    def get_user(self, user_id):
+        row = self.conn.execute(
+            "SELECT id, email, name, created_at, firebase_uid, password_hash IS NOT NULL AS local FROM users WHERE id = ?",
+            (user_id,),
+        ).fetchone()
+        if row is None:
+            raise ValueError("User not found")
+        account = "email" if row["local"] else "demo" if row["firebase_uid"] == "demo-token" else "google"
+        return {"id": row["id"], "email": row["email"], "name": row["name"],
+                "created_at": row["created_at"], "account_type": account}
+
+    @_locked
+    def update_user(self, user_id, name, email=None):
+        """Changes the display name, and the email for local accounts."""
+        try:
+            if email is None:
+                self.conn.execute("UPDATE users SET name = ? WHERE id = ?", (name, user_id))
+            else:
+                self.conn.execute("UPDATE users SET name = ?, email = ? WHERE id = ?", (name, email, user_id))
+        except sqlite3.IntegrityError:
+            raise ValueError("An account with this email already exists")
+        self.conn.commit()
+
+    @_locked
+    def get_password_hash(self, user_id):
+        row = self.conn.execute("SELECT password_hash FROM users WHERE id = ?", (user_id,)).fetchone()
+        return row["password_hash"] if row else None
+
+    @_locked
+    def set_password_hash(self, user_id, password_hash):
+        self.conn.execute("UPDATE users SET password_hash = ? WHERE id = ?", (password_hash, user_id))
+        self.conn.commit()
+
+    # -- sessions ------------------------------------------------------
+
+    @_locked
+    def create_session(self, user_id, token_hash, expires_at):
+        self.conn.execute(
+            "INSERT INTO sessions (user_id, token_hash, created_at, expires_at) VALUES (?, ?, ?, ?)",
+            (user_id, token_hash, datetime.now(timezone.utc).isoformat(), expires_at),
+        )
+        self.conn.commit()
+
+    @_locked
+    def get_session_user(self, token_hash):
+        """user_id for a live session, or None if unknown or expired."""
+        row = self.conn.execute(
+            "SELECT user_id, expires_at FROM sessions WHERE token_hash = ?", (token_hash,)
+        ).fetchone()
+        if row is None:
+            return None
+        if row["expires_at"] <= datetime.now(timezone.utc).isoformat():
+            self.conn.execute("DELETE FROM sessions WHERE token_hash = ?", (token_hash,))
+            self.conn.commit()
+            return None
+        return row["user_id"]
+
+    @_locked
+    def delete_session(self, token_hash):
+        self.conn.execute("DELETE FROM sessions WHERE token_hash = ?", (token_hash,))
+        self.conn.commit()
+
+    @_locked
+    def delete_other_sessions(self, user_id, keep_token_hash):
+        """Signs out every other browser, e.g. after a password change."""
+        self.conn.execute("DELETE FROM sessions WHERE user_id = ? AND token_hash != ?", (user_id, keep_token_hash))
+        self.conn.commit()
 
     def _assert_owner(self, portfolio_id, user_id):
         """Raises PermissionError if this portfolio doesn't belong to this user.

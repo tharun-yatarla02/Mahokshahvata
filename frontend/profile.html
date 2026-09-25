@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mahokshahvata | Profile</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <style>
+      .profile-form { display: grid; gap: 6px; }
+      .profile-form input { width: 100%; }
+      .profile-form button { justify-self: start; margin-top: 10px; }
+    </style>
+  </head>
+  <body>
+    <nav class="navbar">
+      <div class="nav-inner">
+        <div class="brand">
+          <div class="brand-mark">M</div>
+          <span>Mahokshahvata</span>
+        </div>
+        <div class="nav-links">
+          <a href="/">Overview</a>
+          <a href="/market.html">Market</a>
+          <a href="/portfolio.html">Portfolio</a>
+          <a href="/sentiment.html">Sentiment</a>
+          <a href="/options.html">Options</a>
+          <a href="/billing.html">Billing</a>
+        </div>
+        <div class="nav-actions">
+          <button id="themeToggle" class="theme-toggle" type="button" aria-label="Switch color mode">Light mode</button>
+          <div style="position: relative;">
+            <button id="profileButton" class="profile-button" type="button" aria-label="Open profile">
+              <span class="profile-avatar">U</span>
+              <span id="profileLabel">Profile</span>
+            </button>
+            <div id="profileMenu" class="profile-menu" aria-live="polite">
+              <div class="profile-card">
+                <span id="profileMenuAvatar" class="profile-avatar">U</span>
+                <div>
+                  <p id="profileName" class="profile-name"></p>
+                  <p id="profileEmail" class="profile-email"></p>
+                </div>
+              </div>
+              <div class="profile-menu-actions">
+                <button id="accountButton" type="button" class="secondary">Profile</button>
+                <button id="logoutButton" type="button" class="logout-btn">Logout</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </nav>
+
+    <div class="page">
+      <div class="hero premium-hero">
+        <div class="hero-top hero-top-extended">
+          <div class="hero-copy">
+            <span class="eyebrow">Your account</span>
+            <h1 id="profileHeading">Profile</h1>
+            <p>Your details are stored in the app's database. Portfolios and trades belong to this account only.</p>
+          </div>
+          <div class="hero-metric-box">
+            <span>Account type</span>
+            <strong id="accountType">…</strong>
+            <small id="memberSince">&nbsp;</small>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid">
+        <div class="card premium-card">
+          <h2>Profile details</h2>
+          <form id="profileForm" class="profile-form" novalidate>
+            <label class="label" for="nameInput">Name</label>
+            <input id="nameInput" type="text" autocomplete="name" maxlength="100" required />
+            <label class="label" for="emailInput">Email</label>
+            <input id="emailInput" type="email" autocomplete="email" maxlength="254" />
+            <small id="emailNote" class="tag" hidden>This account's email comes from its sign-in provider.</small>
+            <button type="submit">Save changes</button>
+          </form>
+          <div class="status" id="profileStatus" role="status" style="margin-top: 14px; display: none;"></div>
+        </div>
+
+        <div class="card premium-card" id="passwordCard" hidden>
+          <h2>Change password</h2>
+          <form id="passwordForm" class="profile-form" novalidate>
+            <label class="label" for="currentPassword">Current password</label>
+            <input id="currentPassword" type="password" autocomplete="current-password" maxlength="128" required />
+            <label class="label" for="newPassword">New password</label>
+            <input id="newPassword" type="password" autocomplete="new-password" minlength="8" maxlength="128" required />
+            <label class="label" for="confirmPassword">Confirm new password</label>
+            <input id="confirmPassword" type="password" autocomplete="new-password" maxlength="128" required />
+            <button type="submit" class="secondary">Change password</button>
+          </form>
+          <p class="tag" style="margin-top: 10px;">Changing it signs you out on every other device.</p>
+          <div class="status" id="passwordStatus" role="status" style="margin-top: 14px; display: none;"></div>
+        </div>
+      </div>
+    </div>
+
+    <script src="/api.js"></script>
+    <script>
+      const ACCOUNT_LABELS = { email: 'Email & password', google: 'Google sign-in', demo: 'Shared demo account' };
+
+      function show(id, message, kind) {
+        const el = document.getElementById(id);
+        el.textContent = message;
+        el.className = message ? `status ${kind}` : 'status';
+        el.style.display = message ? '' : 'none';
+      }
+
+      function renderUser(user) {
+        document.getElementById('nameInput').value = user.name || '';
+        const email = document.getElementById('emailInput');
+        email.value = user.email || '';
+        const editableEmail = user.account_type === 'email';
+        email.disabled = !editableEmail;
+        document.getElementById('emailNote').hidden = editableEmail;
+        document.getElementById('passwordCard').hidden = !editableEmail;
+        document.getElementById('accountType').textContent = ACCOUNT_LABELS[user.account_type] || user.account_type;
+        document.getElementById('memberSince').textContent = user.created_at
+          ? `Member since ${new Date(user.created_at).toLocaleDateString([], { dateStyle: 'medium' })}` : '';
+      }
+
+      async function loadProfile() {
+        try {
+          renderUser(await apiFetch('/auth/me'));
+        } catch (error) {
+          show('profileStatus', error.message, 'error');
+        }
+      }
+
+      document.getElementById('profileForm').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const name = document.getElementById('nameInput').value.trim();
+        const emailInput = document.getElementById('emailInput');
+        if (!name) return show('profileStatus', 'Name can\'t be blank.', 'error');
+        const body = { name, ...(emailInput.disabled ? {} : { email: emailInput.value.trim() }) };
+        try {
+          const user = await apiFetch('/auth/me', { method: 'PATCH', body: JSON.stringify(body) });
+          renderUser(user);
+          refreshAccountMenu();  // the navbar shows the new name
+          show('profileStatus', 'Profile saved.', 'success');
+        } catch (error) {
+          show('profileStatus', error.message, 'error');
+        }
+      });
+
+      document.getElementById('passwordForm').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const current = document.getElementById('currentPassword').value;
+        const next = document.getElementById('newPassword').value;
+        if (next.length < 8) return show('passwordStatus', 'Use a new password of at least 8 characters.', 'error');
+        if (next !== document.getElementById('confirmPassword').value) return show('passwordStatus', 'The new passwords don\'t match.', 'error');
+        try {
+          await apiFetch('/auth/password', { method: 'POST', body: JSON.stringify({ current_password: current, new_password: next }) });
+          event.target.reset();
+          show('passwordStatus', 'Password changed. Other devices have been signed out.', 'success');
+        } catch (error) {
+          show('passwordStatus', error.message, 'error');
+        }
+      });
+
+      function setTheme(nextTheme) {
+        document.body.setAttribute('data-theme', nextTheme);
+        try { localStorage.setItem('theme', nextTheme); } catch {}
+        document.getElementById('themeToggle').textContent = nextTheme === 'dark' ? 'Light mode' : 'Dark mode';
+      }
+      let savedTheme = null;
+      try { savedTheme = localStorage.getItem('theme'); } catch {}
+      setTheme(savedTheme || (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'));
+      document.getElementById('themeToggle').addEventListener('click', () => {
+        setTheme(document.body.dataset.theme === 'light' ? 'dark' : 'light');
+      });
+
+      loadProfile();
+    </script>
+  </body>
+</html>

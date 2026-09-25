@@ -288,6 +288,9 @@ _classification_cache = {}
 
 
 def _classification_key(article):
+    # Benzinga edits articles in place; a new `updated` time means re-classify.
+    if article.get("benzinga_id"):
+        return f"benzinga:{article['benzinga_id']}:{article.get('updated', '')}"
     return article.get("link") or article.get("title", "")
 
 
@@ -420,12 +423,50 @@ def fetch_articles():
     return deduped
 
 
+BENZINGA_NEWS_URL = "https://api.benzinga.com/api/v2/news"
+BENZINGA_PAGE_SIZE = 100
+
+
+def fetch_benzinga_articles(api_key):
+    """Company news from Benzinga's Newsfeed API, already tagged with tickers,
+    so these skip company-name matching. Dates are RFC 2822, like RSS."""
+    response = requests.get(
+        BENZINGA_NEWS_URL,
+        params={"token": api_key, "pageSize": BENZINGA_PAGE_SIZE},  # newest first by default
+        headers={"accept": "application/json"},
+        timeout=20,
+    )
+    response.raise_for_status()
+    articles = []
+    for item in response.json():
+        title = _clean_text(item.get("title"))
+        if not title:
+            continue
+        articles.append({
+            "source": "Benzinga",
+            "title": title,
+            "summary": _clean_text(item.get("teaser")),
+            "link": (item.get("url") or "").strip(),
+            "published": item.get("created") or "",
+            "updated": item.get("updated") or "",
+            "benzinga_id": item.get("id"),
+            "benzinga_tickers": sorted({(s.get("name") or "").upper() for s in item.get("stocks") or [] if s.get("name")}),
+        })
+    return articles
+
+
 def match_tickers(articles, company_map, known_tickers=None):
     matcher = build_matcher(company_map, known_tickers)
     matched = []
+    names_by_ticker = {}
+    for name, ticker in company_map:
+        names_by_ticker.setdefault(ticker, name)
     for a in articles:
         text = f"{a['title']}. {a['summary']}"
-        tickers = find_tickers(text, matcher)
+        if a.get("benzinga_tickers"):
+            tickers = {t: names_by_ticker.get(t, t) for t in a["benzinga_tickers"]}
+        else:
+            tickers = find_tickers(text, matcher)
         themes, sectors = find_macro_themes(text)
 
         if tickers:
@@ -594,7 +635,17 @@ def collect_sentiment_results(extra_companies=(), known_tickers=None):
             client = Anthropic(api_key=api_key)
 
     company_map = load_company_map() + list(extra_companies)
-    articles = fetch_articles()
+    articles = []
+    benzinga_key = os.environ.get("BENZINGA_API_KEY")
+    if benzinga_key:
+        try:
+            articles = fetch_benzinga_articles(benzinga_key)
+        except Exception as e:  # bad key, plan limits, network
+            # Not str(e): requests puts the URL, and so the token, in its errors.
+            reason = getattr(getattr(e, "response", None), "status_code", None) or type(e).__name__
+            print(f"[warn] Benzinga news unavailable ({reason}), using RSS feeds", file=sys.stderr)
+    if not articles:
+        articles = fetch_articles()
     matched = match_tickers(articles, company_map, known_tickers)
 
     if not matched:

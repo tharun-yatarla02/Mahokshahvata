@@ -34,15 +34,15 @@ import os
 import threading
 import time
 from contextlib import asynccontextmanager
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import FastAPI, HTTPException, Depends, Header, Query
+from fastapi import FastAPI, HTTPException, Depends, Header, Query, Path as FastAPIPath
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, BeforeValidator, Field, model_validator
 
 
 def _load_dotenv(path=Path(__file__).parent.parent / ".env"):
@@ -64,15 +64,17 @@ def _load_dotenv(path=Path(__file__).parent.parent / ".env"):
 # Before the project imports: some modules read their settings at import time.
 _load_dotenv()
 
-from momentum.momentum_engine import latest_price, filter_by_group, search_rows, DEFAULT_SECTOR_LOOKUP
+from momentum.momentum_engine import latest_price, fetch_price_history, filter_by_group, search_rows, DEFAULT_SECTOR_LOOKUP
 from momentum.market_data import MarketData
 from paper_trading.paper_trading_engine import (
     MIN_ORDER_VALUE, PaperTradingEngine, RiskRules, format_shares, order_value, round_shares, shares_for_amount,
 )
 from politician_trades.politician_trades import list_politicians, get_trades_for_politician, refresh_cache
 from auth.firebase_auth import verify_firebase_token
+from auth.passwords import SESSION_DAYS, hash_password, new_session_token, token_hash, verify_password
 from news_sentiment.news_sentiment_scraper import collect_sentiment_results
 from news_sentiment.suggestions import build_suggestions, company_aliases
+from fundamentals.sec_edgar import get_fundamentals
 
 @asynccontextmanager
 async def lifespan(app):
@@ -127,31 +129,37 @@ async def validation_error(request, exc):
 # Auth dependency — every portfolio endpoint requires a valid session token
 # ---------------------------------------------------------------------------
 
+def _bearer_token(authorization):
+    if authorization and authorization.startswith("Bearer "):
+        return authorization.removeprefix("Bearer ").strip() or None
+    return None
+
+
 def get_current_user(authorization: str = Header(None)):
-    """Reads 'Authorization: Bearer <Firebase ID token>', verifies it with
-    Firebase, and returns our internal user_id — creating the user record
-    on their very first authenticated call if this is a new sign-in.
-    Raises 401 if missing or invalid. FastAPI's Depends() runs this before
-    the endpoint body, so an endpoint that declares this dependency can
-    assume the caller is already authenticated by the time its own code
-    runs.
+    """Reads 'Authorization: Bearer <token>' and returns our internal user_id.
+    Raises 401 if the token is missing, unknown or expired. FastAPI's
+    Depends() runs this before the endpoint body, so an endpoint that declares
+    it can assume the caller is signed in.
 
-    In local demo mode, we silently fall back to the default demo token so the
-    browser can still exercise the app without a real Firebase login configured."""
-    demo_mode = os.getenv("USE_DEMO_AUTH", "").lower() in {"1", "true", "yes", "on"}
+    The token is checked in this order:
+      1. a session from email/password sign-in (/auth/login), stored hashed
+         in the sessions table;
+      2. "demo-token", only when USE_DEMO_AUTH=true;
+      3. a Firebase ID token (Google sign-in), when Firebase is configured.
+    A request with no token is always rejected, even in demo mode, so a
+    signed-out browser can't see anyone's portfolio."""
+    token = _bearer_token(authorization)
+    if not token:
+        raise HTTPException(status_code=401, detail="Please sign in")
 
-    if not authorization or not authorization.startswith("Bearer "):
-        if demo_mode:
-            token = "demo-token"
-        else:
-            raise HTTPException(status_code=401, detail="Missing or malformed Authorization header")
-    else:
-        token = authorization.removeprefix("Bearer ").strip()
+    user_id = engine.get_session_user(token_hash(token))
+    if user_id is not None:
+        return user_id
 
     try:
         firebase_user = verify_firebase_token(token)
-    except ValueError as e:
-        raise HTTPException(status_code=401, detail=str(e))
+    except ValueError:
+        raise HTTPException(status_code=401, detail="Your session has expired. Please sign in again.")
 
     return engine.get_or_create_user(
         firebase_uid=firebase_user["firebase_uid"],
@@ -231,6 +239,131 @@ class TradeOptionRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Accounts: email/password sign-in, profile, sign-out
+# ---------------------------------------------------------------------------
+
+# Deliberately loose: one "@", something on each side, a dot in the domain.
+# Real validation is the user receiving mail, which this app doesn't send.
+EMAIL_PATTERN = r"^[^@\s]{1,64}@[^@\s]+\.[^@\s]+$"
+
+
+# Emails are trimmed before validation (pasted addresses often carry spaces);
+# passwords are never trimmed.
+Email = Annotated[str, BeforeValidator(lambda v: v.strip() if isinstance(v, str) else v),
+                  Field(max_length=254, pattern=EMAIL_PATTERN)]
+
+
+def _new_password():
+    return Field(min_length=8, max_length=128, description="8 to 128 characters")
+
+
+def _clean_name(name):
+    name = " ".join(name.split())
+    if not name:
+        raise HTTPException(status_code=422, detail="Name can't be blank")
+    return name
+
+
+class RegisterRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    email: Email
+    password: str = _new_password()
+
+
+class LoginRequest(BaseModel):
+    email: str = Field(min_length=1, max_length=254)
+    password: str = Field(min_length=1, max_length=128)
+
+
+class UpdateProfileRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    email: Email | None = None
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = _new_password()
+
+
+def _start_session(user_id):
+    token = new_session_token()
+    expires_at = (datetime.now(timezone.utc) + timedelta(days=SESSION_DAYS)).isoformat()
+    engine.create_session(user_id, token_hash(token), expires_at)
+    return {"token": token, "expires_at": expires_at, "user": engine.get_user(user_id)}
+
+
+@app.post("/auth/register", status_code=201)
+def register(req: RegisterRequest):
+    """Creates an email/password account with its default $100,000
+    simulated portfolio, and signs it in."""
+    try:
+        user_id = engine.create_local_user(req.email.strip().lower(), _clean_name(req.name), hash_password(req.password))
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    engine.get_or_create_default_portfolio(user_id)
+    return _start_session(user_id)
+
+
+# ponytail: no rate limit on login; add per-IP/per-email throttling before
+# exposing this beyond localhost.
+@app.post("/auth/login")
+def login(req: LoginRequest):
+    """Signs in with email and password. The same message for an unknown
+    email and a wrong password. (Registration still reveals whether an email
+    is taken, via 409, as most sign-up forms do.)"""
+    found = engine.get_local_login(req.email.strip().lower())
+    if not found or not verify_password(req.password, found[1]):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    return _start_session(found[0])
+
+
+@app.post("/auth/logout")
+def logout(authorization: str = Header(None)):
+    """Ends this browser's session. Always succeeds, so a stale token can
+    still sign out cleanly."""
+    token = _bearer_token(authorization)
+    if token:
+        engine.delete_session(token_hash(token))
+    return {"signed_out": True}
+
+
+@app.get("/auth/me")
+def get_me(user_id: int = Depends(get_current_user)):
+    return engine.get_user(user_id)
+
+
+@app.patch("/auth/me")
+def update_me(req: UpdateProfileRequest, user_id: int = Depends(get_current_user)):
+    """Updates the display name, and the email for email/password accounts
+    (Google and demo accounts get their email from the sign-in provider)."""
+    user = engine.get_user(user_id)
+    email = None
+    if req.email is not None and req.email.strip().lower() != (user["email"] or ""):
+        if user["account_type"] != "email":
+            raise HTTPException(status_code=400, detail="This account's email comes from its sign-in provider")
+        email = req.email.strip().lower()
+    try:
+        engine.update_user(user_id, _clean_name(req.name), email)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    return engine.get_user(user_id)
+
+
+@app.post("/auth/password")
+def change_password(req: ChangePasswordRequest, authorization: str = Header(None),
+                    user_id: int = Depends(get_current_user)):
+    """Changes the password and signs out every other browser."""
+    current = engine.get_password_hash(user_id)
+    if not current:
+        raise HTTPException(status_code=400, detail="This account signs in without a password")
+    if not verify_password(req.current_password, current):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    engine.set_password_hash(user_id, hash_password(req.new_password))
+    engine.delete_other_sessions(user_id, token_hash(_bearer_token(authorization)))
+    return {"changed": True}
+
+
+# ---------------------------------------------------------------------------
 # Momentum endpoints
 # ---------------------------------------------------------------------------
 
@@ -255,7 +388,7 @@ def get_momentum(
     No sign-in required — momentum data isn't tied to any one user.
 
     `sector` accepts a sector name ("Energy"), a short alias ("Tech") or a
-    theme ("AI", "Growth") — see THEME_TICKERS in momentum_engine.py.
+    theme ("AI", "Growth") — see THEMES in momentum_engine.py.
     `q` searches ticker, company name and sector, best match first.
     `sort` orders results (highest first) when there's no search; `top`
     and `offset` page through them. `total` is the full match count."""
@@ -593,6 +726,22 @@ def billing_page():
     raise HTTPException(status_code=404, detail="Billing page not found")
 
 
+@app.get("/login.html")
+def login_page():
+    page = frontend_dir / "login.html"
+    if page.exists():
+        return FileResponse(page, headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"})
+    raise HTTPException(status_code=404, detail="Login page not found")
+
+
+@app.get("/profile.html")
+def profile_page():
+    page = frontend_dir / "profile.html"
+    if page.exists():
+        return FileResponse(page, headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"})
+    raise HTTPException(status_code=404, detail="Profile page not found")
+
+
 @app.get("/styles.css")
 def styles_css():
     css_path = frontend_dir / "styles.css"
@@ -665,6 +814,48 @@ def get_news_sentiment(refresh: bool = False):
         "suggestions": build_suggestions(data["results"], market_data.lookup, rows),
         "next_refresh_in": max(0, round(SENTIMENT_TTL_SECONDS - age)),
     }
+
+
+# Daily closes change once a day, so one download per stock per hour is plenty.
+PRICE_HISTORY_TTL_SECONDS = 60 * 60
+PRICE_HISTORY_DAYS = 90  # same window (and start close) as momentum_pct
+_price_history_cache = {}  # ticker -> (fetched_at, points)
+
+
+@app.get("/price-history/{ticker}")
+def get_price_history(ticker: Annotated[str, FastAPIPath(pattern=TICKER_PATTERN)]):
+    """Daily closes for the momentum window, oldest first, for the Market
+    page chart. Cached per ticker for PRICE_HISTORY_TTL_SECONDS."""
+    ticker = _normalize_ticker(ticker)
+    cached = _price_history_cache.get(ticker)
+    if cached and time.monotonic() - cached[0] < PRICE_HISTORY_TTL_SECONDS:
+        return {"ticker": ticker, "points": cached[1]}
+    try:
+        closes = fetch_price_history([ticker], lookback_days=PRICE_HISTORY_DAYS)
+    except Exception as e:  # network error, Yahoo rate limit
+        raise HTTPException(status_code=502, detail=f"Could not fetch price history: {e}")
+    series = closes[ticker].dropna().tail(PRICE_HISTORY_DAYS) if ticker in closes else None
+    points = [] if series is None else [
+        {"date": day.date().isoformat(), "close": round(float(close), 2)} for day, close in series.items()]
+    if not points:
+        raise HTTPException(status_code=404, detail=f"No price history for {ticker}")
+    _price_history_cache[ticker] = (time.monotonic(), points)
+    return {"ticker": ticker, "points": points}
+
+
+@app.get("/fundamentals/{ticker}")
+def get_company_fundamentals(ticker: Annotated[str, FastAPIPath(pattern=TICKER_PATTERN)]):
+    """Revenue, earnings, cash flow and debt from SEC filings, plus links to
+    the latest 10-K/10-Q/8-K (or 20-F/6-K for foreign filers). Cached per
+    company for 6 hours; see fundamentals/sec_edgar.py."""
+    ticker = _normalize_ticker(ticker)
+    try:
+        data = get_fundamentals(ticker)
+    except Exception as e:  # network error, SEC rate limit or outage
+        raise HTTPException(status_code=502, detail=f"Could not reach SEC EDGAR: {e}")
+    if data is None:
+        raise HTTPException(status_code=404, detail=f"No SEC filings found for {ticker}")
+    return data
 
 
 # ---------------------------------------------------------------------------
