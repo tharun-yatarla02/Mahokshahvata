@@ -62,10 +62,10 @@
         </div>
         <div class="hero-bottom-row">
           <div class="hero-pill-row">
-            <button class="sector-pill active" type="button" data-sentiment="all">All</button>
-            <button class="sector-pill" type="button" data-sentiment="Positive">Positive</button>
-            <button class="sector-pill" type="button" data-sentiment="Neutral">Neutral</button>
-            <button class="sector-pill" type="button" data-sentiment="Negative">Negative</button>
+            <button class="sector-pill active" type="button" data-sentiment="all" aria-pressed="true">All</button>
+            <button class="sector-pill" type="button" data-sentiment="Positive" aria-pressed="false">Positive</button>
+            <button class="sector-pill" type="button" data-sentiment="Neutral" aria-pressed="false">Neutral</button>
+            <button class="sector-pill" type="button" data-sentiment="Negative" aria-pressed="false">Negative</button>
           </div>
           <span class="badge">Live</span>
         </div>
@@ -94,6 +94,35 @@
         </div>
       </div>
 
+      <div class="card premium-card" id="picksCard">
+        <div class="premium-header">
+          <div>
+            <div class="mini-label">Positive news on a rising 90-day trend</div>
+            <h2>Good to invest in right now</h2>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="picks-table">
+            <thead>
+              <tr>
+                <th scope="col">Stock</th>
+                <th scope="col">Headlines</th>
+                <th scope="col">Price</th>
+                <th scope="col">Today</th>
+                <th scope="col">90 days</th>
+                <th scope="col">vs S&amp;P 500</th>
+                <th scope="col">Latest headline</th>
+                <th scope="col"><span class="visually-hidden">Trade</span></th>
+              </tr>
+            </thead>
+            <tbody id="picksBody">
+              <tr><td colspan="8" class="empty-table-row">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="impact-note" id="picksNote" style="margin-top: 12px;">Ranked by how much more positive than negative the coverage is, then by strength against the S&amp;P 500. Educational, not financial advice.</p>
+      </div>
+
       <div class="grid suggestion-grid">
         <div class="card premium-card">
           <div class="premium-header">
@@ -120,11 +149,12 @@
       </div>
       <p class="suggestion-disclaimer">Suggestions combine the tone of recent headlines with each stock's price trend. They're informational, not investment advice. Prices are ~15 minutes delayed.</p>
 
-      <div class="card premium-card" id="newsFeedCard">
+      <div class="card premium-card" id="newsFeedCard" style="scroll-margin-top: 80px;">
         <div class="premium-header">
           <div>
             <div class="mini-label">Latest headlines</div>
             <h2>News feed</h2>
+            <p class="impact-note" id="impactNote">Each headline is shown with the stocks it affects. The verdict combines the headline's tone with the stock's 90-day trend. Educational, not financial advice.</p>
           </div>
         </div>
         <div class="button-row" style="justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;">
@@ -289,30 +319,63 @@
           const summary = escapeHtml(item.summary || 'No summary available.');
           const source = escapeHtml(item.source || 'News feed');
           const published = formatPublished(item.published || item.generated_at);
-          const tickers = escapeHtml(item.tickers || item.companies || item.sectors_affected || 'Market');
           const link = safeUrl(item.link);
 
           return `
-            <article class="sentiment-item">
-              <div class="sentiment-head">
-                <div>
-                  <h3>${title}</h3>
-                  <div class="sentiment-meta">
-                    <span>${source}</span>
-                    <span>•</span>
-                    <span>${published}</span>
+            <article class="sentiment-item news-impact">
+              <div>
+                <div class="sentiment-head">
+                  <div>
+                    <h3>${title}</h3>
+                    <div class="sentiment-meta">
+                      <span>${source}</span>
+                      <span>•</span>
+                      <span>${published}</span>
+                    </div>
                   </div>
+                  <span class="sentiment-badge ${sentiment}">${sentimentLabel}</span>
                 </div>
-                <span class="sentiment-badge ${sentiment}">${sentimentLabel}</span>
+                <p class="sentiment-summary">${summary}</p>
+                <div class="sentiment-footer">
+                  ${link ? `<a href="${escapeHtml(link)}" target="_blank" rel="noopener noreferrer">Read article</a>` : '<span>Market note</span>'}
+                </div>
               </div>
-              <p class="sentiment-summary">${summary}</p>
-              <div class="sentiment-footer">
-                <span>${tickers}</span>
-                ${link ? `<a href="${escapeHtml(link)}" target="_blank" rel="noopener noreferrer">Read article</a>` : '<span>Market note</span>'}
-              </div>
+              ${renderImpact(item.affected || [])}
             </article>
           `;
         }).join('');
+        renderImpactNote();
+      }
+
+      const VIEW_CLASSES = { Good: 'good', Bad: 'bad', Wait: 'wait' };
+
+      // The stocks one headline affects, each with a short verdict.
+      function renderImpact(affected) {
+        if (!affected.length) return '';
+        const rows = affected.map((stock) => {
+          const view = stock.view || 'Not tracked';
+          const meta = stock.tracked
+            ? `${formatMoney(stock.current_price)} · today ${formatChange(stock.day_change_pct)} · 90d ${formatChange(stock.momentum_pct)}${stock.via ? ` · via ${escapeHtml(stock.via)} sector` : ''}`
+            : 'Not in the tracked market list';
+          return `
+            <li class="impact-row">
+              <span><span class="impact-ticker">${escapeHtml(stock.ticker)}</span> <span class="impact-name">${escapeHtml(stock.name || '')}</span></span>
+              <span class="view-badge ${VIEW_CLASSES[stock.view] || 'none'}">${escapeHtml(view)}</span>
+              <span class="impact-meta">${meta}</span>
+              ${stock.tracked ? `<span class="impact-reason">${escapeHtml(stock.reason || '')}</span>` : ''}
+            </li>`;
+        }).join('');
+        const heading = affected.some((s) => s.via) ? 'Sectors affected · largest stocks' : 'Stocks affected';
+        return `<aside class="impact-panel" aria-label="${heading}"><div class="mini-label">${heading}</div><ul class="impact-list">${rows}</ul></aside>`;
+      }
+
+      // Say so when tone labels come from the keyword fallback, not the AI model.
+      function renderImpactNote() {
+        const heuristic = sentimentState.rawResults.some((item) => String(item.reasoning || '').startsWith('Heuristic'));
+        const base = "Each headline is shown with the stocks it affects. The verdict combines the headline's tone with the stock's 90-day trend. Educational, not financial advice.";
+        document.getElementById('impactNote').textContent = heuristic
+          ? `${base} Tone labels are keyword estimates right now (no AI key set), so many headlines read as Neutral.`
+          : base;
       }
 
       function formatMoney(value) {
@@ -345,8 +408,42 @@
         return `<div class="suggestion-headline">Latest: ${url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${title}</a>` : title}</div>`;
       }
 
+      // "Good to invest in right now": stocks whose news is positive overall
+      // and whose 90-day trend is rising (the server's "Good" verdict).
+      function renderPicks(picks, heuristic) {
+        const body = document.getElementById('picksBody');
+        body.innerHTML = picks.length ? picks.map((stock) => {
+          const c = stock.condition || {};
+          const others = stock.mentions - stock.positive - stock.negative;
+          return `
+            <tr>
+              <td><strong>${escapeHtml(stock.ticker)}</strong><br><small>${escapeHtml(stock.name || '')}</small></td>
+              <td><span class="positive">${stock.positive} positive</span>${stock.negative ? ` · <span class="negative">${stock.negative} negative</span>` : ''}${others ? ` · ${others} neutral` : ''}</td>
+              <td>${formatMoney(c.current_price)}</td>
+              <td>${formatChange(c.day_change_pct)}</td>
+              <td>${formatChange(c.momentum_pct)}</td>
+              <td>${formatChange(c.relative_strength)}</td>
+              <td><small>${escapeHtml(stock.latest_headline?.title || stock.signal || '')}</small></td>
+              <td><button type="button" class="secondary small-btn" data-trade="${escapeHtml(stock.ticker)}">Trade</button></td>
+            </tr>`;
+        }).join('') : '<tr><td colspan="8" class="empty-table-row">No stock has positive news on a rising trend right now. Check back after the next news update.</td></tr>';
+        const base = 'Ranked by how much more positive than negative the coverage is, then by strength against the S&P 500. Educational, not financial advice.';
+        document.getElementById('picksNote').textContent = heuristic
+          ? `${base} Tone labels are keyword estimates right now (no AI key set), so this list is short and may miss good news.`
+          : base;
+      }
+
+      // Trade opens the Portfolio order form with the stock filled in (as Market does).
+      document.getElementById('picksBody').addEventListener('click', (event) => {
+        const ticker = event.target.closest('[data-trade]')?.dataset.trade;
+        if (!ticker) return;
+        localStorage.setItem('pendingTradeTicker', ticker);
+        window.location.href = '/portfolio.html';
+      });
+
       function renderSuggestions(data) {
         const suggestions = data?.suggestions || {};
+        renderPicks(suggestions.picks || [], (data?.results || []).some((item) => String(item.reasoning || '').startsWith('Heuristic')));
         const overview = suggestions.overview || {};
         const total = Number(overview.headlines || 0);
         const share = (n) => (total ? `${Math.round((100 * n) / total)}% of headlines` : 'Share of headlines');
@@ -477,9 +574,13 @@
           }
           document.querySelectorAll('.sector-pill').forEach((chip) => {
             chip.classList.toggle('active', chip === button);
+            chip.setAttribute('aria-pressed', String(chip === button));
           });
           sentimentState.currentPage = 1;
           renderFeed();
+          // The feed sits below the suggestion panels, so show what changed.
+          const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+          document.getElementById('newsFeedCard').scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
         });
       });
       document.getElementById('sentimentSearch').addEventListener('input', () => {

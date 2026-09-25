@@ -250,7 +250,7 @@ user only sees their own portfolios.
 | POST | `/auth/password` 🔒 | Change password (`current_password`, `new_password`); signs out other sessions |
 | GET | `/health` | Health check |
 | GET | `/momentum?top=50&offset=0` | Tracked stocks ranked by momentum. Also takes `q` (search ticker/company/sector), `sector` (name, alias like `Tech`, or theme like `AI`) and `sort` (`momentum`, `market_cap`, `day_change`, `volume`) |
-| GET | `/news-sentiment` | Latest headlines with sentiment, plus `suggestions`: stocks and sectors in the news next to their current market condition. `refresh=true` refetches (at most once a minute; otherwise cached 5 min) |
+| GET | `/news-sentiment` | Latest headlines with sentiment; each has `affected`: the stocks it names (or, for sector-wide news, the largest stocks in those sectors) with a Good / Bad / Wait / No clear signal verdict from the headline's tone and the stock's 90-day trend. Plus `suggestions` (including `picks`: stocks with positive news on a rising 90-day trend, shown as "Good to invest in right now"): stocks and sectors in the news next to their current market condition. `refresh=true` refetches (at most once a minute; otherwise cached 5 min) |
 | GET | `/price-history/{ticker}` | Daily closes for the 90-day momentum window (yfinance, cached 1 hour), used by the Market page chart |
 | GET | `/fundamentals/{ticker}` | Revenue, net income, diluted EPS, operating cash flow (last 4 years), latest quarter, long-term debt, and links to recent SEC filings |
 | GET | `/politicians` | Politicians with disclosed trades |

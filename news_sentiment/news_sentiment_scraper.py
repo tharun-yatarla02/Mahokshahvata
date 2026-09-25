@@ -186,7 +186,8 @@ def find_macro_themes(text):
     matched_themes = []
     affected_sectors = set()
     for theme, sectors in MACRO_THEMES.items():
-        if theme in lower_text:
+        # Whole words only ("war" must not match "Warsh" or "toward"); a plural counts.
+        if re.search(rf"\b{re.escape(theme)}s?\b", lower_text):
             matched_themes.append(theme)
             affected_sectors.update(sectors)
     return matched_themes, sorted(affected_sectors)
@@ -684,8 +685,20 @@ def collect_sentiment_results(extra_companies=(), known_tickers=None):
     }
 
 
-POSITIVE_WORDS = ["rise", "rally", "beats", "surge", "upgrade", "growth", "strong", "higher", "gain"]
-NEGATIVE_WORDS = ["drop", "fall", "miss", "slump", "cut", "decline", "weak", "lower", "loss"]
+# Whole words with their forms spelled out: matching substrings labelled
+# "prosecutors" negative ("cut"), "against" positive ("gain") and "surprise"
+# positive ("rise").
+POSITIVE_WORDS = {
+    "rise", "rises", "rising", "rose", "rally", "rallies", "rallied", "rallying",
+    "beat", "beats", "surge", "surges", "surged", "surging", "upgrade", "upgrades", "upgraded",
+    "growth", "strong", "stronger", "strongest", "higher", "gain", "gains", "gained", "gaining",
+}
+NEGATIVE_WORDS = {
+    "drop", "drops", "dropped", "dropping", "fall", "falls", "fell", "falling", "fallen",
+    "miss", "misses", "missed", "slump", "slumps", "slumped", "cut", "cuts", "cutting",
+    "decline", "declines", "declined", "declining", "weak", "weaker", "weakest", "weakness",
+    "lower", "loss", "losses",
+}
 
 
 def heuristic_sentiment(articles, reasoning):
@@ -696,12 +709,11 @@ def heuristic_sentiment(articles, reasoning):
         if not text:
             results.append({**article, "sentiment": "Neutral", "confidence": 0.0, "reasoning": "No headline text available"})
             continue
-        if any(word in text for word in POSITIVE_WORDS):
-            sentiment = "Positive"
-        elif any(word in text for word in NEGATIVE_WORDS):
-            sentiment = "Negative"
-        else:
-            sentiment = "Neutral"
+        words = re.findall(r"[a-z]+", text)
+        positive = sum(word in POSITIVE_WORDS for word in words)
+        negative = sum(word in NEGATIVE_WORDS for word in words)
+        # More matches wins, so "shares fall as early gains fade" isn't Positive.
+        sentiment = "Positive" if positive > negative else "Negative" if negative > positive else "Neutral"
         results.append({**article, "sentiment": sentiment, "confidence": 0.65, "reasoning": reasoning})
     return results
 

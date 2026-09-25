@@ -73,7 +73,7 @@ from politician_trades.politician_trades import list_politicians, get_trades_for
 from auth.firebase_auth import verify_firebase_token
 from auth.passwords import SESSION_DAYS, hash_password, new_session_token, token_hash, verify_password
 from news_sentiment.news_sentiment_scraper import collect_sentiment_results
-from news_sentiment.suggestions import build_suggestions, company_aliases
+from news_sentiment.suggestions import affected_stocks, build_suggestions, company_aliases, largest_by_sector
 from fundamentals.sec_edgar import get_fundamentals
 
 @asynccontextmanager
@@ -809,8 +809,12 @@ def get_news_sentiment(refresh: bool = False):
             _sentiment_cache["at"] = time.monotonic()
             age = 0.0
         data = _sentiment_cache["data"]
+    # Built per request (not stored in the cache) so prices are always current.
+    by_sector = largest_by_sector(rows)
+    results = [{**a, "affected": affected_stocks(a, market_data.lookup, by_sector)} for a in data["results"]]
     return {
         **data,
+        "results": results,
         "suggestions": build_suggestions(data["results"], market_data.lookup, rows),
         "next_refresh_in": max(0, round(SENTIMENT_TTL_SECONDS - age)),
     }

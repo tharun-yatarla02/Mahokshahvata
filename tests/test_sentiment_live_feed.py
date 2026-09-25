@@ -245,3 +245,21 @@ def test_sentiment_schema_only_allows_three_labels():
     import pydantic
     with pytest.raises(pydantic.ValidationError):
         scraper.HeadlineSentiment(id=1, sentiment="Mixed", confidence=0.5, reasoning="x")
+
+
+def test_keyword_fallback_matches_whole_words_and_weighs_both_sides():
+    from news_sentiment.news_sentiment_scraper import heuristic_sentiment
+    label = lambda title: heuristic_sentiment([{"title": title, "summary": ""}], "test")[0]["sentiment"]
+
+    # Words inside other words used to count: "prose-cut-ors", "a-gain-st", "surp-rise".
+    assert label("CrowdStrike probe closed by US prosecutors without charges") == "Neutral"
+    assert label("Company wins case against rival") == "Neutral"
+    assert label("Enterprise surprise for Oracle") == "Neutral"
+    # Real word forms still count.
+    assert label("Eli Lilly gains more ground") == "Positive"
+    assert label("Why is Manulife stock gaining today?") == "Positive"
+    assert label("Nvidia shares rose after earnings") == "Positive"
+    assert label("Tesla stock falls as launch fails to excite") == "Negative"
+    # Both sides present: more matches wins, a tie is Neutral.
+    assert label("Shares fall as early gains fade and losses mount") == "Negative"
+    assert label("Stocks rise then fall") == "Neutral"

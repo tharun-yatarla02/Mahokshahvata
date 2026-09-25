@@ -855,6 +855,10 @@ tbody tr[data-ticker] { cursor: pointer; }
 .holdings-table { min-width: 700px; }
 .trade-table { min-width: 900px; }
 
+.picks-table { min-width: 860px; }
+.picks-table td small { color: var(--muted); }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
 .history-table { font-size: 0.8125rem; }
 .history-table th, .history-table td { padding: 10px 12px; vertical-align: top; }
 .history-table td small { color: var(--muted); }
@@ -948,6 +952,36 @@ tbody tr[data-ticker] { cursor: pointer; }
 .sentiment-badge.negative { background: var(--neg-soft); color: var(--neg); }
 .sentiment-badge.neutral,
 .sentiment-badge.unknown { background: var(--neutral-soft); color: var(--neutral); }
+
+/* News card: the article on the left, the stocks it affects on the right. */
+.news-impact {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+.impact-panel { border-left: 1px solid var(--line); padding-left: 20px; }
+.impact-panel .mini-label { margin-bottom: 8px; }
+.impact-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.impact-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; align-items: center; }
+.impact-ticker { font-weight: 600; }
+.impact-name { color: var(--muted); font-size: 0.8125rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.impact-meta { grid-column: 1 / -1; color: var(--muted); font-size: 0.75rem; }
+.impact-reason { grid-column: 1 / -1; font-size: 0.8125rem; }
+.view-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 64px; padding: 3px 10px; border-radius: 980px;
+  font-size: 0.75rem; font-weight: 600; white-space: nowrap;
+}
+.view-badge.good { background: var(--pos-soft); color: var(--pos); }
+.view-badge.bad { background: var(--neg-soft); color: var(--neg); }
+.view-badge.wait { background: var(--warn-soft); color: var(--warn); }
+.view-badge.none { background: var(--neutral-soft); color: var(--neutral); }
+.impact-note { margin: 6px 0 0; color: var(--muted); font-size: 0.8125rem; }
+@media (max-width: 760px) {
+  .news-impact { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  .impact-panel { border-left: 0; padding-left: 0; border-top: 1px solid var(--line); padding-top: 12px; }
+}
 
 /* ------------------------------------------------------------------ market detail (market.html) */
 

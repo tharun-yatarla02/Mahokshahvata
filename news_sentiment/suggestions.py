@@ -60,6 +60,7 @@ def company_aliases(rows, limit=ALIAS_UNIVERSE_SIZE):
 
 SENTIMENT_KEYS = {"Positive": "positive", "Negative": "negative", "Neutral": "neutral"}
 MAX_STOCKS = 12
+MAX_PICKS = 10
 MAX_SECTORS = 8
 LEADER_MIN_MARKET_CAP = 10_000_000_000  # sector leaders are $10B+ companies
 
@@ -89,6 +90,60 @@ def stock_signal(tone, momentum_pct, day_change_pct):
     if day_change_pct is not None and abs(day_change_pct) >= 3:
         return f"In the news and moving {'up' if day_change_pct > 0 else 'down'} sharply today"
     return "In the news, no clear direction"
+
+
+def investment_view(sentiment, momentum_pct):
+    """Short verdict for one headline and one stock, using the same rule as
+    stock_signal (news tone + direction of the 90-day trend), so the badge
+    and the explanation always agree. Informational only."""
+    trend_up = (momentum_pct or 0) >= 0
+    if sentiment == "Positive":
+        return "Good" if trend_up else "Wait"
+    if sentiment == "Negative":
+        return "Wait" if trend_up else "Bad"
+    return "No clear signal"
+
+
+MAX_AFFECTED = 4
+SECTOR_EXAMPLES = 2  # largest companies shown per sector for sector-wide news
+
+
+def affected_stocks(article, lookup, largest_by_sector):
+    """The stocks one headline affects, each with a verdict: the tickers it
+    names, or for sector-wide news (rates, oil...) the largest companies in
+    the affected sectors, marked with the sector they stand in for.
+    largest_by_sector: {sector: [rows, largest market cap first]}."""
+    tone = {"Positive": 1, "Negative": -1}.get(article.get("sentiment"), 0)
+
+    def entry(ticker, row, via=None):
+        if not row:
+            return {"ticker": ticker, "name": ticker, "via": via, "tracked": False,
+                    "view": None, "reason": "Not in the tracked market list"}
+        return {
+            "ticker": ticker, "name": row.get("name") or ticker, "via": via, "tracked": True,
+            "current_price": row.get("current_price"), "day_change_pct": row.get("day_change_pct"),
+            "momentum_pct": row.get("momentum_pct"),
+            "view": investment_view(article.get("sentiment"), row.get("momentum_pct")),
+            "reason": stock_signal(tone, row.get("momentum_pct"), row.get("day_change_pct")),
+        }
+
+    named = [t.strip() for t in (article.get("tickers") or "").split(",") if t.strip()]
+    if named:
+        return [entry(t, lookup(t)) for t in named[:MAX_AFFECTED]]
+    affected = []
+    for sector in (s.strip() for s in (article.get("sectors_affected") or "").split(",")):
+        for row in largest_by_sector.get(sector, [])[:SECTOR_EXAMPLES]:
+            affected.append(entry(row["ticker"], row, via=sector))
+    return affected[:MAX_AFFECTED]
+
+
+def largest_by_sector(market_rows):
+    """{sector: rows sorted by market cap}: sector-wide news is shown against
+    the biggest names (not the best performers, which would bias verdicts)."""
+    groups = {}
+    for row in sorted(market_rows, key=lambda r: r.get("market_cap") or 0, reverse=True):
+        groups.setdefault(row.get("sector"), []).append(row)
+    return groups
 
 
 def _new_bucket():
@@ -130,7 +185,9 @@ def _sector_condition(sector_rows):
 def build_suggestions(results, lookup, market_rows):
     """results: classified articles from the scraper. lookup(ticker) -> the
     tracked market row or None. market_rows: every tracked row (for sector
-    conditions). Returns {"stocks": [...], "sectors": [...], "overview": {...}}."""
+    conditions). Returns {"picks": [...], "stocks": [...], "sectors": [...],
+    "overview": {...}}; picks are the stocks with positive news on a rising
+    trend (verdict "Good"), best first."""
     stocks, sectors = {}, {}
     for article in results:
         if article.get("sentiment") == "Unknown":
@@ -163,6 +220,15 @@ def build_suggestions(results, lookup, market_rows):
         })
     # Most-covered first; among equals, the clearest (most one-sided) news.
     stock_items.sort(key=lambda s: (s["mentions"], abs(s["tone"])), reverse=True)
+    for item in stock_items:
+        item["view"] = investment_view(item["tone_label"], item["condition"]["momentum_pct"]) if item["condition"] else None
+    # "Good to invest in right now": positive news on a rising trend, the most
+    # net-positive coverage first, then the strongest against the S&P 500.
+    picks = sorted(
+        (s for s in stock_items if s["view"] == "Good"),
+        key=lambda s: (s["positive"] - s["negative"], s["tone"], s["condition"].get("relative_strength") or 0),
+        reverse=True,
+    )[:MAX_PICKS]
 
     rows_by_sector = {}
     for row in market_rows:
@@ -182,6 +248,7 @@ def build_suggestions(results, lookup, market_rows):
 
     counted = [a for a in results if a.get("sentiment") != "Unknown"]
     return {
+        "picks": picks,
         "stocks": stock_items[:MAX_STOCKS],
         "sectors": sector_items[:MAX_SECTORS],
         "overview": {

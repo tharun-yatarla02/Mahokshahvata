@@ -1,5 +1,7 @@
-from news_sentiment.news_sentiment_scraper import build_matcher, find_tickers
-from news_sentiment.suggestions import build_suggestions, clean_company_name, company_aliases, stock_signal
+from news_sentiment.news_sentiment_scraper import build_matcher, find_macro_themes, find_tickers
+from news_sentiment.suggestions import (
+    affected_stocks, build_suggestions, clean_company_name, company_aliases, largest_by_sector, stock_signal,
+)
 
 MARKET = [
     {"ticker": "AAPL", "name": "Apple Inc.", "sector": "Technology", "market_cap": 4e12, "current_price": 200.0, "day_change_pct": 1.5, "momentum_pct": 12.0},
@@ -70,3 +72,47 @@ def test_stock_signal_wording():
     assert stock_signal(-0.5, -10, 0) == "Bad news on a falling trend: caution"
     assert stock_signal(0.0, 5, -4.2) == "In the news and moving down sharply today"
     assert stock_signal(0.0, 5, 0.3) == "In the news, no clear direction"
+
+
+def test_each_headline_lists_the_stocks_it_affects_with_a_verdict():
+    by_sector = largest_by_sector(MARKET)
+    view = lambda a: [(s["ticker"], s["via"], s["view"]) for s in affected_stocks(a, LOOKUP, by_sector)]
+
+    # Named stocks: the article's tone plus each stock's 90-day trend.
+    assert view(article("Apple beats", "Positive", tickers="AAPL")) == [("AAPL", None, "Good")]
+    assert view(article("Exxon slumps", "Negative", tickers="XOM")) == [("XOM", None, "Bad")]
+    assert view(article("Exxon upgraded", "Positive", tickers="XOM")) == [("XOM", None, "Wait")]   # good news, falling trend
+    assert view(article("Apple sued", "Negative", tickers="AAPL")) == [("AAPL", None, "Wait")]     # bad news, rising trend
+    assert view(article("Apple event", "Neutral", tickers="AAPL")) == [("AAPL", None, "No clear signal")]
+
+    # Sector-wide news: the largest companies, not the best performers (SMLL is up 90%).
+    assert view(article("Oil prices jump", "Positive", sectors="Energy")) == [("XOM", "Energy", "Wait"), ("SMLL", "Energy", "Good")]
+
+    # A ticker outside the tracked list is shown without a verdict.
+    untracked = affected_stocks(article("Startup news", "Positive", tickers="ZZZZ"), LOOKUP, by_sector)
+    assert untracked == [{"ticker": "ZZZZ", "name": "ZZZZ", "via": None, "tracked": False, "view": None,
+                          "reason": "Not in the tracked market list"}]
+
+
+def test_macro_themes_match_whole_words_only():
+    assert find_macro_themes("Warsh's regime change at the Fed")[0] == []        # not "war"
+    assert find_macro_themes("Returns rise toward 2027 targets")[0] == []
+    assert find_macro_themes("War in Europe lifts oil")[0] == ["war"]
+    assert find_macro_themes("New tariffs hit imports")[0] == ["tariff"]         # plural counts
+
+
+def test_picks_are_positive_news_on_a_rising_trend_best_first():
+    results = [
+        article("Apple beats", "Positive", tickers="AAPL"),
+        article("Apple upgraded", "Positive", tickers="AAPL"),
+        article("Microsoft wins deal", "Positive", tickers="MSFT"),
+        article("Exxon upgraded", "Positive", tickers="XOM"),        # good news but falling trend: not a pick
+        article("Target sued", "Negative", tickers="TGT"),           # bad news: not a pick
+        article("Small Energy flat", "Neutral", tickers="SMLL"),     # no clear signal: not a pick
+    ]
+    suggestions = build_suggestions(results, LOOKUP, MARKET)
+
+    assert [p["ticker"] for p in suggestions["picks"]] == ["AAPL", "MSFT"]   # two positive headlines beat one
+    assert all(p["view"] == "Good" for p in suggestions["picks"])
+    views = {s["ticker"]: s["view"] for s in suggestions["stocks"]}
+    assert views == {"AAPL": "Good", "MSFT": "Good", "XOM": "Wait", "TGT": "Wait", "SMLL": "No clear signal"}
