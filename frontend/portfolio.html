@@ -556,6 +556,7 @@
       let tradePlan = null;
       let previewRequest = 0;
       let previewTimer = null;
+      let previewTicker = null;  // the ticker the market-price line describes
 
       function formatShares(value) {
         return Number(value || 0).toLocaleString('en-US', { maximumFractionDigits: 6 });
@@ -580,6 +581,8 @@
         const box = $('tradePreview');
         const button = $('tradeStockBtn');
         box.classList.remove('over-budget');
+        box.style.opacity = '';
+        previewTicker = plan ? plan.ticker : null;
         if (error) {
           box.textContent = error;
           box.classList.add('over-budget');
@@ -632,14 +635,27 @@
         }
       }
 
-      function schedulePreview() {
+      // Any edit makes the preview on screen stale: drop it and block the Buy
+      // button right away (not when the debounced request starts), so the
+      // button can never place an order the preview doesn't describe.
+      function queuePreview(delay) {
         clearTimeout(previewTimer);
         syncTradeLabels();
-        previewTimer = setTimeout(refreshTradePreview, 250);
+        previewRequest += 1;  // a response already in flight is now stale
+        tradePlan = null;
+        $('tradeStockBtn').disabled = true;
+        $('tradePreview').style.opacity = '0.5';
+        const ticker = $('tradeTicker').value.trim().toUpperCase();
+        if (ticker !== previewTicker) $('tradeMarketPrice').textContent = ticker ? `Market price: looking up ${ticker}…` : 'Market price: —';
+        previewTimer = setTimeout(refreshTradePreview, delay);
       }
+      const schedulePreview = () => queuePreview(250);
 
       ['tradeSide', 'tradeMode'].forEach((id) => $(id).addEventListener('change', schedulePreview));
       $('tradeSize').addEventListener('input', schedulePreview);
+      // Typing a ticker previews it after a short pause; picking a suggestion
+      // (which fires "change") previews it straight away.
+      $('tradeTicker').addEventListener('input', () => queuePreview(400));
       $('tradeTicker').addEventListener('change', schedulePreview);
 
       // Max: everything your cash buys, or everything you own.
