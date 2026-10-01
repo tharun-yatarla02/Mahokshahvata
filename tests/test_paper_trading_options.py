@@ -1,11 +1,8 @@
-import sqlite3
-
 from paper_trading.paper_trading_engine import PaperTradingEngine, RiskRules
 
 
-def test_trade_option_records_timestamps_and_history(tmp_path):
-    db_path = tmp_path / "paper_trading.db"
-    engine = PaperTradingEngine(str(db_path))
+def test_trade_option_records_timestamps_and_history(make_engine):
+    engine = make_engine()
     user_id = engine.get_or_create_user("demo-user", "demo@example.com", "Demo User")
     portfolio_id = engine.create_portfolio(user_id, "Options Demo", 5000)
 
@@ -32,9 +29,8 @@ def test_trade_option_records_timestamps_and_history(tmp_path):
     assert history[0]["timestamp"] == trade["timestamp"]
 
 
-def test_option_mark_to_market_uses_current_premium(tmp_path):
-    db_path = tmp_path / "paper_trading.db"
-    engine = PaperTradingEngine(str(db_path))
+def test_option_mark_to_market_uses_current_premium(make_engine):
+    engine = make_engine()
     user_id = engine.get_or_create_user("option-user", "user@example.com", "Option User")
     portfolio_id = engine.create_portfolio(user_id, "Option Portfolio", 2500)
 
@@ -55,9 +51,8 @@ def test_option_mark_to_market_uses_current_premium(tmp_path):
     assert snapshot["cash_balance"] == 2464.0
 
 
-def test_add_cash_balance_updates_portfolio_and_summary(tmp_path):
-    db_path = tmp_path / "paper_trading.db"
-    engine = PaperTradingEngine(str(db_path))
+def test_add_cash_balance_updates_portfolio_and_summary(make_engine):
+    engine = make_engine()
     user_id = engine.get_or_create_user("balance-user", "balance@example.com", "Balance User")
     portfolio_id = engine.create_portfolio(user_id, "Cash Portfolio", 1000)
 
@@ -70,9 +65,8 @@ def test_add_cash_balance_updates_portfolio_and_summary(tmp_path):
     assert summary["stock_count"] == 0
 
 
-def test_mark_to_market_does_not_treat_cash_topups_as_profit(tmp_path):
-    db_path = tmp_path / "paper_trading.db"
-    engine = PaperTradingEngine(str(db_path))
+def test_mark_to_market_does_not_treat_cash_topups_as_profit(make_engine):
+    engine = make_engine()
     user_id = engine.get_or_create_user("pnl-user", "pnl@example.com", "P&L User")
     portfolio_id = engine.create_portfolio(user_id, "P&L Portfolio", 1000)
 
@@ -83,25 +77,16 @@ def test_mark_to_market_does_not_treat_cash_topups_as_profit(tmp_path):
     assert snapshot["total_pl_pct"] == 0.0
 
 
-def test_summary_percentages_and_position_weights_are_consistent(tmp_path):
-    db_path = tmp_path / "paper_trading.db"
-    engine = PaperTradingEngine(str(db_path))
+def test_summary_percentages_and_position_weights_are_consistent(make_engine):
+    engine = make_engine()
     user_id = engine.get_or_create_user("math-user", "math@example.com", "Math User")
     portfolio_id = engine.create_portfolio(user_id, "Math Portfolio", 10000)
 
-    engine.conn.execute(
-        "INSERT INTO holdings (portfolio_id, ticker, sector, instrument_type, position_key, quantity, avg_buy_price) VALUES (?, ?, ?, 'STOCK', ?, 10, 100.0)",
-        (portfolio_id, "AAPL", "Technology", "AAPL"),
-    )
-    engine.conn.execute(
-        "INSERT INTO holdings (portfolio_id, ticker, sector, instrument_type, position_key, quantity, avg_buy_price) VALUES (?, ?, ?, 'STOCK', ?, 5, 200.0)",
-        (portfolio_id, "MSFT", "Technology", "MSFT"),
-    )
-    engine.conn.execute(
-        "INSERT INTO holdings (portfolio_id, ticker, sector, instrument_type, position_key, quantity, avg_buy_price) VALUES (?, ?, ?, 'STOCK', ?, 8, 75.0)",
-        (portfolio_id, "XOM", "Energy", "XOM"),
-    )
-    engine.conn.commit()
+    for ticker, sector, quantity, price in [("AAPL", "Technology", 10, 100.0), ("MSFT", "Technology", 5, 200.0), ("XOM", "Energy", 8, 75.0)]:
+        engine._holding_ref(portfolio_id, ticker).set({
+            "portfolio_id": portfolio_id, "ticker": ticker, "sector": sector, "instrument_type": "STOCK",
+            "position_key": ticker, "quantity": quantity, "avg_buy_price": price,
+        })
 
     summary = engine.get_portfolio_summary(portfolio_id, user_id)
     total_invested = summary["total_invested"]
@@ -113,9 +98,8 @@ def test_summary_percentages_and_position_weights_are_consistent(tmp_path):
     assert round((summary["sector_breakdown"]["Energy"] / total_invested) * 100, 2) == 23.08
 
 
-def test_option_trade_cost_scales_with_quantity_and_premium(tmp_path):
-    db_path = tmp_path / "paper_trading.db"
-    engine = PaperTradingEngine(str(db_path))
+def test_option_trade_cost_scales_with_quantity_and_premium(make_engine):
+    engine = make_engine()
     user_id = engine.get_or_create_user("option-math-user", "optionmath@example.com", "Option Math User")
     portfolio_id = engine.create_portfolio(user_id, "Option Math Portfolio", 2500)
 
@@ -138,9 +122,8 @@ def test_option_trade_cost_scales_with_quantity_and_premium(tmp_path):
     assert summary["remaining_balance_to_invest"] == 2483.0
 
 
-def test_trade_stock_buy_sell_updates_cash_and_summary(tmp_path):
-    db_path = tmp_path / "paper_trading.db"
-    engine = PaperTradingEngine(str(db_path))
+def test_trade_stock_buy_sell_updates_cash_and_summary(make_engine):
+    engine = make_engine()
     user_id = engine.get_or_create_user("stock-trade-user", "stock@example.com", "Stock Trade User")
     portfolio_id = engine.create_portfolio(user_id, "Stock Trading Portfolio", 10000)
 
@@ -175,40 +158,8 @@ def test_trade_stock_buy_sell_updates_cash_and_summary(tmp_path):
     assert summary["total_pl"] == 80.0  # sold 4 shares $20 above cost
 
 
-def test_legacy_database_allows_stock_and_option_on_same_ticker(tmp_path):
-    # Databases created before options support were unique on (portfolio_id, ticker).
-    db_path = tmp_path / "legacy.db"
-    conn = sqlite3.connect(db_path)
-    conn.executescript(
-        """
-        CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, firebase_uid TEXT UNIQUE NOT NULL,
-                            email TEXT, name TEXT, created_at TEXT NOT NULL);
-        CREATE TABLE portfolios (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL,
-                                 name TEXT NOT NULL, starting_capital REAL NOT NULL,
-                                 cash_balance REAL NOT NULL, created_at TEXT NOT NULL);
-        CREATE TABLE holdings (id INTEGER PRIMARY KEY AUTOINCREMENT, portfolio_id INTEGER NOT NULL,
-                               ticker TEXT NOT NULL, sector TEXT, quantity REAL NOT NULL,
-                               avg_buy_price REAL NOT NULL, UNIQUE(portfolio_id, ticker));
-        INSERT INTO users VALUES (1, 'demo-user', 'demo@example.com', 'Demo User', '2026-01-01');
-        INSERT INTO portfolios VALUES (1, 1, 'Legacy', 5000, 4700, '2026-01-01');
-        INSERT INTO holdings (portfolio_id, ticker, sector, quantity, avg_buy_price)
-            VALUES (1, 'AAPL', 'Technology', 2, 150);
-        """
-    )
-    conn.close()
-
-    engine = PaperTradingEngine(str(db_path))
-    engine.trade_option(1, 1, ticker="AAPL", option_type="CALL", strike=200.0,
-                        expiry="2026-12-18", quantity=2, premium=8.5, side="BUY")
-
-    holdings = engine.get_portfolio_summary(1, 1)["holdings"]
-    assert sorted(h["instrument_type"] for h in holdings if h["ticker"] == "AAPL") == ["OPTION", "STOCK"]
-    stock = next(h for h in holdings if h["instrument_type"] == "STOCK")
-    assert stock["quantity"] == 2
-
-
-def test_cash_stays_exact_to_the_cent_after_many_trades(tmp_path):
-    engine = PaperTradingEngine(str(tmp_path / "cents.db"))
+def test_cash_stays_exact_to_the_cent_after_many_trades(make_engine):
+    engine = make_engine()
     user = engine.get_or_create_user("u1")
     pid = engine.create_portfolio(user, "Cents", 100)
 
@@ -216,12 +167,12 @@ def test_cash_stays_exact_to_the_cent_after_many_trades(tmp_path):
         engine.trade_stock(pid, user, "AAPL", 1, 33.33)  # 3 x 33.33 = 99.99 exactly
 
     assert engine.get_portfolio_summary(pid, user)["cash_balance"] == 0.01
-    raw = engine.conn.execute("SELECT cash_balance FROM portfolios WHERE id = ?", (pid,)).fetchone()[0]
+    raw = engine._portfolio_ref(pid).get().get("cash_balance")
     assert raw == 0.01
 
 
-def test_trade_stock_records_sector_and_backfills_unknown(tmp_path):
-    engine = PaperTradingEngine(str(tmp_path / "paper_trading.db"))
+def test_trade_stock_records_sector_and_backfills_unknown(make_engine):
+    engine = make_engine()
     user_id = engine.get_or_create_user("demo-user", "demo@example.com", "Demo User")
     portfolio_id = engine.create_portfolio(user_id, "Sectors", 5000)
 
@@ -237,14 +188,14 @@ def test_trade_stock_records_sector_and_backfills_unknown(tmp_path):
     assert sectors() == {"PODD": "Healthcare", "AAPL": "Technology"}
 
 
-def _engine_with_portfolio(tmp_path, capital=1000):
-    engine = PaperTradingEngine(str(tmp_path / "pl.db"))
+def _engine_with_portfolio(make_engine, capital=1000):
+    engine = make_engine()
     user = engine.get_or_create_user("pl-user")
     return engine, user, engine.create_portfolio(user, "P/L", capital)
 
 
-def test_pl_counts_realized_and_live_unrealized_gains(tmp_path):
-    engine, user, pid = _engine_with_portfolio(tmp_path)
+def test_pl_counts_realized_and_live_unrealized_gains(make_engine):
+    engine, user, pid = _engine_with_portfolio(make_engine)
     engine.trade_stock(pid, user, "AAPL", 2, 100)
     engine.trade_stock(pid, user, "AAPL", 1, 150, side="SELL")   # +50 realized
 
@@ -257,8 +208,8 @@ def test_pl_counts_realized_and_live_unrealized_gains(tmp_path):
     assert summary["holdings"][0]["market_value"] == 120.0
 
 
-def test_deposits_are_not_profit_and_options_keep_their_value(tmp_path):
-    engine, user, pid = _engine_with_portfolio(tmp_path)
+def test_deposits_are_not_profit_and_options_keep_their_value(make_engine):
+    engine, user, pid = _engine_with_portfolio(make_engine)
     engine.add_cash_balance(pid, user, 500)
     engine.trade_option(pid, user, "aapl", "CALL", 200, "2026-12-18", 2, 10)
 
@@ -271,8 +222,8 @@ def test_deposits_are_not_profit_and_options_keep_their_value(tmp_path):
     assert summary["holdings"][0]["ticker"] == "AAPL"
 
 
-def test_summary_works_after_mark_to_market(tmp_path):
-    engine, user, pid = _engine_with_portfolio(tmp_path)
+def test_summary_works_after_mark_to_market(make_engine):
+    engine, user, pid = _engine_with_portfolio(make_engine)
     engine.trade_stock(pid, user, "MSFT", 2, 100)
     engine.trade_stock(pid, user, "NVDA", 1, 100)
 
@@ -283,23 +234,8 @@ def test_summary_works_after_mark_to_market(tmp_path):
     assert engine.get_portfolio_summary(pid, user)["latest"]["total_pl"] == 20.0
 
 
-def test_contributed_capital_is_backfilled_for_existing_portfolios(tmp_path):
-    engine, user, pid = _engine_with_portfolio(tmp_path)
-    engine.trade_stock(pid, user, "AAPL", 2, 100)
-    engine.trade_stock(pid, user, "AAPL", 1, 150, side="SELL")
-    # Simulate a database from before deposits were tracked: an untracked $300 deposit.
-    engine.conn.execute("UPDATE portfolios SET cash_balance = cash_balance + 300, contributed_capital = NULL")
-    engine.conn.commit()
-
-    reopened = PaperTradingEngine(str(tmp_path / "pl.db"))
-
-    summary = reopened.get_portfolio_summary(pid, user)
-    assert summary["contributed_capital"] == 1300.0
-    assert summary["total_pl"] == 50.0
-
-
-def test_sector_breakdown_uses_market_value_and_counts_stock_sectors_only(tmp_path):
-    engine, user, pid = _engine_with_portfolio(tmp_path, capital=10000)
+def test_sector_breakdown_uses_market_value_and_counts_stock_sectors_only(make_engine):
+    engine, user, pid = _engine_with_portfolio(make_engine, capital=10000)
     engine.trade_stock(pid, user, "AAPL", 10, 100, sector="Technology")
     engine.trade_stock(pid, user, "XOM", 10, 100, sector="Energy")
     engine.trade_option(pid, user, "AAPL", "CALL", 200, "2099-12-18", 1, 50)
@@ -312,8 +248,8 @@ def test_sector_breakdown_uses_market_value_and_counts_stock_sectors_only(tmp_pa
     assert summary["total_pl"] == 400.0   # +500 AAPL, -100 XOM, option at cost
 
 
-def test_daily_snapshot_is_one_row_per_day(tmp_path):
-    engine, user, pid = _engine_with_portfolio(tmp_path)
+def test_daily_snapshot_is_one_row_per_day(make_engine):
+    engine, user, pid = _engine_with_portfolio(make_engine)
     summary = engine.get_portfolio_summary(pid, user)
     engine.record_daily_snapshot(pid, summary, as_of="2026-09-22")
     engine.record_daily_snapshot(pid, summary, as_of="2026-09-23")

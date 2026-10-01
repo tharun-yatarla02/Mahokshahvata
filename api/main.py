@@ -38,7 +38,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import FastAPI, HTTPException, Depends, Header, Query, Path as FastAPIPath
+from fastapi import FastAPI, HTTPException, Depends, Header, Query, Request, Path as FastAPIPath
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
@@ -87,7 +87,7 @@ async def lifespan(app):
 
 app = FastAPI(title="Mahokshahvata API", version="0.1.0", lifespan=lifespan)
 frontend_dir = Path(__file__).parent.parent / "frontend"
-engine = PaperTradingEngine(str(Path(__file__).parent.parent / "paper_trading" / "paper_trading.db"))
+engine = PaperTradingEngine()  # Firestore: GOOGLE_APPLICATION_CREDENTIALS picks the project
 market_data = MarketData()
 
 # Portfolio builds pick from the largest names only, so a momentum build
@@ -285,6 +285,20 @@ class ChangePasswordRequest(BaseModel):
     new_password: str = _new_password()
 
 
+class GoogleLoginRequest(BaseModel):
+    id_token: str = Field(min_length=1, max_length=4096)
+
+
+def _log_auth(request, event, user_id=None, method=None, email=None):
+    """Records a sign-in history row in Firestore (auth_events). Caddy
+    replaces X-Forwarded-For with the real client address, so it can't be
+    spoofed from outside; without Caddy (local runs) the socket address is used."""
+    forwarded = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+    ip = forwarded or (request.client.host if request.client else None)
+    engine.log_auth_event(event, user_id=user_id, method=method, email=email,
+                          ip=ip, user_agent=request.headers.get("user-agent"))
+
+
 def _start_session(user_id):
     token = new_session_token()
     expires_at = (datetime.now(timezone.utc) + timedelta(days=SESSION_DAYS)).isoformat()
@@ -293,37 +307,60 @@ def _start_session(user_id):
 
 
 @app.post("/auth/register", status_code=201)
-def register(req: RegisterRequest):
+def register(req: RegisterRequest, request: Request):
     """Creates an email/password account with its default $100,000
     simulated portfolio, and signs it in."""
+    email = req.email.strip().lower()
     try:
-        user_id = engine.create_local_user(req.email.strip().lower(), _clean_name(req.name), hash_password(req.password))
+        user_id = engine.create_local_user(email, _clean_name(req.name), hash_password(req.password))
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
     engine.get_or_create_default_portfolio(user_id)
+    _log_auth(request, "register", user_id, "email", email)
     return _start_session(user_id)
 
 
 # ponytail: no rate limit on login; add per-IP/per-email throttling before
 # exposing this beyond localhost.
 @app.post("/auth/login")
-def login(req: LoginRequest):
+def login(req: LoginRequest, request: Request):
     """Signs in with email and password. The same message for an unknown
     email and a wrong password. (Registration still reveals whether an email
     is taken, via 409, as most sign-up forms do.)"""
-    found = engine.get_local_login(req.email.strip().lower())
+    email = req.email.strip().lower()
+    found = engine.get_local_login(email)
     if not found or not verify_password(req.password, found[1]):
+        _log_auth(request, "login_failed", found[0] if found else None, "email", email)
         raise HTTPException(status_code=401, detail="Invalid email or password")
+    _log_auth(request, "login", found[0], "email", email)
     return _start_session(found[0])
 
 
+@app.post("/auth/google")
+def google_login(req: GoogleLoginRequest, request: Request):
+    """Trades a Firebase ID token from the Google sign-in popup for one of our
+    sessions. Firebase ID tokens expire after an hour; our session lasts
+    SESSION_DAYS and works like an email/password one from here on."""
+    try:
+        firebase_user = verify_firebase_token(req.id_token)
+    except ValueError:
+        _log_auth(request, "login_failed", method="google")
+        raise HTTPException(status_code=401, detail="Google sign-in failed. Please try again.")
+    user_id = engine.get_or_create_user(firebase_user["firebase_uid"], firebase_user["email"], firebase_user["name"])
+    _log_auth(request, "login", user_id, "google", firebase_user["email"])
+    return _start_session(user_id)
+
+
 @app.post("/auth/logout")
-def logout(authorization: str = Header(None)):
+def logout(request: Request, authorization: str = Header(None)):
     """Ends this browser's session. Always succeeds, so a stale token can
     still sign out cleanly."""
     token = _bearer_token(authorization)
     if token:
+        user_id = engine.get_session_user(token_hash(token))
         engine.delete_session(token_hash(token))
+        if user_id is not None:
+            _log_auth(request, "logout", user_id)
     return {"signed_out": True}
 
 

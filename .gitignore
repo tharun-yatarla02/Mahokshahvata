@@ -10,6 +10,7 @@ __pycache__/
 *.key
 *serviceAccountKey*.json
 firebase-adminsdk-*.json
+firebase-admin.json
 
 # Databases (generated at runtime)
 *.db

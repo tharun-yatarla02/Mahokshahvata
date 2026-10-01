@@ -8,9 +8,9 @@ AUTH = {"Authorization": "Bearer demo-token"}
 
 
 @pytest.fixture
-def client(tmp_path, monkeypatch):
+def client(make_engine, monkeypatch):
     monkeypatch.setenv("USE_DEMO_AUTH", "true")
-    monkeypatch.setattr(api_main, "engine", PaperTradingEngine(str(tmp_path / "paper_trading.db")))
+    monkeypatch.setattr(api_main, "engine", make_engine())
     return TestClient(api_main.app)
 
 
@@ -85,9 +85,9 @@ def test_trade_stores_sector_and_uppercase_ticker(client, portfolio_id, monkeypa
     assert holding["sector"] == "Technology"
 
 
-def test_concurrent_buys_cannot_overspend(tmp_path):
+def test_concurrent_buys_cannot_overspend(make_engine):
     import threading
-    engine = PaperTradingEngine(str(tmp_path / "race.db"))
+    engine = make_engine()
     user = engine.get_or_create_user("u1")
     pid = engine.create_portfolio(user, "Race", 1000)
 

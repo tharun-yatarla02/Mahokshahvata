@@ -1,7 +1,5 @@
 """Email/password accounts: register, sign in, profile, sign out, and that
 each account only ever sees its own portfolios."""
-import sqlite3
-
 import pytest
 from fastapi.testclient import TestClient
 
@@ -10,14 +8,14 @@ from paper_trading.paper_trading_engine import PaperTradingEngine
 
 
 @pytest.fixture
-def db_path(tmp_path):
-    return str(tmp_path / "paper_trading.db")
+def engine(make_engine):
+    return make_engine()
 
 
 @pytest.fixture
-def client(db_path, monkeypatch):
+def client(engine, monkeypatch):
     monkeypatch.setenv("USE_DEMO_AUTH", "true")
-    monkeypatch.setattr(api_main, "engine", PaperTradingEngine(db_path))
+    monkeypatch.setattr(api_main, "engine", engine)
     return TestClient(api_main.app)
 
 
@@ -63,11 +61,10 @@ def test_duplicate_email_and_weak_input_are_rejected(client):
     assert client.post("/auth/register", json={"name": "D", "email": "not-an-email", "password": "long-enough"}).status_code == 422
 
 
-def test_password_is_stored_hashed_and_session_token_is_not_stored(client, db_path):
+def test_password_is_stored_hashed_and_session_token_is_not_stored(client, engine):
     token = register(client, password="plain-text-never")
-    conn = sqlite3.connect(db_path)
-    stored_password = conn.execute("SELECT password_hash FROM users WHERE email = 'ada@example.com'").fetchone()[0]
-    stored_tokens = [row[0] for row in conn.execute("SELECT token_hash FROM sessions")]
+    stored_password = engine._where("users", "email", "ada@example.com")[0]["password_hash"]
+    stored_tokens = [s.id for s in engine.db.collection("sessions").stream()]
     assert stored_password.startswith("scrypt$") and "plain-text-never" not in stored_password
     assert stored_tokens and token not in stored_tokens
 
@@ -114,3 +111,36 @@ def test_accounts_cannot_see_each_others_portfolios(client):
     assert "Alice's" not in {p["name"] for p in client.get("/portfolio", headers=auth(bob)).json()["portfolios"]}
     assert client.get(f"/portfolio/{portfolio_id}", headers=auth(bob)).status_code == 403
     assert client.post(f"/portfolio/{portfolio_id}/cash", json={"amount": 10}, headers=auth(bob)).status_code == 403
+
+
+def events(engine):
+    rows = [e.to_dict() for e in engine.db.collection("auth_events").stream()]
+    return sorted((e["event"], e["method"], e["user_id"] is not None) for e in rows)
+
+
+def test_google_sign_in_gets_a_session_and_is_logged(client, engine, monkeypatch):
+    def verify(token):
+        if token != "good":
+            raise ValueError("bad token")
+        return {"firebase_uid": "g-123", "email": "grace@example.com", "name": "Grace Hopper", "picture": None}
+    monkeypatch.setattr(api_main, "verify_firebase_token", verify)
+
+    assert client.post("/auth/google", json={"id_token": "forged"}).status_code == 401
+    first = client.post("/auth/google", json={"id_token": "good"}, headers={"X-Forwarded-For": "203.0.113.7"}).json()
+    again = client.post("/auth/google", json={"id_token": "good"}).json()
+
+    assert first["user"]["account_type"] == "google" and first["user"]["email"] == "grace@example.com"
+    assert first["user"]["id"] == again["user"]["id"]          # same account on every sign-in
+    assert client.get("/auth/me", headers=auth(first["token"])).status_code == 200
+    assert client.post("/auth/logout", headers=auth(first["token"])).status_code == 200
+    assert events(engine) == [("login", "google", True), ("login", "google", True),
+                              ("login_failed", "google", False), ("logout", None, True)]
+    ips = {e.get("ip") for e in (d.to_dict() for d in engine.db.collection("auth_events").stream())}
+    assert "203.0.113.7" in ips
+
+
+def test_email_sign_ins_are_logged(client, engine):
+    register(client)
+    client.post("/auth/login", json={"email": "ada@example.com", "password": "wrong-password"})
+    client.post("/auth/login", json={"email": "ada@example.com", "password": "analytical-engine"})
+    assert events(engine) == [("login", "email", True), ("login_failed", "email", True), ("register", "email", True)]

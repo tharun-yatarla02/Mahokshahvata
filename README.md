@@ -41,7 +41,7 @@ ai_stock_platform/
 │   ├── sentiment_history.json       # recent sentiment history
 │   └── model/                       # optional local sentiment model (train + inference)
 ├── paper_trading/
-│   └── paper_trading_engine.py      # simulated portfolios, trades, P/L (SQLite, created on first run)
+│   └── paper_trading_engine.py      # simulated portfolios, trades, P/L (stored in Firestore)
 ├── politician_trades/
 │   └── politician_trades.py         # congressional trade disclosures via Quiver Quantitative
 ├── docs/
@@ -217,21 +217,28 @@ the price time and source and warns when prices are stale.
 Every page except `/login.html` requires sign-in; signed-out visitors are
 sent to the sign-in page and returned where they were afterwards.
 
-- **Email and password accounts** are stored in the `users` table of
-  `paper_trading.db`. Passwords are hashed with scrypt and a per-user salt
+- **Storage:** users, sessions and portfolios live in Cloud Firestore, the
+  Firebase project's database (layout at the top of
+  `paper_trading/paper_trading_engine.py`).
+- **Email and password accounts** are stored in the `users` collection.
+  Passwords are hashed with scrypt and a per-user salt
   (`auth/passwords.py`); the plain password is never stored.
+- **Google accounts:** "Continue with Google" opens Firebase's Google popup;
+  the server checks the resulting Firebase ID token (`POST /auth/google`) and
+  starts a normal session. Needs the Firebase Admin key
+  (`GOOGLE_APPLICATION_CREDENTIALS`) and the site's address in Firebase
+  Authentication's authorized domains.
 - **Sessions:** signing in creates a random token that the browser keeps in
   `localStorage` and sends as `Authorization: Bearer <token>`. The `sessions`
-  table stores only its SHA-256 hash, with a 30-day expiry. Logging out
-  deletes the row; changing the password deletes the user's other sessions.
+  collection stores only its SHA-256 hash, with a 30-day expiry. Logging out
+  deletes it; changing the password deletes the user's other sessions.
+- **Sign-in history:** every register, login, failed login and logout is
+  recorded in the `auth_events` collection (user, method, IP, browser, time).
 - **New accounts** start with a $100,000 simulated portfolio.
 - **Profile page** (`/profile.html`, from the account menu): change name and
   email, change password.
 - **Demo account:** with `USE_DEMO_AUTH=true`, "Continue with demo account"
   signs in as the shared demo user (token `demo-token`).
-- **Google sign-in (Firebase)** is still supported by the server: a Firebase ID
-  token is accepted as a Bearer token. The pages don't have a Google button yet;
-  see `auth/README.md`.
 - Each account only ever sees its own portfolios, holdings and trades.
 
 ## API overview
@@ -242,6 +249,7 @@ user only sees their own portfolios.
 
 | Method | Path | |
 |---|---|---|
+| POST | `/auth/google` | Exchange a Firebase ID token from the Google popup (`id_token`) for a session token |
 | POST | `/auth/register` | Create an email/password account (`name`, `email`, `password` of 8+ characters). Returns a session token |
 | POST | `/auth/login` | Sign in (`email`, `password`). Returns a session token |
 | POST | `/auth/logout` | End this session |
@@ -304,6 +312,8 @@ python politician_trades/politician_trades.py       # needs QUIVER_API_KEY
 
 ## Tests
 
+Start the Firestore emulator first (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)), then:
+
 ```bash
 pytest
 ```
@@ -326,8 +336,7 @@ See [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) for the full roadmap.
   use a ticker or nickname. If the feed has no relevant headlines, it returns
   a curated demo fallback.
 - **Paper trading** buys whole shares only; leftover cash stays as cash.
-- **No database migrations** — the SQLite schema is created with
-  `CREATE TABLE IF NOT EXISTS` on startup; moving to Postgres or a cloud DB
-  will need a migration tool (Alembic, etc.).
+- **One server process** — trades are serialized by an in-process lock, so
+  run a single uvicorn worker. Several would need Firestore transactions.
 - **No scheduled jobs** — momentum and news update only when the endpoints
   are called. A deployment should add a scheduler to refresh data.

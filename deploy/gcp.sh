@@ -6,8 +6,9 @@
 #   PROJECT=my-gcp-project ALLOWED_IPS=1.2.3.4/32,5.6.7.8/32 ./deploy/gcp.sh   # first deploy and every redeploy
 #
 # Order on a fresh project: budget alerts ($10/$25/$50) -> firewall -> IP -> VM.
-# Ships the committed code (git archive HEAD) plus your local .env. Data on the
-# VM (accounts, portfolios, caches) is never overwritten by a redeploy.
+# Ships the committed code (git archive HEAD), your local .env and the Firebase
+# Admin key. Accounts and portfolios live in Firestore; caches on the
+# VM are never overwritten by a redeploy.
 set -euo pipefail
 
 : "${PROJECT:?set PROJECT to your GCP project id}"
@@ -16,10 +17,13 @@ ZONE=${ZONE:-us-central1-a}
 REGION=${ZONE%-*}
 VM=${VM:-mahokshahvata}
 MACHINE=${MACHINE:-e2-micro}  # free tier (us-central1/us-east1/us-west1); app peaks ~330 MB, swap covers spikes
+FIREBASE_KEY=${FIREBASE_KEY:-$HOME/.config/mahokshahvata/firebase-admin.json}  # Firebase Admin key: sign-in + Firestore
 PYTHON=$(.venv/bin/python -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null || echo 3.14)
 
 g() { gcloud --project "$PROJECT" "$@"; }
 ssh_vm() { g compute ssh "$VM" --zone "$ZONE" --command "$1"; }
+
+[ -f "$FIREBASE_KEY" ] || { echo "Missing $FIREBASE_KEY (Firebase console > Project settings > Service accounts > Generate new private key)" >&2; exit 1; }
 
 if grep -qiE '^\s*USE_DEMO_AUTH\s*=\s*(1|true|yes|on)' .env 2>/dev/null; then
   echo "Refusing to deploy: .env has USE_DEMO_AUTH on (shared demo account). Remove it first." >&2
@@ -61,6 +65,7 @@ IP=$(g compute addresses describe "$VM-ip" --region "$REGION" --format='value(ad
 # 4. Code: committed files only, so .venv, *.db and caches never ship.
 git archive --format=tar HEAD | g compute ssh "$VM" --zone "$ZONE" --command 'mkdir -p ~/app && tar -x -C ~/app'
 [ -f .env ] && g compute scp .env "$VM:~/app/.env" --zone "$ZONE" && ssh_vm 'chmod 600 ~/app/.env'
+g compute scp "$FIREBASE_KEY" "$VM:~/app/firebase-admin.json" --zone "$ZONE" && ssh_vm 'chmod 600 ~/app/firebase-admin.json'
 # Seed the market snapshot once so the first boot isn't empty.
 if [ -f momentum/market_cache.json ] && ! ssh_vm 'test -f ~/app/momentum/market_cache.json'; then
   g compute scp momentum/market_cache.json "$VM:~/app/momentum/" --zone "$ZONE"
@@ -82,6 +87,7 @@ After=network-online.target
 [Service]
 User=\$USER
 WorkingDirectory=\$HOME/app
+Environment=GOOGLE_APPLICATION_CREDENTIALS=\$HOME/app/firebase-admin.json
 ExecStart=\$HOME/app/.venv/bin/uvicorn api.main:app --host 127.0.0.1 --port 8000
 Restart=always
 [Install]

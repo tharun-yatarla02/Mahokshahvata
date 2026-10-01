@@ -7,30 +7,41 @@ tracks holdings, and marks the portfolio to market against price updates
 over time — producing real profit/loss history without touching any real
 brokerage account or real money.
 
-Storage: SQLite (paper_trading.db in the same folder) — swap for your
-production database (Postgres, Cosmos DB, etc.) later; the schema below
-maps directly onto any relational store.
+Storage: Cloud Firestore (the Firebase project's database). Layout:
+
+    users/{id}                         profile; password_hash for email accounts
+    sessions/{sha256 of token}         one per signed-in browser
+    auth_events/{auto}                 every register / login / logout
+    counters/{users|portfolios}        last integer id handed out
+    portfolios/{id}                    cash, capital, owner
+    portfolios/{id}/holdings/{position_key}
+    portfolios/{id}/transactions/{auto}
+    portfolios/{id}/snapshots/{as_of}  one per day, for the performance chart
+
+Ids stay integers (from the counters) so URLs and the API don't change.
+Queries only ever filter on one field and sort in Python, so no composite
+indexes are needed.
 
 Usage as a library:
+    from google.cloud import firestore
     from paper_trading_engine import PaperTradingEngine
 
-    engine = PaperTradingEngine("paper_trading.db")
-    portfolio_id = engine.create_portfolio("Momentum Demo", starting_capital=1000)
-    engine.build_portfolio_from_momentum(portfolio_id, momentum_list, sector_lookup)
-    engine.mark_to_market(portfolio_id, current_prices, as_of="2026-09-22")
-    print(engine.get_portfolio_summary(portfolio_id))
-
-See demo.py for a full runnable walkthrough.
+    engine = PaperTradingEngine(firestore.Client())
+    user_id = engine.get_or_create_user("some-firebase-uid")
+    portfolio_id = engine.create_portfolio(user_id, "Momentum Demo", starting_capital=1000)
+    engine.build_portfolio_from_momentum(portfolio_id, user_id, momentum_list)
+    print(engine.get_portfolio_summary(portfolio_id, user_id))
 """
 
 import functools
-import re
 import secrets
-import sqlite3
 import threading
 from datetime import datetime, timezone
 from dataclasses import dataclass
 from decimal import ROUND_DOWN, ROUND_UP, Decimal
+
+from google.cloud import firestore
+from google.cloud.firestore_v1 import FieldFilter
 
 
 # ---------------------------------------------------------------------------
@@ -109,323 +120,196 @@ class RiskRules:
     cash_reserve_pct: float = 0.02  # keep a small cash buffer, don't fully deploy
 
 
-# ---------------------------------------------------------------------------
-# Schema
-# ---------------------------------------------------------------------------
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    firebase_uid TEXT UNIQUE NOT NULL,
-    email TEXT,
-    name TEXT,
-    created_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS portfolios (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL REFERENCES users(id),
-    name TEXT NOT NULL,
-    starting_capital REAL NOT NULL,
-    cash_balance REAL NOT NULL,
-    contributed_capital REAL,  -- starting capital + every deposit; P/L is measured against this
-    created_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS holdings (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    portfolio_id INTEGER NOT NULL REFERENCES portfolios(id),
-    ticker TEXT NOT NULL,
-    sector TEXT,
-    instrument_type TEXT DEFAULT 'STOCK' CHECK(instrument_type IN ('STOCK', 'OPTION')),
-    position_key TEXT DEFAULT '',
-    option_type TEXT,
-    strike REAL,
-    expiry TEXT,
-    quantity REAL NOT NULL,
-    avg_buy_price REAL NOT NULL,
-    UNIQUE(portfolio_id, position_key)
-);
-
-CREATE TABLE IF NOT EXISTS transactions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    portfolio_id INTEGER NOT NULL REFERENCES portfolios(id),
-    ticker TEXT NOT NULL,
-    instrument_type TEXT DEFAULT 'STOCK' CHECK(instrument_type IN ('STOCK', 'OPTION')),
-    option_type TEXT,
-    strike REAL,
-    expiry TEXT,
-    type TEXT NOT NULL CHECK(type IN ('BUY','SELL')),
-    quantity REAL NOT NULL,
-    price REAL NOT NULL,
-    timestamp TEXT NOT NULL
-);
-
--- Local email/password sign-in: one row per signed-in browser. Only the
--- SHA-256 of the token is stored (see auth/passwords.py).
-CREATE TABLE IF NOT EXISTS sessions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL REFERENCES users(id),
-    token_hash TEXT UNIQUE NOT NULL,
-    created_at TEXT NOT NULL,
-    expires_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS daily_snapshots (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    portfolio_id INTEGER NOT NULL REFERENCES portfolios(id),
-    as_of TEXT NOT NULL,
-    total_value REAL NOT NULL,
-    cash_balance REAL NOT NULL,
-    holdings_value REAL NOT NULL,
-    total_pl REAL NOT NULL,
-    total_pl_pct REAL NOT NULL,
-    UNIQUE(portfolio_id, as_of)
-);
-"""
+def _now():
+    return datetime.now(timezone.utc).isoformat()
 
 
 class PaperTradingEngine:
-    def __init__(self, db_path="paper_trading.db"):
-        # check_same_thread=False: needed because FastAPI runs sync endpoints
-        # in a worker thread pool, not the thread that created this engine.
-        # Every public method takes self._lock (see _locked), so the shared
-        # connection is used by one thread at a time.
-        # ponytail: one lock per process serializes all trades; move to
-        # per-request connections + BEGIN IMMEDIATE (or Postgres) for multi-process.
+    def __init__(self, db=None):
+        # Every public method takes self._lock (see _locked): reads and the
+        # writes that depend on them (cash checks, then the trade) must not
+        # interleave between FastAPI's worker threads. Multi-doc writes go in
+        # one batch, so a trade lands completely or not at all.
+        # ponytail: one lock per process; the deploy runs a single uvicorn
+        # worker. Move trades into Firestore transactions for multi-process.
         self._lock = threading.RLock()
-        self.conn = sqlite3.connect(db_path, check_same_thread=False)
-        self.conn.row_factory = sqlite3.Row
-        self.conn.executescript(SCHEMA)
-        self._migrate_schema()
-        self.conn.commit()
+        self.db = db if db is not None else firestore.Client()
 
-    def _migrate_schema(self):
-        for table_name, columns in {
-            "holdings": [
-                ("instrument_type", "TEXT DEFAULT 'STOCK'"),
-                ("position_key", "TEXT DEFAULT ''"),
-                ("option_type", "TEXT"),
-                ("strike", "REAL"),
-                ("expiry", "TEXT"),
-            ],
-            "transactions": [
-                ("instrument_type", "TEXT DEFAULT 'STOCK'"),
-                ("option_type", "TEXT"),
-                ("strike", "REAL"),
-                ("expiry", "TEXT"),
-            ],
-        }.items():
-            existing = self.conn.execute(f"PRAGMA table_info({table_name})").fetchall()
-            existing_columns = {col[1] for col in existing}
-            for column_name, column_def in columns:
-                if column_name not in existing_columns:
-                    self.conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_def}")
+    def _portfolio_ref(self, portfolio_id):
+        return self.db.collection("portfolios").document(str(portfolio_id))
 
-        self.conn.execute("UPDATE holdings SET instrument_type = 'STOCK' WHERE instrument_type IS NULL")
-        self.conn.execute("UPDATE holdings SET position_key = ticker WHERE position_key IS NULL OR position_key = ''")
-        self.conn.execute("UPDATE transactions SET instrument_type = 'STOCK' WHERE instrument_type IS NULL")
+    def _holding_ref(self, portfolio_id, position_key):
+        return self._portfolio_ref(portfolio_id).collection("holdings").document(position_key)
 
-        holdings_rows = self.conn.execute("SELECT id, ticker, position_key, instrument_type FROM holdings").fetchall()
-        for row in holdings_rows:
-            if not row["position_key"]:
-                self.conn.execute(
-                    "UPDATE holdings SET position_key = ? WHERE id = ?",
-                    (row["ticker"], row["id"]),
-                )
+    def _holdings(self, portfolio_id):
+        return [h.to_dict() for h in self._portfolio_ref(portfolio_id).collection("holdings").stream()]
 
-        self._rebuild_legacy_holdings_table()
-        self._backfill_contributed_capital()
-        self._add_local_accounts()
-        self.conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_holdings_portfolio_position ON holdings(portfolio_id, position_key)")
+    def _get_holding(self, portfolio_id, position_key):
+        snap = self._holding_ref(portfolio_id, position_key).get()
+        return snap.to_dict() if snap.exists else None
 
-    def _backfill_contributed_capital(self):
-        """Older databases didn't record deposits. Every cash movement other
-        than a deposit is a trade, so: contributed = cash now + spent on buys
-        - received from sells, summed over the transaction log."""
-        columns = {col[1] for col in self.conn.execute("PRAGMA table_info(portfolios)").fetchall()}
-        if "contributed_capital" not in columns:
-            self.conn.execute("ALTER TABLE portfolios ADD COLUMN contributed_capital REAL")
-        self.conn.execute(
-            """UPDATE portfolios SET contributed_capital = ROUND(cash_balance + COALESCE((
-                   SELECT SUM(CASE WHEN type = 'BUY' THEN quantity * price ELSE -quantity * price END)
-                   FROM transactions WHERE transactions.portfolio_id = portfolios.id), 0), 2)
-               WHERE contributed_capital IS NULL"""
-        )
+    def _new_transaction(self, batch, portfolio_id, **fields):
+        ref = self._portfolio_ref(portfolio_id).collection("transactions").document()
+        batch.set(ref, {"portfolio_id": portfolio_id, "option_type": None, "strike": None, "expiry": None, **fields})
 
-    def _add_local_accounts(self):
-        """Email/password accounts live in the same users table as Firebase
-        and demo users; a password_hash marks a local account. Emails are
-        stored lowercased and must be unique among local accounts."""
-        columns = {col[1] for col in self.conn.execute("PRAGMA table_info(users)").fetchall()}
-        if "password_hash" not in columns:
-            self.conn.execute("ALTER TABLE users ADD COLUMN password_hash TEXT")
-        self.conn.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_local_email ON users(email) WHERE password_hash IS NOT NULL"
-        )
-        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)")
+    def _next_id(self, kind):
+        """Next integer id for users or portfolios, from counters/{kind}."""
+        ref = self.db.collection("counters").document(kind)
 
-    def _rebuild_legacy_holdings_table(self):
-        """Databases created before options support have UNIQUE(portfolio_id, ticker)
-        on holdings, which blocks holding a stock and an option on the same ticker.
-        SQLite can't drop a table constraint, so copy the rows into a fresh table
-        built from SCHEMA (unique on position_key instead)."""
-        row = self.conn.execute(
-            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'holdings'"
-        ).fetchone()
-        if not row or not re.search(r"UNIQUE\s*\(\s*portfolio_id\s*,\s*ticker\s*\)", row[0]):
-            return
+        @firestore.transactional
+        def bump(transaction):
+            snap = ref.get(transaction=transaction)
+            next_id = (snap.get("last") if snap.exists else 0) + 1
+            transaction.set(ref, {"last": next_id})
+            return next_id
 
-        columns = (
-            "id, portfolio_id, ticker, sector, instrument_type, position_key, "
-            "option_type, strike, expiry, quantity, avg_buy_price"
-        )
-        # SCHEMA is all IF NOT EXISTS, so re-running it only recreates holdings.
-        self.conn.executescript(f"""
-            BEGIN;
-            ALTER TABLE holdings RENAME TO holdings_legacy;
-            {SCHEMA}
-            INSERT INTO holdings ({columns}) SELECT {columns} FROM holdings_legacy;
-            DROP TABLE holdings_legacy;
-            COMMIT;
-        """)
+        return bump(self.db.transaction())
+
+    def _where(self, collection, field, value):
+        return [d.to_dict() for d in self.db.collection(collection).where(filter=FieldFilter(field, "==", value)).stream()]
 
     # -----------------------------------------------------------------
     # Users
     # -----------------------------------------------------------------
 
+    def _create_user(self, firebase_uid, email, name, password_hash=None):
+        user_id = self._next_id("users")
+        self.db.collection("users").document(str(user_id)).set({
+            "id": user_id, "firebase_uid": firebase_uid, "email": email, "name": name,
+            "password_hash": password_hash, "created_at": _now(),
+        })
+        return user_id
+
+    def _local_email_taken(self, email, except_user_id=None):
+        """Emails are unique among email/password accounts (stored lowercased)."""
+        return any(u["password_hash"] and u["id"] != except_user_id for u in self._where("users", "email", email))
+
     @_locked
     def get_or_create_user(self, firebase_uid, email=None, name=None):
         """Looks up a user by their stable Firebase id, creating them on
         first sign-in. Returns the internal user_id (ours, not Firebase's)."""
-        row = self.conn.execute(
-            "SELECT id FROM users WHERE firebase_uid = ?", (firebase_uid,)
-        ).fetchone()
-        if row:
-            return row["id"]
-
-        cur = self.conn.execute(
-            "INSERT INTO users (firebase_uid, email, name, created_at) VALUES (?, ?, ?, ?)",
-            (firebase_uid, email, name, datetime.now(timezone.utc).isoformat()),
-        )
-        self.conn.commit()
-        return cur.lastrowid
+        found = self._where("users", "firebase_uid", firebase_uid)
+        if found:
+            return found[0]["id"]
+        return self._create_user(firebase_uid, email, name)
 
     @_locked
     def create_local_user(self, email, name, password_hash):
         """New email/password account. Raises ValueError if the email is taken.
-        firebase_uid is required by the schema, so local users get a random
-        "local:" id that can never collide with a Firebase uid."""
-        try:
-            cur = self.conn.execute(
-                "INSERT INTO users (firebase_uid, email, name, password_hash, created_at) VALUES (?, ?, ?, ?, ?)",
-                (f"local:{secrets.token_hex(12)}", email, name, password_hash, datetime.now(timezone.utc).isoformat()),
-            )
-        except sqlite3.IntegrityError:
+        Local users get a random "local:" firebase_uid that can never collide
+        with a real Firebase uid."""
+        if self._local_email_taken(email):
             raise ValueError("An account with this email already exists")
-        self.conn.commit()
-        return cur.lastrowid
+        return self._create_user(f"local:{secrets.token_hex(12)}", email, name, password_hash)
 
     @_locked
     def get_local_login(self, email):
         """(user_id, password_hash) for a local account, or None."""
-        row = self.conn.execute(
-            "SELECT id, password_hash FROM users WHERE email = ? AND password_hash IS NOT NULL", (email,)
-        ).fetchone()
-        return (row["id"], row["password_hash"]) if row else None
+        for user in self._where("users", "email", email):
+            if user["password_hash"]:
+                return (user["id"], user["password_hash"])
+        return None
+
+    def _user_doc(self, user_id):
+        snap = self.db.collection("users").document(str(user_id)).get()
+        if not snap.exists:
+            raise ValueError("User not found")
+        return snap.to_dict()
 
     @_locked
     def get_user(self, user_id):
-        row = self.conn.execute(
-            "SELECT id, email, name, created_at, firebase_uid, password_hash IS NOT NULL AS local FROM users WHERE id = ?",
-            (user_id,),
-        ).fetchone()
-        if row is None:
-            raise ValueError("User not found")
-        account = "email" if row["local"] else "demo" if row["firebase_uid"] == "demo-token" else "google"
-        return {"id": row["id"], "email": row["email"], "name": row["name"],
-                "created_at": row["created_at"], "account_type": account}
+        user = self._user_doc(user_id)
+        account = "email" if user["password_hash"] else "demo" if user["firebase_uid"] == "demo-token" else "google"
+        return {"id": user["id"], "email": user["email"], "name": user["name"],
+                "created_at": user["created_at"], "account_type": account}
 
     @_locked
     def update_user(self, user_id, name, email=None):
         """Changes the display name, and the email for local accounts."""
-        try:
-            if email is None:
-                self.conn.execute("UPDATE users SET name = ? WHERE id = ?", (name, user_id))
-            else:
-                self.conn.execute("UPDATE users SET name = ?, email = ? WHERE id = ?", (name, email, user_id))
-        except sqlite3.IntegrityError:
-            raise ValueError("An account with this email already exists")
-        self.conn.commit()
+        changes = {"name": name}
+        if email is not None:
+            if self._local_email_taken(email, except_user_id=user_id):
+                raise ValueError("An account with this email already exists")
+            changes["email"] = email
+        self.db.collection("users").document(str(user_id)).update(changes)
 
     @_locked
     def get_password_hash(self, user_id):
-        row = self.conn.execute("SELECT password_hash FROM users WHERE id = ?", (user_id,)).fetchone()
-        return row["password_hash"] if row else None
+        try:
+            return self._user_doc(user_id)["password_hash"]
+        except ValueError:
+            return None
 
     @_locked
     def set_password_hash(self, user_id, password_hash):
-        self.conn.execute("UPDATE users SET password_hash = ? WHERE id = ?", (password_hash, user_id))
-        self.conn.commit()
+        self.db.collection("users").document(str(user_id)).update({"password_hash": password_hash})
 
     # -- sessions ------------------------------------------------------
 
     @_locked
     def create_session(self, user_id, token_hash, expires_at):
-        self.conn.execute(
-            "INSERT INTO sessions (user_id, token_hash, created_at, expires_at) VALUES (?, ?, ?, ?)",
-            (user_id, token_hash, datetime.now(timezone.utc).isoformat(), expires_at),
+        self.db.collection("sessions").document(token_hash).set(
+            {"user_id": user_id, "created_at": _now(), "expires_at": expires_at}
         )
-        self.conn.commit()
 
     @_locked
     def get_session_user(self, token_hash):
         """user_id for a live session, or None if unknown or expired."""
-        row = self.conn.execute(
-            "SELECT user_id, expires_at FROM sessions WHERE token_hash = ?", (token_hash,)
-        ).fetchone()
-        if row is None:
+        ref = self.db.collection("sessions").document(token_hash)
+        snap = ref.get()
+        if not snap.exists:
             return None
-        if row["expires_at"] <= datetime.now(timezone.utc).isoformat():
-            self.conn.execute("DELETE FROM sessions WHERE token_hash = ?", (token_hash,))
-            self.conn.commit()
+        if snap.get("expires_at") <= _now():
+            ref.delete()
             return None
-        return row["user_id"]
+        return snap.get("user_id")
 
     @_locked
     def delete_session(self, token_hash):
-        self.conn.execute("DELETE FROM sessions WHERE token_hash = ?", (token_hash,))
-        self.conn.commit()
+        self.db.collection("sessions").document(token_hash).delete()
 
     @_locked
     def delete_other_sessions(self, user_id, keep_token_hash):
         """Signs out every other browser, e.g. after a password change."""
-        self.conn.execute("DELETE FROM sessions WHERE user_id = ? AND token_hash != ?", (user_id, keep_token_hash))
-        self.conn.commit()
+        batch = self.db.batch()
+        for snap in self.db.collection("sessions").where(filter=FieldFilter("user_id", "==", user_id)).stream():
+            if snap.id != keep_token_hash:
+                batch.delete(snap.reference)
+        batch.commit()
+
+    def log_auth_event(self, event, user_id=None, method=None, email=None, ip=None, user_agent=None):
+        """Appends a sign-in history row: event is register, login,
+        login_failed or logout; method is email, google or demo."""
+        self.db.collection("auth_events").add({
+            "event": event, "user_id": user_id, "method": method, "email": email,
+            "ip": ip, "user_agent": user_agent, "at": _now(),
+        })
+
+    # -----------------------------------------------------------------
+    # Portfolios
+    # -----------------------------------------------------------------
 
     def _assert_owner(self, portfolio_id, user_id):
-        """Raises PermissionError if this portfolio doesn't belong to this user.
-        Every portfolio-touching method below calls this first — a user should
-        never be able to view or modify someone else's simulated money."""
-        row = self.conn.execute(
-            "SELECT user_id FROM portfolios WHERE id = ?", (portfolio_id,)
-        ).fetchone()
-        if row is None:
+        """Returns the portfolio, or raises PermissionError if it doesn't
+        belong to this user. Every portfolio-touching method below calls this
+        first — a user should never be able to view or modify someone else's
+        simulated money."""
+        snap = self._portfolio_ref(portfolio_id).get()
+        if not snap.exists:
             raise ValueError(f"No portfolio with id {portfolio_id}")
-        if row["user_id"] != user_id:
+        portfolio = snap.to_dict()
+        if portfolio["user_id"] != user_id:
             raise PermissionError(f"Portfolio {portfolio_id} does not belong to this user")
+        return portfolio
+
+    def _portfolios_newest_first(self, user_id):
+        return sorted(self._where("portfolios", "user_id", user_id), key=lambda p: (p["created_at"], p["id"]), reverse=True)
 
     @_locked
     def list_portfolios_for_user(self, user_id):
-        rows = self.conn.execute(
-            "SELECT id, name, starting_capital, cash_balance, created_at FROM portfolios WHERE user_id = ? ORDER BY created_at DESC",
-            (user_id,),
-        ).fetchall()
-        return [dict(r) for r in rows]
-
-    # -----------------------------------------------------------------
-    # Portfolio creation
-    # -----------------------------------------------------------------
+        keys = ("id", "name", "starting_capital", "cash_balance", "created_at")
+        return [{k: p[k] for k in keys} for p in self._portfolios_newest_first(user_id)]
 
     DEFAULT_PORTFOLIO_NAME = "Demo Portfolio"
     DEFAULT_STARTING_CAPITAL = 100_000.0
@@ -435,26 +319,24 @@ class PaperTradingEngine:
         """The user's most recent portfolio, creating a $100,000 one on first
         use. Runs under the lock so two pages opening at once can't both
         create one."""
-        row = self.conn.execute(
-            "SELECT id FROM portfolios WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 1", (user_id,)
-        ).fetchone()
-        if row:
-            return row["id"]
+        existing = self._portfolios_newest_first(user_id)
+        if existing:
+            return existing[0]["id"]
         return self.create_portfolio(user_id, self.DEFAULT_PORTFOLIO_NAME, self.DEFAULT_STARTING_CAPITAL)
 
     @_locked
     def create_portfolio(self, user_id, name, starting_capital):
         # Cash is kept rounded to cents at every write so float error can't
         # accumulate across trades (e.g. 0.1 + 0.2 != 0.3).
-        # ponytail: REAL columns + rounding; switch to integer cents if exact
+        # ponytail: floats + rounding; switch to integer cents if exact
         # accounting (tax lots, fees, fractional shares) is ever needed.
         starting_capital = round(starting_capital, 2)
-        cur = self.conn.execute(
-            "INSERT INTO portfolios (user_id, name, starting_capital, cash_balance, contributed_capital, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-            (user_id, name, starting_capital, starting_capital, starting_capital, datetime.now(timezone.utc).isoformat()),
-        )
-        self.conn.commit()
-        return cur.lastrowid
+        portfolio_id = self._next_id("portfolios")
+        self._portfolio_ref(portfolio_id).set({
+            "id": portfolio_id, "user_id": user_id, "name": name, "starting_capital": starting_capital,
+            "cash_balance": starting_capital, "contributed_capital": starting_capital, "created_at": _now(),
+        })
+        return portfolio_id
 
     # -----------------------------------------------------------------
     # Allocation logic: given a ranked momentum list and risk rules,
@@ -465,6 +347,26 @@ class PaperTradingEngine:
         if instrument_type == "OPTION":
             return _option_position_key(ticker, option_type, strike, expiry)
         return ticker
+
+    def _add_to_holding(self, batch, portfolio_id, position_key, existing, quantity, price, new_fields):
+        """Buys into a position: averages the cost into an existing holding,
+        or creates it from new_fields."""
+        if existing:
+            total = existing["quantity"] + quantity
+            avg = (existing["avg_buy_price"] * existing["quantity"] + price * quantity) / total
+            batch.update(self._holding_ref(portfolio_id, position_key), {"quantity": total, "avg_buy_price": avg})
+        else:
+            batch.set(self._holding_ref(portfolio_id, position_key), {
+                "portfolio_id": portfolio_id, "position_key": position_key, "option_type": None,
+                "strike": None, "expiry": None, **new_fields, "quantity": quantity, "avg_buy_price": price,
+            })
+
+    def _reduce_holding(self, batch, portfolio_id, position_key, remaining_qty):
+        ref = self._holding_ref(portfolio_id, position_key)
+        if remaining_qty <= 0:
+            batch.delete(ref)
+        else:
+            batch.update(ref, {"quantity": remaining_qty})
 
     @_locked
     def build_portfolio_from_momentum(self, portfolio_id, user_id, momentum_list, rules=None, as_of=None):
@@ -490,13 +392,7 @@ class PaperTradingEngine:
         """
         rules = rules or RiskRules()
         as_of = _normalize_timestamp(as_of)
-        self._assert_owner(portfolio_id, user_id)
-
-        portfolio = self.conn.execute(
-            "SELECT * FROM portfolios WHERE id = ?", (portfolio_id,)
-        ).fetchone()
-        if portfolio is None:
-            raise ValueError(f"No portfolio with id {portfolio_id}")
+        portfolio = self._assert_owner(portfolio_id, user_id)
 
         candidates = momentum_list[: rules.max_positions]
         if not candidates:
@@ -564,46 +460,33 @@ class PaperTradingEngine:
                 "cost": stock_spent[ticker],
             })
 
-        # Execute the purchases: write holdings + transactions, update cash
+        # Execute the purchases: holdings + transactions + cash, in one batch
+        batch = self.db.batch()
         for p in purchases:
             position_key = self._get_position_key(p["ticker"], instrument_type="STOCK")
-            self.conn.execute(
-                """INSERT INTO holdings (portfolio_id, ticker, sector, instrument_type, position_key, quantity, avg_buy_price)
-                   VALUES (?, ?, ?, 'STOCK', ?, ?, ?)
-                   ON CONFLICT(portfolio_id, position_key) DO UPDATE SET
-                     quantity = quantity + excluded.quantity,
-                     avg_buy_price = ((avg_buy_price * quantity) + (excluded.avg_buy_price * excluded.quantity))
-                                     / (quantity + excluded.quantity)""",
-                (portfolio_id, p["ticker"], p["sector"], position_key, p["quantity"], p["price"]),
-            )
-            self.conn.execute(
-                "INSERT INTO transactions (portfolio_id, ticker, instrument_type, type, quantity, price, timestamp) VALUES (?, ?, 'STOCK', 'BUY', ?, ?, ?)",
-                (portfolio_id, p["ticker"], p["quantity"], p["price"], as_of),
-            )
+            self._add_to_holding(batch, portfolio_id, position_key, self._get_holding(portfolio_id, position_key),
+                                 p["quantity"], p["price"],
+                                 {"ticker": p["ticker"], "sector": p["sector"], "instrument_type": "STOCK"})
+            self._new_transaction(batch, portfolio_id, ticker=p["ticker"], instrument_type="STOCK", type="BUY",
+                                  quantity=p["quantity"], price=p["price"], timestamp=as_of)
 
         new_cash = round(portfolio["cash_balance"] - sum(p["cost"] for p in purchases), 2)
-        self.conn.execute(
-            "UPDATE portfolios SET cash_balance = ? WHERE id = ?", (new_cash, portfolio_id)
-        )
-        self.conn.commit()
+        batch.update(self._portfolio_ref(portfolio_id), {"cash_balance": new_cash})
+        batch.commit()
         return purchases
 
     @_locked
     def order_context(self, portfolio_id, user_id, ticker):
         """Cash available and shares of `ticker` held, for order previews."""
-        self._assert_owner(portfolio_id, user_id)
-        cash = self.conn.execute("SELECT cash_balance FROM portfolios WHERE id = ?", (portfolio_id,)).fetchone()[0]
-        held = self.conn.execute(
-            "SELECT quantity FROM holdings WHERE portfolio_id = ? AND position_key = ?",
-            (portfolio_id, self._get_position_key((ticker or "").strip().upper(), instrument_type="STOCK")),
-        ).fetchone()
-        return {"cash": round(float(cash), 2), "owned": float(held[0]) if held else 0.0}
+        portfolio = self._assert_owner(portfolio_id, user_id)
+        held = self._get_holding(portfolio_id, self._get_position_key((ticker or "").strip().upper(), instrument_type="STOCK"))
+        return {"cash": round(float(portfolio["cash_balance"]), 2), "owned": float(held["quantity"]) if held else 0.0}
 
     @_locked
     def trade_stock(self, portfolio_id, user_id, ticker, quantity, price, side="BUY", timestamp=None, sector="Unknown"):
         """Market order for `quantity` shares (fractional allowed) at `price`,
         which must be the current market price. See the order rules above."""
-        self._assert_owner(portfolio_id, user_id)
+        portfolio = self._assert_owner(portfolio_id, user_id)
         ticker = (ticker or "").strip().upper()
         if not ticker:
             raise ValueError("Ticker is required")
@@ -618,17 +501,8 @@ class PaperTradingEngine:
             raise ValueError(f"Quantity must be at least {format_shares(float(_SHARE_STEP))} shares")
 
         ts = _normalize_timestamp(timestamp)
-        portfolio = self.conn.execute(
-            "SELECT * FROM portfolios WHERE id = ?", (portfolio_id,)
-        ).fetchone()
-        if portfolio is None:
-            raise ValueError(f"No portfolio with id {portfolio_id}")
-
         position_key = self._get_position_key(ticker, instrument_type="STOCK")
-        existing = self.conn.execute(
-            "SELECT * FROM holdings WHERE portfolio_id = ? AND position_key = ?",
-            (portfolio_id, position_key),
-        ).fetchone()
+        existing = self._get_holding(portfolio_id, position_key)
         if side == "SELL" and existing is not None and abs(existing["quantity"] - quantity) < float(_SHARE_STEP):
             quantity = float(existing["quantity"])  # "sell all" despite float noise
 
@@ -637,52 +511,32 @@ class PaperTradingEngine:
         if trade_value < MIN_ORDER_VALUE and not selling_everything:  # a small leftover position can always be sold
             raise ValueError(f"Minimum order is ${MIN_ORDER_VALUE:,.2f}; {format_shares(quantity)} {ticker} is ${trade_value:,.2f}")
 
+        cash = float(portfolio["cash_balance"])
+        batch = self.db.batch()
         if side == "BUY":
-            cash = float(portfolio["cash_balance"])
             if cash < trade_value:
                 affordable = shares_for_amount(cash, trade_price)
                 raise ValueError(
                     f"Not enough cash: {format_shares(quantity)} {ticker} at ${trade_price:,.2f} costs ${trade_value:,.2f}, "
                     f"but you have ${cash:,.2f}. That buys up to {format_shares(affordable)} shares."
                 )
-            self.conn.execute(
-                """INSERT INTO holdings (portfolio_id, ticker, sector, instrument_type, position_key, quantity, avg_buy_price)
-                   VALUES (?, ?, ?, 'STOCK', ?, ?, ?)
-                   ON CONFLICT(portfolio_id, position_key) DO UPDATE SET
-                     sector = CASE WHEN sector = 'Unknown' THEN excluded.sector ELSE sector END,
-                     quantity = quantity + excluded.quantity,
-                     avg_buy_price = ((avg_buy_price * quantity) + (excluded.avg_buy_price * excluded.quantity))
-                                     / (quantity + excluded.quantity)""",
-                (portfolio_id, ticker, sector or "Unknown", position_key, quantity, trade_price),
-            )
-            self.conn.execute(
-                "UPDATE portfolios SET cash_balance = ROUND(cash_balance - ?, 2) WHERE id = ?",
-                (trade_value, portfolio_id),
-            )
+            self._add_to_holding(batch, portfolio_id, position_key, existing, quantity, trade_price,
+                                 {"ticker": ticker, "sector": sector or "Unknown", "instrument_type": "STOCK"})
+            if existing and existing["sector"] == "Unknown" and sector and sector != "Unknown":
+                batch.update(self._holding_ref(portfolio_id, position_key), {"sector": sector})
+            cash_after = round(cash - trade_value, 2)
         else:
             owned = float(existing["quantity"]) if existing else 0.0
             if quantity > owned:
                 raise ValueError(f"You own {format_shares(owned)} {ticker}; can't sell {format_shares(quantity)}")
-            remaining_qty = round_shares(owned - quantity)
-            if remaining_qty <= 0:
-                self.conn.execute("DELETE FROM holdings WHERE portfolio_id = ? AND position_key = ?", (portfolio_id, position_key))
-            else:
-                self.conn.execute(
-                    "UPDATE holdings SET quantity = ? WHERE portfolio_id = ? AND position_key = ?",
-                    (remaining_qty, portfolio_id, position_key),
-                )
-            self.conn.execute(
-                "UPDATE portfolios SET cash_balance = ROUND(cash_balance + ?, 2) WHERE id = ?",
-                (trade_value, portfolio_id),
-            )
+            self._reduce_holding(batch, portfolio_id, position_key, round_shares(owned - quantity))
+            cash_after = round(cash + trade_value, 2)
 
-        self.conn.execute(
-            "INSERT INTO transactions (portfolio_id, ticker, instrument_type, type, quantity, price, timestamp) VALUES (?, ?, 'STOCK', ?, ?, ?, ?)",
-            (portfolio_id, ticker, side, quantity, trade_price, ts),
-        )
-        self.conn.commit()
+        batch.update(self._portfolio_ref(portfolio_id), {"cash_balance": cash_after})
+        self._new_transaction(batch, portfolio_id, ticker=ticker, instrument_type="STOCK", type=side,
+                              quantity=quantity, price=trade_price, timestamp=ts)
+        batch.commit()
 
-        cash_after = round(float(self.conn.execute("SELECT cash_balance FROM portfolios WHERE id = ?", (portfolio_id,)).fetchone()[0]), 2)
         return {
             "portfolio_id": portfolio_id,
             "ticker": ticker,
@@ -696,7 +550,7 @@ class PaperTradingEngine:
 
     @_locked
     def trade_option(self, portfolio_id, user_id, ticker, option_type, strike, expiry, quantity, premium, side="BUY", timestamp=None):
-        self._assert_owner(portfolio_id, user_id)
+        portfolio = self._assert_owner(portfolio_id, user_id)
         ticker = (ticker or "").strip().upper()
         if not ticker:
             raise ValueError("Ticker is required")
@@ -708,56 +562,30 @@ class PaperTradingEngine:
             raise ValueError("side must be BUY or SELL")
 
         ts = _normalize_timestamp(timestamp)
-        portfolio = self.conn.execute(
-            "SELECT * FROM portfolios WHERE id = ?", (portfolio_id,)
-        ).fetchone()
-        if portfolio is None:
-            raise ValueError(f"No portfolio with id {portfolio_id}")
-
         trade_cost = round(quantity * premium, 2)
         position_key = self._get_position_key(ticker, "OPTION", option_type, strike, expiry)
-        existing = self.conn.execute(
-            "SELECT * FROM holdings WHERE portfolio_id = ? AND position_key = ?",
-            (portfolio_id, position_key),
-        ).fetchone()
+        existing = self._get_holding(portfolio_id, position_key)
+        cash = float(portfolio["cash_balance"])
 
+        batch = self.db.batch()
         if side == "BUY":
-            if portfolio["cash_balance"] < trade_cost:
+            if cash < trade_cost:
                 raise ValueError("Insufficient cash to buy this option")
-            self.conn.execute(
-                """INSERT INTO holdings (portfolio_id, ticker, sector, instrument_type, position_key, option_type, strike, expiry, quantity, avg_buy_price)
-                   VALUES (?, ?, 'Options', 'OPTION', ?, ?, ?, ?, ?, ?)
-                   ON CONFLICT(portfolio_id, position_key) DO UPDATE SET
-                     quantity = quantity + excluded.quantity,
-                     avg_buy_price = ((avg_buy_price * quantity) + (excluded.avg_buy_price * excluded.quantity))
-                                     / (quantity + excluded.quantity)""",
-                (portfolio_id, ticker, position_key, option_type, strike, expiry, quantity, premium),
-            )
-            self.conn.execute(
-                "UPDATE portfolios SET cash_balance = ROUND(cash_balance - ?, 2) WHERE id = ?",
-                (trade_cost, portfolio_id),
-            )
+            self._add_to_holding(batch, portfolio_id, position_key, existing, quantity, premium, {
+                "ticker": ticker, "sector": "Options", "instrument_type": "OPTION",
+                "option_type": option_type, "strike": strike, "expiry": expiry,
+            })
+            cash_after = round(cash - trade_cost, 2)
         else:
             if existing is None or existing["quantity"] < quantity:
                 raise ValueError("Not enough option contracts to sell")
-            remaining_qty = existing["quantity"] - quantity
-            if remaining_qty <= 0:
-                self.conn.execute("DELETE FROM holdings WHERE portfolio_id = ? AND position_key = ?", (portfolio_id, position_key))
-            else:
-                self.conn.execute(
-                    "UPDATE holdings SET quantity = ? WHERE portfolio_id = ? AND position_key = ?",
-                    (remaining_qty, portfolio_id, position_key),
-                )
-            self.conn.execute(
-                "UPDATE portfolios SET cash_balance = ROUND(cash_balance + ?, 2) WHERE id = ?",
-                (trade_cost, portfolio_id),
-            )
+            self._reduce_holding(batch, portfolio_id, position_key, existing["quantity"] - quantity)
+            cash_after = round(cash + trade_cost, 2)
 
-        self.conn.execute(
-            "INSERT INTO transactions (portfolio_id, ticker, instrument_type, option_type, strike, expiry, type, quantity, price, timestamp) VALUES (?, ?, 'OPTION', ?, ?, ?, ?, ?, ?, ?)",
-            (portfolio_id, ticker, option_type, strike, expiry, side, quantity, premium, ts),
-        )
-        self.conn.commit()
+        batch.update(self._portfolio_ref(portfolio_id), {"cash_balance": cash_after})
+        self._new_transaction(batch, portfolio_id, ticker=ticker, instrument_type="OPTION", option_type=option_type,
+                              strike=strike, expiry=expiry, type=side, quantity=quantity, price=premium, timestamp=ts)
+        batch.commit()
 
         return {
             "portfolio_id": portfolio_id,
@@ -770,29 +598,34 @@ class PaperTradingEngine:
             "premium": round(float(premium), 2),
             "side": side,
             "timestamp": ts,
-            "cash_balance": round(float(self.conn.execute("SELECT cash_balance FROM portfolios WHERE id = ?", (portfolio_id,)).fetchone()[0]), 2),
+            "cash_balance": cash_after,
         }
 
     # -----------------------------------------------------------------
     # Mark-to-market: recompute portfolio value against current prices
     # -----------------------------------------------------------------
 
+    def _save_snapshot(self, portfolio_id, as_of, total_value, cash_balance, holdings_value, total_pl, total_pl_pct):
+        """One snapshot per portfolio per as_of; a later save overwrites it."""
+        self._portfolio_ref(portfolio_id).collection("snapshots").document(as_of).set({
+            "portfolio_id": portfolio_id, "as_of": as_of, "total_value": total_value,
+            "cash_balance": cash_balance, "holdings_value": holdings_value,
+            "total_pl": total_pl, "total_pl_pct": total_pl_pct,
+        })
+
+    def _snapshots(self, portfolio_id):
+        rows = [s.to_dict() for s in self._portfolio_ref(portfolio_id).collection("snapshots").stream()]
+        return sorted(rows, key=lambda s: s["as_of"])
+
     @_locked
     def mark_to_market(self, portfolio_id, user_id, current_prices, as_of=None, current_option_prices=None):
         """current_prices: dict {ticker: price}; option values can also be supplied through current_option_prices keyed by position_key or ticker."""
         as_of = _normalize_timestamp(as_of)
-        self._assert_owner(portfolio_id, user_id)
-
-        portfolio = self.conn.execute(
-            "SELECT * FROM portfolios WHERE id = ?", (portfolio_id,)
-        ).fetchone()
-        holdings = self.conn.execute(
-            "SELECT * FROM holdings WHERE portfolio_id = ?", (portfolio_id,)
-        ).fetchall()
+        portfolio = self._assert_owner(portfolio_id, user_id)
 
         holdings_value = 0.0
         current_option_prices = current_option_prices or {}
-        for h in holdings:
+        for h in self._holdings(portfolio_id):
             if h["instrument_type"] == "OPTION":
                 key = self._get_position_key(h["ticker"], "OPTION", h["option_type"], h["strike"], h["expiry"])
                 option_price = current_option_prices.get(key)
@@ -807,18 +640,7 @@ class PaperTradingEngine:
         total_pl = total_value - contributed
         total_pl_pct = (total_pl / contributed) * 100 if contributed else 0
 
-        self.conn.execute(
-            """INSERT INTO daily_snapshots (portfolio_id, as_of, total_value, cash_balance, holdings_value, total_pl, total_pl_pct)
-               VALUES (?, ?, ?, ?, ?, ?, ?)
-               ON CONFLICT(portfolio_id, as_of) DO UPDATE SET
-                 total_value = excluded.total_value,
-                 cash_balance = excluded.cash_balance,
-                 holdings_value = excluded.holdings_value,
-                 total_pl = excluded.total_pl,
-                 total_pl_pct = excluded.total_pl_pct""",
-            (portfolio_id, as_of, total_value, portfolio["cash_balance"], holdings_value, total_pl, total_pl_pct),
-        )
-        self.conn.commit()
+        self._save_snapshot(portfolio_id, as_of, total_value, portfolio["cash_balance"], holdings_value, total_pl, total_pl_pct)
         return {
             "as_of": as_of,
             "total_value": round(total_value, 2),
@@ -837,30 +659,27 @@ class PaperTradingEngine:
         """Sets the sector on stock holdings saved as 'Unknown' (manual trades
         used to always save that). sector_for_ticker(ticker) returns a sector
         name or None. Returns how many holdings were updated."""
-        rows = self.conn.execute(
-            "SELECT id, ticker FROM holdings WHERE instrument_type = 'STOCK' AND sector = 'Unknown'"
-        ).fetchall()
         updated = 0
-        for row in rows:
-            sector = sector_for_ticker(row["ticker"])
-            if sector and sector != "Unknown":
-                self.conn.execute("UPDATE holdings SET sector = ? WHERE id = ?", (sector, row["id"]))
-                updated += 1
-        self.conn.commit()
+        for portfolio in self.db.collection("portfolios").stream():
+            holdings = portfolio.reference.collection("holdings").where(filter=FieldFilter("sector", "==", "Unknown"))
+            for snap in holdings.stream():
+                if snap.get("instrument_type") != "STOCK":
+                    continue
+                sector = sector_for_ticker(snap.get("ticker"))
+                if sector and sector != "Unknown":
+                    snap.reference.update({"sector": sector})
+                    updated += 1
         return updated
 
     @_locked
     def add_cash_balance(self, portfolio_id, user_id, amount):
         if amount < 0:
             raise ValueError("Cash amount must be non-negative")
-        self._assert_owner(portfolio_id, user_id)
-        self.conn.execute(
-            """UPDATE portfolios SET cash_balance = ROUND(cash_balance + ?, 2),
-                                     contributed_capital = ROUND(contributed_capital + ?, 2)
-               WHERE id = ?""",
-            (amount, amount, portfolio_id),
-        )
-        self.conn.commit()
+        portfolio = self._assert_owner(portfolio_id, user_id)
+        self._portfolio_ref(portfolio_id).update({
+            "cash_balance": round(portfolio["cash_balance"] + amount, 2),
+            "contributed_capital": round(portfolio["contributed_capital"] + amount, 2),
+        })
         return self.get_portfolio_summary(portfolio_id, user_id)
 
     @_locked
@@ -869,18 +688,9 @@ class PaperTradingEngine:
         price (falling back to cost when there's no quote); options are valued
         at cost, since there's no options price feed. P/L is everything the
         portfolio is worth now minus everything put into it."""
-        self._assert_owner(portfolio_id, user_id)
-        portfolio = self.conn.execute(
-            "SELECT * FROM portfolios WHERE id = ?", (portfolio_id,)
-        ).fetchone()
-        holdings = self.conn.execute(
-            "SELECT * FROM holdings WHERE portfolio_id = ? ORDER BY quantity * avg_buy_price DESC",
-            (portfolio_id,),
-        ).fetchall()
-        latest_snapshot = self.conn.execute(
-            "SELECT * FROM daily_snapshots WHERE portfolio_id = ? ORDER BY as_of DESC LIMIT 1",
-            (portfolio_id,),
-        ).fetchone()
+        portfolio = self._assert_owner(portfolio_id, user_id)
+        holdings = sorted(self._holdings(portfolio_id), key=lambda h: h["quantity"] * h["avg_buy_price"], reverse=True)
+        snapshots = self._snapshots(portfolio_id)
 
         total_invested = 0.0
         holdings_value = 0.0
@@ -888,8 +698,7 @@ class PaperTradingEngine:
         stock_sectors = set()
         unique_tickers = set()
         rows = []
-        for holding in holdings:
-            row = dict(holding)
+        for row in holdings:
             quantity = float(row["quantity"])
             cost = quantity * float(row["avg_buy_price"])
             price = None
@@ -925,44 +734,26 @@ class PaperTradingEngine:
             "sector_count": len(stock_sectors),  # options aren't a sector
             "stock_count": len(unique_tickers),
             "holdings": rows,
-            "latest": dict(latest_snapshot) if latest_snapshot else None,
+            "latest": snapshots[-1] if snapshots else None,
             "holdings_value": round(holdings_value, 2),
         }
 
     @_locked
     def record_daily_snapshot(self, portfolio_id, summary, as_of=None):
-        """Stores today's value from a summary, one row per portfolio per day
+        """Stores today's value from a summary, one per portfolio per day
         (later calls the same day overwrite it). This is what the
         performance chart plots."""
         as_of = as_of or datetime.now(timezone.utc).date().isoformat()
-        self.conn.execute(
-            """INSERT INTO daily_snapshots (portfolio_id, as_of, total_value, cash_balance, holdings_value, total_pl, total_pl_pct)
-               VALUES (?, ?, ?, ?, ?, ?, ?)
-               ON CONFLICT(portfolio_id, as_of) DO UPDATE SET
-                 total_value = excluded.total_value,
-                 cash_balance = excluded.cash_balance,
-                 holdings_value = excluded.holdings_value,
-                 total_pl = excluded.total_pl,
-                 total_pl_pct = excluded.total_pl_pct""",
-            (portfolio_id, as_of, summary["total_portfolio_value"], summary["cash_balance"],
-             summary["holdings_value"], summary["total_pl"], summary["total_pl_pct"]),
-        )
-        self.conn.commit()
+        self._save_snapshot(portfolio_id, as_of, summary["total_portfolio_value"], summary["cash_balance"],
+                            summary["holdings_value"], summary["total_pl"], summary["total_pl_pct"])
 
     @_locked
     def get_history(self, portfolio_id, user_id):
         self._assert_owner(portfolio_id, user_id)
-        rows = self.conn.execute(
-            "SELECT * FROM daily_snapshots WHERE portfolio_id = ? ORDER BY as_of ASC",
-            (portfolio_id,),
-        ).fetchall()
-        return [dict(r) for r in rows]
+        return self._snapshots(portfolio_id)
 
     @_locked
     def get_trade_history(self, portfolio_id, user_id):
         self._assert_owner(portfolio_id, user_id)
-        rows = self.conn.execute(
-            "SELECT * FROM transactions WHERE portfolio_id = ? ORDER BY timestamp DESC",
-            (portfolio_id,),
-        ).fetchall()
-        return [dict(r) for r in rows]
+        rows = [t.to_dict() for t in self._portfolio_ref(portfolio_id).collection("transactions").stream()]
+        return sorted(rows, key=lambda t: t["timestamp"], reverse=True)

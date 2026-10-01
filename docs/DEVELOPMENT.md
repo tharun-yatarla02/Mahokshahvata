@@ -7,9 +7,9 @@ A short checklist. The [README](../README.md) has the full API and project layou
 - **Python 3.11+** (tested on 3.14). On macOS use `python3`, since there's no `python`.
 - **Git**
 - An internet connection. Market data comes from Nasdaq and yfinance, and news from RSS feeds.
-- Optional: the `sqlite3` CLI for inspecting the database (preinstalled on macOS).
+- **Java 21+** for the local Firestore emulator (`brew install openjdk`; it doesn't replace your default Java), and the emulator itself: `gcloud components install cloud-firestore-emulator`.
 
-No database server, Docker or Node is needed. Storage is SQLite and JSON files, and the frontend is plain HTML/JS served by the API.
+Accounts, portfolios and trades live in Cloud Firestore (the Firebase project's database). Locally you run against the emulator, so you never touch real data. Caches are JSON/SQLite files, and the frontend is plain HTML/JS served by the API.
 
 ## Setup (once)
 
@@ -20,9 +20,19 @@ python3 -m venv .venv
 
 ## Run
 
+Start the Firestore emulator in one terminal (data is kept in memory and is gone when you stop it):
+
 ```bash
-USE_DEMO_AUTH=true .venv/bin/uvicorn api.main:app --reload
+PATH=/opt/homebrew/opt/openjdk/bin:$PATH gcloud emulators firestore start --host-port=127.0.0.1:8681
 ```
+
+Then the app in another:
+
+```bash
+FIRESTORE_EMULATOR_HOST=127.0.0.1:8681 GOOGLE_CLOUD_PROJECT=local-dev USE_DEMO_AUTH=true .venv/bin/uvicorn api.main:app --reload
+```
+
+To work against the real database instead, drop the first two variables and set `GOOGLE_APPLICATION_CREDENTIALS` to the Firebase Admin key.
 
 - Dashboard: http://localhost:8000/ (sign in or create an account first; "Continue with demo account" needs `USE_DEMO_AUTH=true`), API docs: http://localhost:8000/docs
 - The first start takes ~2 minutes before stock data appears (`/momentum` reports `warming_up: true`).
@@ -40,7 +50,7 @@ Put them in a `.env` file in the project folder (loaded on startup; shell variab
 | `MASSIVE_API_KEY` | Prices come from the free Nasdaq screener and yfinance (~15 min delayed) |
 | `BENZINGA_API_KEY` | News comes from RSS feeds, matched to companies by name |
 | `SEC_USER_AGENT` | Fundamentals still work but send a placeholder contact. SEC asks for your app name + email |
-| `GOOGLE_APPLICATION_CREDENTIALS` | Google (Firebase) tokens aren't accepted. Email/password and demo sign-in still work |
+| `GOOGLE_APPLICATION_CREDENTIALS` | Path to the Firebase Admin key. Needed for "Continue with Google" and for the real Firestore database; not needed with the emulator |
 
 ## Test
 
@@ -48,7 +58,7 @@ Put them in a `.env` file in the project folder (loaded on startup; shell variab
 .venv/bin/python -m pytest -q
 ```
 
-Tests use temp files and canned API responses, so they don't touch your local data or need keys.
+Start the Firestore emulator first (see Run); engine tests fail fast with a reminder if it isn't running. Each test gets its own empty emulator project, and other tests use temp files and canned API responses, so nothing touches real data or needs keys.
 
 ## Local data
 
@@ -56,7 +66,6 @@ All of these are created at runtime and gitignored. Delete one to reset it.
 
 | File | Holds |
 |---|---|
-| `paper_trading/paper_trading.db` | Users (with hashed passwords), sessions, portfolios, holdings, trades, daily snapshots |
 | `politician_trades/politician_trades.db` | Cached congressional trade disclosures |
 | `momentum/market_cache.json` | Market snapshot, so restarts are instant |
 | `news_sentiment/sentiment_history.json` | Recent sentiment results |

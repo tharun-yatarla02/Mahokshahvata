@@ -36,8 +36,8 @@ uvicorn api.main:app --reload          # then open http://localhost:8000
 - The Market page says *"Loading market data…"* for about **2 minutes** while
   it downloads price history for 3,000 stocks. After that it's cached in
   `momentum/market_cache.json`, and restarts are instant.
-- The first page you open creates a $100,000 demo portfolio in
-  `paper_trading/paper_trading.db`.
+- The first page you open creates a $100,000 demo portfolio in Firestore
+  (the local emulator when developing; see docs/DEVELOPMENT.md).
 - The Sentiment page uses Claude if `ANTHROPIC_API_KEY` is set; without it,
   headlines are labeled by a simple keyword fallback (works, less accurate).
   Use **your own** API key; never commit it.
@@ -60,8 +60,8 @@ uvicorn api.main:app --reload          # then open http://localhost:8000
 api/main.py                  FastAPI app: every endpoint, request validation, serves the frontend.
                              Also: .env loader, trade planning (_plan_order), sentiment cache.
 paper_trading/
-  paper_trading_engine.py    Paper-trading engine (SQLite): portfolios, trades, options, P/L,
-                             daily snapshots, schema migrations. Thread-safe (@_locked).
+  paper_trading_engine.py    Paper-trading engine (Firestore): users, sessions, sign-in history,
+                             portfolios, trades, options, P/L, daily snapshots. Thread-safe (@_locked).
 momentum/
   market_data.py             Background service: top-3,000 US stocks, quotes + history, disk cache.
   momentum_engine.py         Momentum math, sector/theme filters (AI, Tech, ...), stock search.
@@ -150,7 +150,6 @@ docs/                        PROJECT_STATUS.md, this guide, session logs.
 | File | What | Safe to delete? |
 |---|---|---|
 | `.env` | Your keys and settings | No (recreate it) |
-| `paper_trading/paper_trading.db` | All portfolios and trades | Yes, to start fresh (a new one is created) |
 | `momentum/market_cache.json` | Market data cache | Yes (re-downloads, ~2 min) |
 | `news_sentiment/sentiment_history.json` | 5-day headline history | Yes |
 | `politician_trades/politician_trades.db` | Quiver cache | Yes |
@@ -213,7 +212,7 @@ git push
 - **Don't insert data into the page without `escapeHtml()`** (tickers, names
   and headlines come from users and feeds).
 - **Single process only.** Don't run uvicorn with `--workers > 1`; the
-  engine lock and SQLite file aren't shared across processes.
+  engine lock isn't shared across processes.
 - **Options aren't market-priced.** Premiums are typed in and valued at cost;
   there's no ×100 contract multiplier.
 - **Sectors come from Nasdaq's classification** (e.g. Thermo Fisher is

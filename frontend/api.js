@@ -1,6 +1,6 @@
 // Shared fetch helper and sign-in state for every dashboard page.
 //
-// Sign-in: /auth/login or /auth/register return a session token, kept in
+// Sign-in: /auth/login, /auth/register or /auth/google return a session token, kept in
 // localStorage and sent as "Authorization: Bearer <token>". The server stores
 // only a hash of it, and /auth/logout deletes it. "demo-token" is the shared
 // demo account (server must run with USE_DEMO_AUTH=true).

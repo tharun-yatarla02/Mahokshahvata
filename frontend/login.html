@@ -56,7 +56,8 @@
         </p>
 
         <div class="auth-divider">or</div>
-        <button id="demoButton" class="secondary auth-demo" type="button">Continue with demo account</button>
+        <button id="googleButton" class="secondary auth-demo" type="button">Continue with Google</button>
+        <button id="demoButton" class="secondary auth-demo" type="button" style="margin-top: 8px;">Continue with demo account</button>
       </div>
     </main>
 
@@ -113,6 +114,41 @@
           showStatus(error.message);
           submit.disabled = false;
           submit.textContent = mode === 'register' ? 'Create account' : 'Sign in';
+        }
+      });
+
+      // Google: Firebase shows the popup and hands back an ID token, which the
+      // server swaps for one of our sessions (POST /auth/google). The Firebase
+      // sign-in itself isn't kept; our session is the only one. Public web config
+      // (project mahokshahvata-ae5f9); Firestore rules deny all browser access.
+      const FIREBASE_CONFIG = {
+        apiKey: 'AIzaSyC1MRo0OW_slh8cNwXtNjubi4WRB8-dw_A',
+        authDomain: 'mahokshahvata-ae5f9.firebaseapp.com',
+        projectId: 'mahokshahvata-ae5f9',
+        appId: '1:148447370236:web:8b547e3b0161a69994b079',
+      };
+      const googleButton = document.getElementById('googleButton');
+      googleButton.addEventListener('click', async () => {
+        googleButton.disabled = true;
+        showStatus('');
+        try {
+          const sdk = 'https://www.gstatic.com/firebasejs/12.19.0';
+          const { initializeApp } = await import(`${sdk}/firebase-app.js`);
+          const { getAuth, GoogleAuthProvider, signInWithPopup, signOut: firebaseSignOut } = await import(`${sdk}/firebase-auth.js`);
+          const auth = getAuth(initializeApp(FIREBASE_CONFIG));
+          const provider = new GoogleAuthProvider();
+          provider.setCustomParameters({ prompt: 'select_account' });
+          const result = await signInWithPopup(auth, provider);
+          const session = await apiFetch('/auth/google', {
+            method: 'POST', body: JSON.stringify({ id_token: await result.user.getIdToken() }),
+          });
+          await firebaseSignOut(auth);
+          setAuthToken(session.token);
+          window.location.replace(next);
+        } catch (error) {
+          const closed = ['auth/popup-closed-by-user', 'auth/cancelled-popup-request'].includes(error.code);
+          if (!closed) showStatus(error.code === 'auth/popup-blocked' ? 'Allow pop-ups for this site, then try again.' : error.message);
+          googleButton.disabled = false;
         }
       });
 
