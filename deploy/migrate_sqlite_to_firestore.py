@@ -15,7 +15,7 @@ from google.cloud import firestore
 
 
 def migrate(db_path, db):
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)  # read-only: a wrong path fails instead of creating an empty db
     conn.row_factory = sqlite3.Row
     rows = lambda table: [dict(r) for r in conn.execute(f"SELECT * FROM {table}")]
     batch, pending = db.batch(), 0
