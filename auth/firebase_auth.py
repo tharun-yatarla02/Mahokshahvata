@@ -1,12 +1,12 @@
 """
 firebase_auth.py
 
-Verifies Firebase ID tokens on the backend. Replaces the earlier raw-Google-
-Cloud-OAuth approach (google_auth.py) — Firebase manages the sign-in flow
-and issues its own tokens, so there's no separate "our own session token"
-step needed: a valid Firebase ID token IS a valid session, on every request.
+Verifies Firebase ID tokens on the backend. The sign-in page gets one from
+Firebase's Google popup and posts it to POST /auth/google, which checks it
+here and then starts one of our own sessions (see auth/README.md). A raw
+Firebase ID token is also still accepted as a Bearer token on any endpoint.
 
-Why this instead of raw Google Cloud OAuth:
+Why Firebase instead of raw Google Cloud OAuth:
     Google's OAuth "brand verification" requirement only applies once you
     publish an app to Production for the general public. Firebase sidesteps
     this for typical small/student projects: enabling Google as a sign-in
@@ -14,32 +14,9 @@ Why this instead of raw Google Cloud OAuth:
     verification wall raw Google Cloud OAuth can hit. No domain, no company
     registration needed.
 
-Setup:
-    pip install firebase-admin
-
-    1. Go to console.firebase.google.com -> Create a project (free, no
-       domain or company needed)
-    2. Build -> Authentication -> Get started -> enable "Google" as a
-       sign-in provider (one click)
-    3. Project settings (gear icon) -> Service accounts -> "Generate new
-       private key" -> downloads a JSON file. Keep this private — it's a
-       credential, not something to commit to git.
-    4. Point the backend at it:
-       export GOOGLE_APPLICATION_CREDENTIALS="/path/to/serviceAccountKey.json"
-    5. In your frontend, add the Firebase JS SDK and use
-       signInWithPopup(auth, new GoogleAuthProvider()) — see auth/README.md
-       for the full snippet.
-
-The flow, end to end:
-    1. Frontend uses the Firebase SDK to show Google's sign-in popup
-    2. User signs in — Firebase handles the Google OAuth exchange internally
-    3. Firebase SDK gives the frontend an ID token (a JWT, auto-refreshed
-       by the SDK as it nears expiry — no manual refresh logic needed)
-    4. Frontend attaches it to every API call: Authorization: Bearer <token>
-    5. verify_firebase_token() below checks it's genuinely signed by
-       Firebase and not expired, and returns the user's info
-    6. There is no separate "our own session token" — the Firebase token
-       itself is checked on every request
+Setup: GOOGLE_APPLICATION_CREDENTIALS must point at the Firebase project's
+Admin key (Project settings -> Service accounts -> Generate new private key).
+Full steps in auth/README.md.
 """
 
 import os
