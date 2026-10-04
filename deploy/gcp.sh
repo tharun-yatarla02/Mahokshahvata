@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# Deploy to a Google Compute Engine VM: uvicorn under systemd, Caddy on port 80.
+# Milestone 2: create the VM, firewall, static IP and budget, and (on a VM not yet
+# moved to containers) run uvicorn under systemd behind Caddy. Since Milestone 3,
+# app deploys go through deploy/docker_deploy.sh; this script stops after the
+# infrastructure steps once the VM runs containers.
 # A VM (not Cloud Run) because the app keeps SQLite + JSON caches on local disk
 # and runs a background market-data thread; both need one long-lived process.
 #
@@ -61,6 +64,12 @@ if ! g compute instances describe "$VM" --zone "$ZONE" >/dev/null 2>&1; then
   sleep 30  # let sshd come up
 fi
 IP=$(g compute addresses describe "$VM-ip" --region "$REGION" --format='value(address)')
+
+# Since Milestone 3 the VM runs containers; the systemd install below would fight them for port 80.
+if g compute ssh "$VM" --zone "$ZONE" --command 'test -f /opt/mahokshahvata/docker-compose.yml' 2>/dev/null; then
+  echo "Infrastructure is up to date. The VM runs containers now: deploy with TAG=<version> ./deploy/docker_deploy.sh"
+  exit 0
+fi
 
 # 4. Code: committed files only, so .venv, *.db and caches never ship.
 git archive --format=tar HEAD | g compute ssh "$VM" --zone "$ZONE" --command 'mkdir -p ~/app && tar -x -C ~/app'

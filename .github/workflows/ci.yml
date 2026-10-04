@@ -1,0 +1,42 @@
+# On every push and pull request: run the test suite against a Firestore
+# emulator, and check that the Docker image still builds. A red X on a commit
+# means it broke something before anyone deploys it.
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"   # same as the Docker image
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - name: Start the Firestore emulator
+        run: |
+          docker run -d --name firestore -p 8681:8681 gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators \
+            gcloud emulators firestore start --host-port=0.0.0.0:8681
+          for i in $(seq 60); do curl -sf http://127.0.0.1:8681 && exit 0; sleep 2; done
+          docker logs firestore; exit 1
+      - run: pytest -q
+
+  docker-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build the image (not pushed)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
