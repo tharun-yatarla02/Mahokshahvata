@@ -144,3 +144,44 @@ def test_email_sign_ins_are_logged(client, engine):
     client.post("/auth/login", json={"email": "ada@example.com", "password": "wrong-password"})
     client.post("/auth/login", json={"email": "ada@example.com", "password": "analytical-engine"})
     assert events(engine) == [("login", "email", True), ("login_failed", "email", True), ("register", "email", True)]
+
+
+def google_as(monkeypatch, uid, email, verified=True):
+    def verify(token):  # only "good" is a valid Google token, like the real check
+        if token != "good":
+            raise ValueError("bad token")
+        return {"firebase_uid": uid, "email": email, "name": "Ada (Google)", "picture": None, "email_verified": verified}
+    monkeypatch.setattr(api_main, "verify_firebase_token", verify)
+
+
+def test_google_sign_in_joins_the_existing_account_for_that_email(client, engine, monkeypatch):
+    old_token = register(client, email="ada@example.com", password="analytical-engine")
+    user_id = client.get("/auth/me", headers=auth(old_token)).json()["id"]
+    client.post("/portfolio", json={"name": "Mine", "starting_capital": 1000}, headers=auth(old_token))
+
+    google_as(monkeypatch, "g-ada", "Ada@Example.com")
+    session = client.post("/auth/google", json={"id_token": "good"}).json()
+
+    assert session["user"]["id"] == user_id and session["user"]["account_type"] == "google"
+    assert "Mine" in {p["name"] for p in client.get("/portfolio", headers=auth(session["token"])).json()["portfolios"]}
+    assert len(engine._where("users", "email", "ada@example.com")) == 1
+    # Whoever set the password never proved they own the email, so it stops working.
+    assert client.get("/auth/me", headers=auth(old_token)).status_code == 401
+    res = client.post("/auth/login", json={"email": "ada@example.com", "password": "analytical-engine"})
+    assert res.status_code == 400 and "Google" in res.json()["detail"]
+
+
+def test_email_used_by_a_google_account_cannot_be_reused(client, monkeypatch):
+    google_as(monkeypatch, "g-grace", "grace@example.com")
+    client.post("/auth/google", json={"id_token": "good"})
+
+    res = client.post("/auth/register", json={"name": "G", "email": "grace@example.com", "password": "long-enough"})
+    assert res.status_code == 409 and "Google" in res.json()["detail"]
+    other = register(client, email="other@example.com")
+    assert client.patch("/auth/me", json={"name": "O", "email": "grace@example.com"}, headers=auth(other)).status_code == 409
+
+
+def test_unverified_google_email_does_not_take_over_an_account(client, monkeypatch):
+    register(client, email="ada@example.com")
+    google_as(monkeypatch, "g-someone", "ada@example.com", verified=False)
+    assert client.post("/auth/google", json={"id_token": "good"}).status_code == 409

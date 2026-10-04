@@ -142,7 +142,13 @@
           refreshAccountMenu();  // the navbar shows the new name
           show('profileStatus', 'Profile saved.', 'success');
         } catch (error) {
-          show('profileStatus', error.message, 'error');
+          if (error.status === 409) {
+            emailInput.focus();
+            emailInput.select();
+            show('profileStatus', `${body.email} is already used by another account. Choose a different email.`, 'error');
+          } else {
+            show('profileStatus', error.message, 'error');
+          }
         }
       });
 

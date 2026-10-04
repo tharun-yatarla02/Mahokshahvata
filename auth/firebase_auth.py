@@ -61,6 +61,7 @@ def verify_firebase_token(token):
             "email": "demo@example.com",
             "name": "Local Demo User",
             "picture": None,
+            "email_verified": False,
         }
 
     try:
@@ -80,4 +81,5 @@ def verify_firebase_token(token):
         "email": decoded.get("email"),
         "name": decoded.get("name"),
         "picture": decoded.get("picture"),
+        "email_verified": bool(decoded.get("email_verified")),  # Google checked the user owns this email
     }

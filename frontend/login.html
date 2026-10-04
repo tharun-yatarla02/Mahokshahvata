@@ -13,6 +13,8 @@
       .auth-card button[type="submit"] { width: 100%; margin-top: 12px; }
       .auth-switch { margin-top: 16px; color: var(--muted); font-size: 0.9375rem; }
       .auth-switch button { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; cursor: pointer; }
+      .status-actions { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 8px; }
+      .status-actions button { background: none; border: 0; padding: 0; color: inherit; font: inherit; font-weight: 600; text-decoration: underline; cursor: pointer; }
       .auth-divider { margin: 20px 0 12px; text-align: center; color: var(--muted); font-size: 0.8125rem; }
       .auth-demo { width: 100%; }
       .navbar .nav-actions { margin-left: auto; }  /* no nav links on this page to push it right */
@@ -86,10 +88,58 @@
         showStatus('');
       }
 
-      function showStatus(message, kind = 'error') {
+      // actions: [{label, onClick}] shown as links under the message.
+      function showStatus(message, kind = 'error', actions = []) {
         statusEl.textContent = message;
+        if (actions.length) {
+          const row = document.createElement('div');
+          row.className = 'status-actions';
+          for (const { label, onClick } of actions) {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.textContent = label;
+            button.addEventListener('click', onClick);
+            row.appendChild(button);
+          }
+          statusEl.appendChild(row);
+        }
         statusEl.className = message ? `status ${kind}` : 'status';
         statusEl.style.display = message ? '' : 'none';
+      }
+
+      // Same rule as EMAIL_PATTERN in api/main.py, so the form catches typos
+      // before the server's less friendly 422.
+      const EMAIL_PATTERN = /^[^@\s]{1,64}@[^@\s]+\.[^@\s]+$/;
+
+      function focusField(id, select = false) {
+        const input = document.getElementById(id);
+        input.focus();
+        if (select) input.select();
+      }
+
+      // Registering with an email that already has an account (409).
+      // The server says when that account uses Google instead of a password.
+      function showEmailTaken(email, serverMessage) {
+        if (/Google/.test(serverMessage)) {
+          return showStatus(`An account with ${email} already exists and signs in with Google. Use Continue with Google below.`);
+        }
+        showStatus(`An account with ${email} already exists.`, 'error', [
+          { label: 'Sign in instead', onClick: () => {
+            setMode('login');  // keeps the typed email
+            document.getElementById('authPassword').value = '';
+            focusField('authPassword');
+          } },
+          { label: 'Use a different email', onClick: () => { showStatus(''); focusField('authEmail', true); } },
+        ]);
+      }
+
+      // Wrong password or unknown email (401). The server deliberately doesn't
+      // say which, so offer both ways forward.
+      function showLoginFailed() {
+        showStatus('That email and password don’t match an account.', 'error', [
+          { label: 'Create an account', onClick: () => { setMode('register'); focusField('authName'); } },
+          { label: 'Try again', onClick: () => { showStatus(''); focusField('authPassword', true); } },
+        ]);
       }
 
       document.getElementById('switchMode').addEventListener('click', () => setMode(mode === 'login' ? 'register' : 'login'));
@@ -101,6 +151,10 @@
         const name = document.getElementById('authName').value.trim();
         if (mode === 'register' && !name) return showStatus('Enter your name.');
         if (!email || !password) return showStatus('Enter your email and password.');
+        if (mode === 'register' && !EMAIL_PATTERN.test(email)) {
+          focusField('authEmail', true);
+          return showStatus('Enter a valid email address, like name@example.com.');
+        }
         if (mode === 'register' && password.length < 8) return showStatus('Use a password of at least 8 characters.');
 
         submit.disabled = true;
@@ -111,7 +165,9 @@
           setAuthToken(session.token);
           window.location.replace(next);
         } catch (error) {
-          showStatus(error.message);
+          if (mode === 'register' && error.status === 409) showEmailTaken(email, error.message);
+          else if (mode === 'login' && error.status === 401) showLoginFailed();
+          else showStatus(error.message);
           submit.disabled = false;
           submit.textContent = mode === 'register' ? 'Create account' : 'Sign in';
         }

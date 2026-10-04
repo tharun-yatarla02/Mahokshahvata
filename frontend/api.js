@@ -57,7 +57,11 @@ async function apiFetch(path, options = {}) {
     setAuthToken(null);
     goToLogin();
   }
-  if (!res.ok) throw new Error(errorMessage(payload) || `HTTP ${res.status}`);
+  if (!res.ok) {
+    const error = new Error(errorMessage(payload) || `HTTP ${res.status}`);
+    error.status = res.status;  // lets callers react to e.g. 409 "email taken"
+    throw error;
+  }
   return payload;
 }
 

@@ -18,6 +18,11 @@ Google's OAuth "brand verification" only applies once an app is published to Pro
 2. Firebase handles the Google OAuth exchange and hands the page an ID token (a JWT that expires after an hour)
 3. The page posts it to **`POST /auth/google`**; the server verifies it with `verify_firebase_token()`, creates the user on their first sign-in, records a `login` row in `auth_events`, and returns one of our own session tokens (30 days), exactly like `/auth/login` does
 4. From then on the browser sends `Authorization: Bearer <session token>`; Firebase isn't involved again until the next sign-in
+
+## One account per email
+- Registering, or changing a profile email, to an address any account already uses → 409 (the message says when that account uses Google)
+- A first Google sign-in whose email already has an account signs into it, if Google has verified the email (otherwise 409). Linking makes it a Google account: the password is turned off and its other browsers are signed out, because the email was never verified when the password was set, so someone could otherwise register a victim's email first and keep a way in
+- Signing in with a password on a Google account → 400 "This account signs in with Google"
 5. Logout deletes the session and records a `logout` row
 
 Swapping the short-lived Firebase token for our session means the page needs no token-refresh logic, and every sign-in and sign-out passes through the server, so it can be recorded.

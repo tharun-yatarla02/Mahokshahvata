@@ -164,11 +164,15 @@ def get_current_user(authorization: str = Header(None)):
     except ValueError:
         raise HTTPException(status_code=401, detail="Your session has expired. Please sign in again.")
 
-    return engine.get_or_create_user(
-        firebase_uid=firebase_user["firebase_uid"],
-        email=firebase_user["email"],
-        name=firebase_user["name"],
-    )
+    try:
+        return engine.get_or_create_user(
+            firebase_uid=firebase_user["firebase_uid"],
+            email=firebase_user["email"],
+            name=firebase_user["name"],
+            email_verified=firebase_user.get("email_verified", False),
+        )
+    except ValueError as e:  # email already used by another account
+        raise HTTPException(status_code=409, detail=str(e))
 
 
 # ---------------------------------------------------------------------------
@@ -332,6 +336,9 @@ def login(req: LoginRequest, request: Request):
     is taken, via 409, as most sign-up forms do.)"""
     email = req.email.strip().lower()
     found = engine.get_local_login(email)
+    if found and found[1] is None:  # one account per email, and this one uses Google
+        _log_auth(request, "login_failed", found[0], "email", email)
+        raise HTTPException(status_code=400, detail="This account signs in with Google. Use Continue with Google.")
     if not found or not verify_password(req.password, found[1]):
         _log_auth(request, "login_failed", found[0] if found else None, "email", email)
         raise HTTPException(status_code=401, detail="Invalid email or password")
@@ -343,13 +350,19 @@ def login(req: LoginRequest, request: Request):
 def google_login(req: GoogleLoginRequest, request: Request):
     """Trades a Firebase ID token from the Google sign-in popup for one of our
     sessions. Firebase ID tokens expire after an hour; our session lasts
-    SESSION_DAYS and works like an email/password one from here on."""
+    SESSION_DAYS and works like an email/password one from here on. An email
+    that already has an account signs into it (see get_or_create_user)."""
     try:
         firebase_user = verify_firebase_token(req.id_token)
     except ValueError:
         _log_auth(request, "login_failed", method="google")
         raise HTTPException(status_code=401, detail="Google sign-in failed. Please try again.")
-    user_id = engine.get_or_create_user(firebase_user["firebase_uid"], firebase_user["email"], firebase_user["name"])
+    try:
+        user_id = engine.get_or_create_user(firebase_user["firebase_uid"], firebase_user["email"],
+                                            firebase_user["name"], firebase_user.get("email_verified", False))
+    except ValueError as e:  # email taken and Google hasn't verified it
+        _log_auth(request, "login_failed", method="google", email=firebase_user["email"])
+        raise HTTPException(status_code=409, detail=str(e))
     _log_auth(request, "login", user_id, "google", firebase_user["email"])
     return _start_session(user_id)
 

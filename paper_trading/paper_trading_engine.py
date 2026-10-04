@@ -125,6 +125,12 @@ def _now():
     return datetime.now(timezone.utc).isoformat()
 
 
+def _taken_message(owner):
+    if owner["password_hash"] is None and not (owner["firebase_uid"] or "").startswith("local:"):
+        return "An account with this email already exists. It signs in with Google."
+    return "An account with this email already exists"
+
+
 class PaperTradingEngine:
     def __init__(self, db=None):
         # Every public method takes self._lock (see _locked): reads and the
@@ -181,35 +187,58 @@ class PaperTradingEngine:
         })
         return user_id
 
-    def _local_email_taken(self, email, except_user_id=None):
-        """Emails are unique among email/password accounts (stored lowercased)."""
-        return any(u["password_hash"] and u["id"] != except_user_id for u in self._where("users", "email", email))
+    def _email_owner(self, email, except_user_id=None):
+        """The other account using this email, or None. One account per email,
+        whatever the sign-in method (emails are stored lowercased)."""
+        if not email:
+            return None
+        return next((u for u in self._where("users", "email", email) if u["id"] != except_user_id), None)
 
     @_locked
-    def get_or_create_user(self, firebase_uid, email=None, name=None):
+    def get_or_create_user(self, firebase_uid, email=None, name=None, email_verified=False):
         """Looks up a user by their stable Firebase id, creating them on
-        first sign-in. Returns the internal user_id (ours, not Firebase's)."""
+        first sign-in. Returns the internal user_id (ours, not Firebase's).
+
+        A first Google sign-in with an email that already has an account
+        signs into that account instead of making a second one, but only when
+        Google has verified the email. Linking turns off the account's
+        password and signs out its other browsers: nobody ever proved they
+        owned the email when the password was set, so otherwise someone could
+        register a victim's email first and keep a way in after the victim
+        links their Google account. Raises ValueError when the email is
+        taken and not verified."""
         found = self._where("users", "firebase_uid", firebase_uid)
         if found:
             return found[0]["id"]
-        return self._create_user(firebase_uid, email, name)
+        email = email.strip().lower() if email else email
+        owner = self._email_owner(email)
+        if owner is None:
+            return self._create_user(firebase_uid, email, name)
+        if not email_verified or owner["firebase_uid"] == "demo-token":
+            raise ValueError("An account with this email already exists")
+        self.db.collection("users").document(str(owner["id"])).update(
+            {"firebase_uid": firebase_uid, "password_hash": None}
+        )
+        self.delete_other_sessions(owner["id"], keep_token_hash=None)
+        return owner["id"]
 
     @_locked
     def create_local_user(self, email, name, password_hash):
         """New email/password account. Raises ValueError if the email is taken.
         Local users get a random "local:" firebase_uid that can never collide
         with a real Firebase uid."""
-        if self._local_email_taken(email):
-            raise ValueError("An account with this email already exists")
+        owner = self._email_owner(email)
+        if owner is not None:
+            raise ValueError(_taken_message(owner))
         return self._create_user(f"local:{secrets.token_hex(12)}", email, name, password_hash)
 
     @_locked
     def get_local_login(self, email):
-        """(user_id, password_hash) for a local account, or None."""
-        for user in self._where("users", "email", email):
-            if user["password_hash"]:
-                return (user["id"], user["password_hash"])
-        return None
+        """(user_id, password_hash) for the account with this email, or None.
+        password_hash is None when the account signs in with Google. Prefers
+        the password account if duplicates from before the one-account rule exist."""
+        users = sorted(self._where("users", "email", email), key=lambda u: u["password_hash"] is None)
+        return (users[0]["id"], users[0]["password_hash"]) if users else None
 
     def _user_doc(self, user_id):
         snap = self.db.collection("users").document(str(user_id)).get()
@@ -229,8 +258,9 @@ class PaperTradingEngine:
         """Changes the display name, and the email for local accounts."""
         changes = {"name": name}
         if email is not None:
-            if self._local_email_taken(email, except_user_id=user_id):
-                raise ValueError("An account with this email already exists")
+            owner = self._email_owner(email, except_user_id=user_id)
+            if owner is not None:
+                raise ValueError(_taken_message(owner))
             changes["email"] = email
         self.db.collection("users").document(str(user_id)).update(changes)
 
