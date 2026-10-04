@@ -5,6 +5,7 @@
 services:
   app:
     build: .
+    image: mahokshahvata/app:local   # local builds never overwrite the registry's v1 tag
     environment:
       FIRESTORE_EMULATOR_HOST: firestore:8681
       GOOGLE_CLOUD_PROJECT: local-dev
