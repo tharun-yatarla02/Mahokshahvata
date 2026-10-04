@@ -35,15 +35,21 @@ ai_stock_platform/
 │   └── market_data.py               # background service tracking the top ~3000 US stocks
 ├── fundamentals/
 │   └── sec_edgar.py                 # revenue, earnings, cash flow, debt + filing links from SEC EDGAR
+├── explain/
+│   └── stock_explainer.py           # "Explain this stock": facts -> plain-English explanation (Claude or rules)
 ├── news_sentiment/
 │   ├── news_sentiment_scraper.py    # Benzinga or RSS news -> sentiment via Claude (or local model)
-│   ├── company_tickers.csv          # company name -> ticker lookup
+│   ├── company_tickers.csv          # ~1,000 company names -> tickers, as headlines spell them
 │   ├── sentiment_history.json       # recent sentiment history
 │   └── model/                       # optional local sentiment model (train + inference)
 ├── paper_trading/
 │   └── paper_trading_engine.py      # simulated portfolios, trades, P/L (stored in Firestore)
 ├── politician_trades/
 │   └── politician_trades.py         # congressional trade disclosures via Quiver Quantitative
+├── deploy/
+│   ├── gcp.sh                       # GCP VM deploy: uvicorn under systemd, Caddy for HTTPS, budget alerts
+│   ├── migrate_sqlite_to_firestore.py  # one-off move of the old SQLite data into Firestore
+│   └── find_duplicate_emails.py     # read-only: lists emails used by more than one account
 ├── docs/
 │   ├── HANDOFF.md                   # developer guide: setup, architecture, gotchas, next tasks
 │   └── PROJECT_STATUS.md            # current status and roadmap
@@ -206,6 +212,27 @@ so it skips company-name matching. Claude's label cache is keyed on article
 id + `updated` time, so an edited article is re-classified. If Benzinga
 returns nothing or fails, the RSS feeds are used.
 
+**Headline → ticker matching (RSS).** Without Benzinga, each headline is
+tagged with the stocks it names, from `company_tickers.csv` plus the cleaned
+names of the 1,000 largest tracked stocks:
+
+- Names match case-sensitively and as whole words, so "an apple a day" isn't
+  Apple. Names that are everyday words ("Target", "Shell", "Delta", "Nasdaq",
+  which usually means the index) are skipped (`AMBIGUOUS_NAMES`).
+- People and organizations that share a company's name ("Harrison Ford",
+  "Tom Ford", "Ford Foundation", "Lilly Singh") are ignored.
+- Explicit tickers count: `$NVDA`, `(NASDAQ: NVDA)`, and a bare ticker in
+  brackets after a name, like "Chewy (CHWY) vs. Petco (WOOF)". A bare ticker
+  only counts if it's a tracked symbol and not a common abbreviation that is
+  also a ticker, like (AI), (IT) or (PM).
+- Company names from the screener are cleaned before matching: "SAP SE ADS"
+  becomes "SAP", "Willis Towers Watson Public Limited Company" becomes
+  "Willis Towers Watson", and bonds, notes and preferred shares are skipped.
+
+On 99 live headlines (Oct 3, 2026), this found 48 of the 49 tracked stocks
+named in titles, with no wrong tags. The one miss was "American" (American
+Airlines), which is too common a word to match.
+
 **Not built yet: streaming quotes.** A WebSocket client subscribed to
 watchlists and holdings would make the trade screen real-time. It needs a
 Massive plan with WebSocket access and a new dependency, so it waits until a
@@ -234,9 +261,27 @@ sent to the sign-in page and returned where they were afterwards.
   deletes it; changing the password deletes the user's other sessions.
 - **Sign-in history:** every register, login, failed login and logout is
   recorded in the `auth_events` collection (user, method, IP, browser, time).
+- **One account per email**, whatever the sign-in method:
+  - Registering, or changing a profile email, to an address another account
+    uses is refused (409). When that account uses Google, the message says so.
+  - A first Google sign-in whose email already has an account signs into that
+    account (same portfolios) instead of creating a second one, provided Google
+    has verified the email. Otherwise it's refused (409).
+  - Joining makes it a Google account: the password is turned off and its other
+    browsers are signed out. The email was never verified when the password
+    was set, so otherwise someone could register another person's email first
+    and keep a way in after that person signs in with Google.
+  - Signing in with a password on a Google account returns 400 "This account
+    signs in with Google".
+  - Duplicates created before this rule are not merged automatically. List them
+    with `python deploy/find_duplicate_emails.py` (read-only).
+- **Error messages on the sign-in page** say what to do next: an email that
+  already has an account offers "Sign in instead" or "Use a different email";
+  a wrong email or password offers "Create an account" or "Try again".
 - **New accounts** start with a $100,000 simulated portfolio.
-- **Profile page** (`/profile.html`, from the account menu): change name and
-  email, change password.
+- **Profile page** (`/profile.html`, from the account menu): change name, and
+  email and password for email/password accounts (Google accounts get both
+  from Google).
 - **Demo account:** with `USE_DEMO_AUTH=true`, "Continue with demo account"
   signs in as the shared demo user (token `demo-token`).
 - Each account only ever sees its own portfolios, holdings and trades.
@@ -249,18 +294,19 @@ user only sees their own portfolios.
 
 | Method | Path | |
 |---|---|---|
-| POST | `/auth/google` | Exchange a Firebase ID token from the Google popup (`id_token`) for a session token |
-| POST | `/auth/register` | Create an email/password account (`name`, `email`, `password` of 8+ characters). Returns a session token |
-| POST | `/auth/login` | Sign in (`email`, `password`). Returns a session token |
+| POST | `/auth/google` | Exchange a Firebase ID token from the Google popup (`id_token`) for a session token. An email that already has an account signs into it; 409 if the email is taken and unverified |
+| POST | `/auth/register` | Create an email/password account (`name`, `email`, `password` of 8+ characters). Returns a session token; 409 if any account uses the email |
+| POST | `/auth/login` | Sign in (`email`, `password`). Returns a session token; 401 for a wrong email or password, 400 if the account signs in with Google |
 | POST | `/auth/logout` | End this session |
 | GET | `/auth/me` 🔒 | The signed-in user's profile |
-| PATCH | `/auth/me` 🔒 | Change name, and email for email/password accounts |
+| PATCH | `/auth/me` 🔒 | Change name, and email for email/password accounts; 409 if another account uses the email |
 | POST | `/auth/password` 🔒 | Change password (`current_password`, `new_password`); signs out other sessions |
 | GET | `/health` | Health check |
 | GET | `/momentum?top=50&offset=0` | Tracked stocks ranked by momentum. Also takes `q` (search ticker/company/sector), `sector` (name, alias like `Tech`, or theme like `AI`) and `sort` (`momentum`, `market_cap`, `day_change`, `volume`) |
 | GET | `/news-sentiment` | Latest headlines with sentiment; each has `affected`: the stocks it names (or, for sector-wide news, the largest stocks in those sectors) with a Good / Bad / Wait / No clear signal verdict from the headline's tone and the stock's 90-day trend. Plus `suggestions` (including `picks`: stocks with positive news on a rising 90-day trend, shown as "Good to invest in right now"): stocks and sectors in the news next to their current market condition. `refresh=true` refetches (at most once a minute; otherwise cached 5 min) |
 | GET | `/price-history/{ticker}` | Daily closes for the 90-day momentum window (yfinance, cached 1 hour), used by the Market page chart |
 | GET | `/fundamentals/{ticker}` | Revenue, net income, diluted EPS, operating cash flow (last 4 years), latest quarter, long-term debt, and links to recent SEC filings |
+| GET | `/explain/{ticker}` | Plain-English explanation of one stock (why it's moving, trend vs S&P 500 and sector, financials, risks) from the app's prices, headlines and SEC data. Written by Claude when `ANTHROPIC_API_KEY` is set, otherwise by fixed rules; cached 15 min; requires sign-in |
 | GET | `/politicians` | Politicians with disclosed trades |
 | GET | `/politicians/{name}/trades` | One politician's trades |
 | POST | `/politicians/refresh` 🔒 | Pull fresh data from Quiver into the local cache |
@@ -324,7 +370,11 @@ See [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) for the full roadmap.
 
 - **Accounts** have no email verification or password reset (the app
   sends no email), and no rate limiting on sign-in. Add both before
-  exposing the app beyond your own machine.
+  exposing the app beyond your own machine. A forgotten password currently
+  means a locked-out account. Email verification would also let a joined
+  account keep its password (see [Accounts and sign-in](#accounts-and-sign-in)).
+- **Sign-in history** (`auth_events`, with IP and browser) is kept forever;
+  add a retention limit before real users sign up.
 - **Market data** defaults to free, unofficial sources: Nasdaq's screener
   API and yfinance. Prices are ~15 minutes delayed and either source can
   change or rate-limit without notice. Set `MASSIVE_API_KEY` to use Massive
@@ -332,8 +382,9 @@ See [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) for the full roadmap.
   built yet.
 - **News sentiment** caches Claude's label per article, but only in memory,
   so a restart re-classifies current headlines. Without `BENZINGA_API_KEY`,
-  headlines are matched to companies by name, which misses articles that only
-  use a ticker or nickname. If the feed has no relevant headlines, it returns
+  headlines are matched to companies by name and explicit tickers, which
+  still misses nicknames not in `company_tickers.csv` and names that are
+  everyday words (e.g. "American" for American Airlines). If the feed has no relevant headlines, it returns
   a curated demo fallback.
 - **Paper trading** buys whole shares only; leftover cash stays as cash.
 - **One server process** — trades are serialized by an in-process lock, so
