@@ -1,0 +1,48 @@
+# Only what the running app needs goes into the image.
+
+# Secrets: supplied at run time, never baked in
+.env
+.env.*
+*.key
+*.pem
+firebase-admin.json
+firebase-adminsdk-*.json
+*serviceAccountKey*.json
+
+# Runtime data: lives in the /data volume, and a stale copy would ship old prices
+*.db
+*.sqlite3
+momentum/market_cache.json
+momentum/*.tmp
+news_sentiment/sentiment_history.json
+news_sentiment/news_sentiment_output.csv
+news_sentiment/model/sentiment_model/
+news_sentiment/model/training_checkpoints/
+
+# Local environments and caches: rebuilt inside the image for Linux
+.venv/
+venv/
+env/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Not needed to run the app
+.git/
+.gitignore
+.claude/
+.vscode/
+.idea/
+.DS_Store
+tests/
+docs/
+deploy/
+pytest.ini
+requirements-dev.txt
+README.md
+auth/README.md
+Dockerfile
+.dockerignore
+docker-compose*.yml
+*.pptx
+*.pdf

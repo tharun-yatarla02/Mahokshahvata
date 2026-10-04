@@ -59,7 +59,8 @@ HISTORY_REFRESH_SECONDS = 6 * 60 * 60
 HISTORY_RETRY_SECONDS = 15 * 60  # after a failed history download
 MIN_HISTORY_COVERAGE = 0.5       # a download with less than this is treated as failed
 HISTORY_CHUNK_SIZE = 500
-DEFAULT_CACHE_PATH = Path(__file__).parent / "market_cache.json"
+# DATA_DIR moves runtime files out of the code tree (the Docker volume).
+DEFAULT_CACHE_PATH = Path(os.environ.get("DATA_DIR") or Path(__file__).parent) / "market_cache.json"
 
 # Nasdaq's sector names, mapped onto the names the rest of the app uses.
 SECTOR_NAMES = {"Finance": "Financials", "Health Care": "Healthcare", "": "Unknown"}

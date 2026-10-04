@@ -36,7 +36,7 @@ import requests
 
 QUIVER_API_KEY = os.environ.get("QUIVER_API_KEY")
 BULK_ENDPOINT = "https://api.quiverquant.com/beta/bulk/congresstrading"
-DB_PATH = Path(__file__).parent / "politician_trades.db"
+DB_PATH = Path(os.environ.get("DATA_DIR") or Path(__file__).parent) / "politician_trades.db"  # DATA_DIR: Docker volume
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS trades (

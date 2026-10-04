@@ -1,0 +1,25 @@
+# Laptop only (docker compose loads this automatically; the VM never has it).
+# Builds the image from this checkout and runs a local Firestore emulator, so
+# `docker compose up --build` needs no cloud credentials and never touches real data.
+
+services:
+  app:
+    build: .
+    environment:
+      FIRESTORE_EMULATOR_HOST: firestore:8681
+      GOOGLE_CLOUD_PROJECT: local-dev
+      USE_DEMO_AUTH: "true"   # "Continue with demo account"; never set on the VM
+    depends_on:
+      firestore:
+        condition: service_healthy
+
+  firestore:
+    image: gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators
+    command: gcloud emulators firestore start --host-port=0.0.0.0:8681
+    expose:
+      - "8681"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8681"]
+      interval: 5s
+      timeout: 3s
+      retries: 30

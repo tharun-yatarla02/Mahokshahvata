@@ -1,0 +1,6 @@
+[
+  {"name": "keep-5-newest", "action": {"type": "Keep"}, "mostRecentVersions": {"keepCount": 5}},
+  {"name": "keep-v1", "action": {"type": "Keep"}, "condition": {"tagState": "TAGGED", "tagPrefixes": ["v1"]}},
+  {"name": "delete-untagged-after-7-days", "action": {"type": "Delete"}, "condition": {"tagState": "UNTAGGED", "olderThan": "7d"}},
+  {"name": "delete-old-after-30-days", "action": {"type": "Delete"}, "condition": {"tagState": "ANY", "olderThan": "30d"}}
+]

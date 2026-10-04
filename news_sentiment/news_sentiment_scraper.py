@@ -69,8 +69,9 @@ RSS_FEEDS = {
 }
 
 TICKER_CSV = Path(__file__).parent / "company_tickers.csv"
-OUTPUT_CSV = Path(__file__).parent / "news_sentiment_output.csv"
-HISTORY_FILE = Path(__file__).parent / "sentiment_history.json"
+DATA_DIR = Path(os.environ.get("DATA_DIR") or Path(__file__).parent)  # runtime files (the Docker volume)
+OUTPUT_CSV = DATA_DIR / "news_sentiment_output.csv"
+HISTORY_FILE = DATA_DIR / "sentiment_history.json"
 HISTORY_RETENTION_DAYS = 5
 
 # Macro/geopolitical themes that move whole sectors even when no specific

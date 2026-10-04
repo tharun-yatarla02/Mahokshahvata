@@ -1,0 +1,14 @@
+# VM only: real Firestore, with the Firebase Admin key handed in at run time.
+# The key file sits next to this file on the VM (chmod 600) and is mounted
+# read-only at /run/secrets/firebase-admin; it is never part of the image.
+
+services:
+  app:
+    environment:
+      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/firebase-admin
+    secrets:
+      - firebase-admin
+
+secrets:
+  firebase-admin:
+    file: ./firebase-admin.json
