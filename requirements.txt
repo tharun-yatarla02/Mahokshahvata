@@ -6,6 +6,7 @@ pandas>=2.0
 feedparser>=6.0
 requests>=2.32
 anthropic>=1.8  # messages.parse structured outputs
+brotli>=1.2  # anthropic's HTTP client decodes brotli replies; 1.0.x crashes it ("process() takes no keyword arguments")
 
 # Auth (Firebase)
 firebase-admin>=6.5
