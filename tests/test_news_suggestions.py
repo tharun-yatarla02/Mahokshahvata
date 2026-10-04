@@ -26,6 +26,20 @@ def test_clean_company_name_strips_legal_suffixes():
     assert clean_company_name("Meta Platforms Inc. Class A") == "Meta Platforms"
 
 
+def test_clean_company_name_strips_listing_details_and_skips_debt():
+    assert clean_company_name("SAP  SE ADS") == "SAP"
+    assert clean_company_name("Brookfield Corporation Class A Limited Voting Shares") == "Brookfield"
+    assert clean_company_name("Duke Energy Corporation (Holding Company)") == "Duke Energy"
+    assert clean_company_name("MPLX LP Common Units Representing Limited Partner Interests") == "MPLX"
+    assert clean_company_name("America Movil S.A.B. de C.V.") == "America Movil"
+    assert clean_company_name("Iron Mountain Incorporated (Delaware)Common Stock REIT") == "Iron Mountain"
+    assert clean_company_name("Entergy Arkansas LLC First Mortgage Bonds 4.875% Series Due September 1 2066") == ""
+    assert clean_company_name("Willis Towers Watson Public Limited Company") == "Willis Towers Watson"
+    assert clean_company_name("Comcast Holdings ZONES") == ""
+    assert clean_company_name("Brookfield Renewable Corporation Brookfield Renewable Corporation "
+                              "Class A Exchangeable Subordinate Voting Shares") == "Brookfield Renewable"
+
+
 def test_headline_matching_is_case_sensitive_and_skips_everyday_words():
     names = company_aliases(MARKET)
     matcher = build_matcher(names, known_tickers={r["ticker"] for r in MARKET})
@@ -35,6 +49,17 @@ def test_headline_matching_is_case_sensitive_and_skips_everyday_words():
     assert find_tickers("Analyst raises price Target", matcher) == {}      # "Target" is an everyday word
     assert find_tickers("Target (NYSE: TGT) cuts guidance", matcher) == {"TGT": "TGT"}
     assert find_tickers("Buffett buys more (NYSE:BRK.B) and $FAKE", matcher) == {"BRK-B": "BRK-B"}
+
+
+def test_bare_ticker_in_brackets_after_a_name():
+    matcher = build_matcher([("Ford", "F")], known_tickers={"CHWY", "WOOF", "AI", "F"})
+    assert find_tickers("Chewy (CHWY) vs. Petco (WOOF): Which to Buy?", matcher) == {"CHWY": "CHWY", "WOOF": "WOOF"}
+    assert find_tickers("Startup Zeta (ZETA) soars", matcher) == {}                   # not a tracked symbol
+    assert find_tickers("Firms adopt artificial intelligence (AI)", matcher) == {}    # lowercase before it
+    assert find_tickers("Generative AI (AI) spending rises", matcher) == {}           # common abbreviation
+    assert find_tickers("Ford recalls SUVs", matcher) == {"F": "Ford"}
+    assert find_tickers("Harrison Ford and Gerald Ford", matcher) == {}               # people, not the company
+    assert find_tickers("Ford (CHWY)", build_matcher([], known_tickers=None)) == {}   # bare form needs real symbols
 
 
 def test_suggestions_pair_news_with_present_condition():

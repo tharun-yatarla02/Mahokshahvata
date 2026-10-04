@@ -123,18 +123,31 @@ AMBIGUOUS_NAMES = {
     "International", "Coherent", "Fair", "Tapestry", "Globe", "Delta", "Equity",
     "Realty", "Crown", "Ross", "Dollar", "Discover", "Genuine", "Waters",
     "Graham", "Paramount", "Fox", "News", "Trade", "Service", "Universal",
-    "Public", "Prudential", "Principal", "Travelers", "Hartford", "Corning",
+    "Public", "Prudential", "Principal", "Travelers", "Hartford",
     "Southwest", "Alaska", "Frontier", "Spirit", "Rocket", "Lucid", "Toast",
-    "Wise", "Ford", "Popular", "Northern", "Nova", "Crane", "Dover", "Flex",
+    "Wise", "Popular", "Northern", "Nova", "Crane", "Dover", "Flex",
     "Freedom", "Grab", "Trip", "Viking", "Reliance", "Carlisle", "Woodward",
-    "Equitable", "Elastic", "Affirm",
+    "Equitable", "Elastic", "Affirm", "Nasdaq",  # Nasdaq: usually the index
 }
+
+# People and organizations that share a company's name. Blanked out before
+# name matching, so "Harrison Ford" doesn't tag F.
+NOT_COMPANIES = re.compile(r"\b(?:Harrison|Gerald|Betty|Tom) Ford\b|\bFord Foundation\b|\bLilly (?:Singh|Endowment)\b")
 
 # "$NVDA", "(NASDAQ: NVDA)", "(NYSE:BRK.B)"
 TICKER_MENTION = re.compile(
     r"\$([A-Z]{1,5}(?:[.-][A-Z])?)\b"
     r"|\((?:NYSE|NASDAQ|Nasdaq|NYSE American|NYSEArca|NYSEARCA|AMEX|OTC)\s*:\s*([A-Z]{1,5}(?:[.-][A-Z])?)\)"
 )
+
+
+# "Chewy (CHWY) vs. Petco (WOOF)": a bare ticker in brackets right after a
+# capitalized name. Only tracked symbols count, and never these abbreviations,
+# which are also real tickers: "artificial intelligence (AI)", "Information
+# Technology (IT)".
+BARE_TICKER_MENTION = re.compile(r"\b[A-Z0-9][\w.&'’-]*\s\(([A-Z]{1,5}(?:[.-][A-Z])?)\)")
+NOT_TICKERS = {"AI", "AGI", "AM", "AR", "HR", "IP", "IT", "LNG", "PM", "PR", "TV", "US", "UK", "EU",
+               "CEO", "CFO", "IPO", "ETF", "EV", "GDP", "CPI", "FDA", "SEC", "DOJ", "FTC", "IRS", "ESG", "EPS"}
 
 
 def _normalize_ticker(ticker):
@@ -170,12 +183,17 @@ def find_tickers(text, matcher):
         matcher = build_matcher(matcher)
     found = {}
     if matcher["pattern"]:
-        for match in matcher["pattern"].finditer(text):
+        for match in matcher["pattern"].finditer(NOT_COMPANIES.sub(" ", text)):
             found.setdefault(matcher["names"][match.group(0)], match.group(0))
     for match in TICKER_MENTION.finditer(text):
         ticker = _normalize_ticker(match.group(1) or match.group(2))
         if matcher["known_tickers"] is None or ticker in matcher["known_tickers"]:
             found.setdefault(ticker, ticker)
+    if matcher["known_tickers"]:  # bare "(CHWY)" is only trusted against real symbols
+        for match in BARE_TICKER_MENTION.finditer(text):
+            ticker = _normalize_ticker(match.group(1))
+            if ticker in matcher["known_tickers"] and match.group(1) not in NOT_TICKERS:
+                found.setdefault(ticker, ticker)
     return found
 
 

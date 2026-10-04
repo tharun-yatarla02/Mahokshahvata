@@ -21,16 +21,40 @@ from news_sentiment.news_sentiment_scraper import AMBIGUOUS_NAMES
 
 NAME_SUFFIX = re.compile(
     r"(,|\s)+(Inc|Incorporated|Corp|Corporation|Company|Companies|Co|Holdings?|Group|Ltd|"
-    r"Limited|plc|PLC|N\.?V|S\.?A|SE|AG|LP|L\.P|Trust|Class [A-Z]|Common|Ordinary|"
+    r"Limited|plc|PLC|N\.?V|S\.?A|SE|AG|A/S|LP|L\.P|Trust|Class [A-Z]|Common|Ordinary|"
     r"Shares?|Stock|&|and|\(The\))\b\.?\s*$",
     re.IGNORECASE,
 )
+# Share-class and listing wording the screener puts after the company name:
+# "SAP SE ADS", "Brookfield Corporation Class A Limited Voting Shares",
+# "MPLX LP Common Units Representing Limited Partner Interests". Everything
+# from the first of these words on is dropped.
+LISTING_DETAIL = re.compile(
+    r"\s(?:Class [A-Z](?:-\d)?\b|Series [A-Z]\b|Sponsored|Sponosred|Unsponsored|ADS\b|ADR\b|"
+    r"American Depositary|American Depository|N\.?Y\.? Registry|New York Registry|Common Units|"
+    r"Common Stock|Ordinary Shares|Limited Voting|Sub\. Vot|REIT\b|Public Limited Company|\(each representing).*$"
+)
+# "(Holding Company)", "(NEW)", "(Delaware)", "(Japan)", "(COPEL)"
+PARENTHETICAL = re.compile(r"\s*\([^)]*\)")
+# Bonds, notes and preferreds trade under their own tickers but are never
+# what a headline means by the company's name.
+DEBT_SECURITY = re.compile(r"\b(?:Notes?|Bonds?|Debentures?|Pfd|Preferred|Perpetual|STRATS|ZONES)\b|\d%")
+# "Brookfield Renewable Corporation Brookfield Renewable Corporation Class A ..."
+REPEATED_NAME = re.compile(r"^(.+?)\s+(?:Corporation|Corp\.?|Inc\.?)\s+\1\b.*$")
 ALIAS_UNIVERSE_SIZE = 1000
 
 
 def clean_company_name(name):
-    """'Eli Lilly and Company' -> 'Eli Lilly', 'Amazon.com, Inc.' -> 'Amazon'."""
-    name = re.sub(r"\(The\)", "", name or "").strip()
+    """'Eli Lilly and Company' -> 'Eli Lilly', 'Amazon.com, Inc.' -> 'Amazon',
+    'SAP SE ADS' -> 'SAP'. Empty for debt securities ("... 5.0% Notes")."""
+    name = re.sub(r"\s+", " ", name or "").strip()
+    if DEBT_SECURITY.search(name):
+        return ""
+    name = name.removeprefix("The ").removeprefix("D/B/A ")
+    name = PARENTHETICAL.sub(" ", name).strip()
+    name = REPEATED_NAME.sub(r"\1", name)
+    name = LISTING_DETAIL.sub("", name)
+    name = re.sub(r"\s(?:S\.\s?A\.\s?(?:B\.\s)?de C\.V|S\.A|p\.l\.c|L\.P|LLC|Inc\.? New|New|NEW)\.?$", "", name)
     previous = None
     while previous != name:
         previous = name
