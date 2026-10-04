@@ -234,6 +234,13 @@
         const relativeStrength = item.relative_strength;
 
         marketDetail.innerHTML = `
+          <div class="explain-box" data-explain>
+            <div>
+              <div class="mini-label">Explain this stock</div>
+              <p class="explain-intro">A plain-English read of ${escapeHtml(item.name || ticker)}: why it's moving, its trend, its financials and what to watch.</p>
+            </div>
+            <button type="button" data-explain-button>Explain ${escapeHtml(ticker)}</button>
+          </div>
           <div class="detail-grid">
             <div>
               <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom: 12px;">
@@ -270,6 +277,7 @@
 
         detailTickerTitle.textContent = ticker;
         selectedMarketTicker = ticker;
+        marketDetail.querySelector('[data-explain-button]').addEventListener('click', () => explainStock(ticker));
         getPriceHistory(ticker, currentPrice);
         getFundamentals(ticker);
         getRelatedNews(ticker);
@@ -299,6 +307,52 @@
           text = 'Price history unavailable right now.';
         }
         label.textContent = text;
+      }
+
+      // Plain-English explanation from /explain (see explain/stock_explainer.py).
+      const EXPLAIN_SECTIONS = [
+        ['why_moving', 'Why it’s moving'],
+        ['trend', 'Trend'],
+        ['financials', 'Financials'],
+        ['risks', 'Things to watch'],
+      ];
+
+      async function explainStock(ticker) {
+        const box = marketDetail.querySelector('[data-explain]');
+        const button = box.querySelector('[data-explain-button]');
+        button.disabled = true;
+        button.textContent = 'Explaining…';
+        let html;
+        try {
+          const data = await apiFetch(`/explain/${encodeURIComponent(ticker)}`);
+          const e = data.explanation || {};
+          const sections = EXPLAIN_SECTIONS.map(([key, title]) => (e[key] || []).length ? `
+            <div class="explain-section">
+              <div class="mini-label">${title}</div>
+              <ul>${e[key].map((point) => `<li>${escapeHtml(point)}</li>`).join('')}</ul>
+            </div>` : '').join('');
+          const made = new Date(data.generated_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+          html = `
+            <div class="explain-result">
+              <div class="explain-head">
+                <div class="mini-label">Explain this stock</div>
+                <span class="tag">${data.source === 'claude' ? 'Written by AI from the app’s data' : 'Written from the app’s data (no AI key)'} · ${escapeHtml(made)}</span>
+              </div>
+              <p class="explain-summary">${escapeHtml(e.summary || '')}</p>
+              <div class="explain-sections">${sections}</div>
+              <p class="explain-bottom"><strong>Bottom line:</strong> ${escapeHtml(e.bottom_line || '')}</p>
+            </div>`;
+        } catch (error) {
+          html = `
+            <div>
+              <div class="mini-label">Explain this stock</div>
+              <p class="explain-intro">${escapeHtml(error.message || 'Could not explain this stock right now.')}</p>
+            </div>
+            <button type="button" data-explain-button>Try again</button>`;
+        }
+        if (selectedMarketTicker !== ticker || !box.isConnected) return;  // user picked another stock meanwhile
+        box.innerHTML = html;
+        box.querySelector('[data-explain-button]')?.addEventListener('click', () => explainStock(ticker));
       }
 
       function formatReported(point) {

@@ -995,6 +995,34 @@ tbody tr[data-ticker] { cursor: pointer; }
   .detail-grid { grid-template-columns: minmax(0, 1fr); }
 }
 
+/* "Explain this stock" panel in the Market page's stock detail */
+.explain-box {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px 20px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+  padding: 16px;
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+}
+.explain-box:has(.explain-result) { display: block; }
+.explain-intro { margin: 6px 0 0; color: var(--muted); font-size: 0.9375rem; }
+.explain-head { display: flex; justify-content: space-between; align-items: baseline; gap: 6px 12px; flex-wrap: wrap; }
+.explain-summary { margin: 10px 0 0; font-size: 1.0625rem; line-height: 1.5; }
+.explain-sections {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px 24px;
+  margin-top: 16px;
+}
+.explain-section ul { margin: 6px 0 0; padding-left: 18px; color: var(--muted); line-height: 1.6; }
+.explain-bottom { margin: 16px 0 0; padding-top: 12px; border-top: 1px solid var(--line); line-height: 1.5; }
+@media (max-width: 720px) {
+  .explain-sections { grid-template-columns: minmax(0, 1fr); }
+}
+
 .news-item { padding: 12px 0; border-bottom: 1px solid var(--line); }
 .news-item:last-child { border-bottom: 0; }
 .news-source { margin-bottom: 4px; color: var(--muted); font-size: 0.75rem; font-weight: 600; }

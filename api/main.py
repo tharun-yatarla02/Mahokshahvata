@@ -23,6 +23,7 @@ require sign-in; POST /politicians/refresh does.
 
 Endpoints:
     GET  /momentum?top=10                     ranked momentum stocks
+    GET  /explain/{ticker}                     plain-English explanation of one stock (sign-in)
     GET  /portfolio                            list the signed-in user's portfolios
     POST /portfolio                            create a portfolio
     POST /portfolio/{id}/build                 build it from a momentum list
@@ -31,6 +32,7 @@ Endpoints:
 """
 
 import os
+import sys
 import threading
 import time
 from contextlib import asynccontextmanager
@@ -72,9 +74,10 @@ from paper_trading.paper_trading_engine import (
 from politician_trades.politician_trades import list_politicians, get_trades_for_politician, refresh_cache
 from auth.firebase_auth import verify_firebase_token
 from auth.passwords import SESSION_DAYS, hash_password, new_session_token, token_hash, verify_password
-from news_sentiment.news_sentiment_scraper import collect_sentiment_results
+from news_sentiment.news_sentiment_scraper import Anthropic, collect_sentiment_results
 from news_sentiment.suggestions import affected_stocks, build_suggestions, company_aliases, largest_by_sector
 from fundamentals.sec_edgar import get_fundamentals
+from explain.stock_explainer import build_facts, explain_with_claude, explain_with_rules
 
 @asynccontextmanager
 async def lifespan(app):
@@ -823,6 +826,21 @@ _sentiment_cache = {"data": None, "at": 0.0}
 _sentiment_lock = threading.Lock()
 
 
+def _sentiment_data(rows, refresh=False):
+    """(cached headline data, its age in seconds), refetched when stale."""
+    with _sentiment_lock:
+        age = time.monotonic() - _sentiment_cache["at"]
+        stale = age > (SENTIMENT_MIN_REFRESH_SECONDS if refresh else SENTIMENT_TTL_SECONDS)
+        if _sentiment_cache["data"] is None or stale:
+            _sentiment_cache["data"] = collect_sentiment_results(
+                extra_companies=company_aliases(rows),
+                known_tickers={row["ticker"] for row in rows} or None,
+            )
+            _sentiment_cache["at"] = time.monotonic()
+            age = 0.0
+        return _sentiment_cache["data"], age
+
+
 @app.get("/news-sentiment")
 def get_news_sentiment(refresh: bool = False):
     """Returns current news sentiment for tracked tickers and sector themes,
@@ -835,17 +853,7 @@ def get_news_sentiment(refresh: bool = False):
     sooner, but not more than once a minute. Suggestions are rebuilt on every
     request so prices are always the latest snapshot."""
     rows = market_data.snapshot()
-    with _sentiment_lock:
-        age = time.monotonic() - _sentiment_cache["at"]
-        stale = age > (SENTIMENT_MIN_REFRESH_SECONDS if refresh else SENTIMENT_TTL_SECONDS)
-        if _sentiment_cache["data"] is None or stale:
-            _sentiment_cache["data"] = collect_sentiment_results(
-                extra_companies=company_aliases(rows),
-                known_tickers={row["ticker"] for row in rows} or None,
-            )
-            _sentiment_cache["at"] = time.monotonic()
-            age = 0.0
-        data = _sentiment_cache["data"]
+    data, age = _sentiment_data(rows, refresh)
     # Built per request (not stored in the cache) so prices are always current.
     by_sector = largest_by_sector(rows)
     results = [{**a, "affected": affected_stocks(a, market_data.lookup, by_sector)} for a in data["results"]]
@@ -897,6 +905,67 @@ def get_company_fundamentals(ticker: Annotated[str, FastAPIPath(pattern=TICKER_P
     if data is None:
         raise HTTPException(status_code=404, detail=f"No SEC filings found for {ticker}")
     return data
+
+
+# Each explanation can cost a Claude call, so one per stock per 15 minutes.
+EXPLAIN_TTL_SECONDS = 15 * 60
+EXPLAIN_CACHE_MAX = 500
+_explain_cache = {}  # ticker -> (made_at, response)
+
+
+@app.get("/explain/{ticker}")
+def explain_stock(ticker: Annotated[str, FastAPIPath(pattern=TICKER_PATTERN)],
+                  user_id: int = Depends(get_current_user)):
+    """A plain-English explanation of one stock: what is going on, why it is
+    moving, its trend, its financials and the risks to watch, from the
+    app's own prices, headlines and SEC filings (see explain/stock_explainer.py).
+    Written by Claude when ANTHROPIC_API_KEY is set, otherwise by fixed
+    rules. Requires sign-in, since it can spend API credit."""
+    ticker = _normalize_ticker(ticker)
+    cached = _explain_cache.get(ticker)
+    if cached and time.monotonic() - cached[0] < EXPLAIN_TTL_SECONDS:
+        return cached[1]
+    row = market_data.lookup(ticker)
+    if not row:
+        raise HTTPException(status_code=404, detail=f"{ticker} is not in the tracked market list")
+    rows = market_data.snapshot()
+    try:
+        news, _ = _sentiment_data(rows)
+    except Exception as e:  # feeds down: explain from prices and filings alone
+        print(f"[warn] news unavailable for /explain: {type(e).__name__}", file=sys.stderr)
+        news = {}
+    headlines = [] if news.get("fallback") else news.get("results", [])  # demo headlines aren't real news
+    try:
+        fundamentals = get_fundamentals(ticker)
+    except Exception:  # SEC rate limit or outage
+        fundamentals = None
+    facts = build_facts(
+        row, rows, headlines, fundamentals,
+        keyword_tone=any(str(a.get("reasoning", "")).startswith("Heuristic") for a in headlines),
+    )
+
+    explanation, source = None, "rules"
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if api_key and Anthropic is not None:
+        try:
+            explanation = explain_with_claude(Anthropic(api_key=api_key), facts)
+            source = "claude" if explanation else source
+        except Exception as e:  # rate limit, network, bad key
+            print(f"[warn] Claude explanation failed, using rules: {type(e).__name__}: {e}", file=sys.stderr)
+    if explanation is None:
+        explanation = explain_with_rules(facts)
+
+    response = {
+        "ticker": ticker,
+        "explanation": explanation.model_dump(),
+        "source": source,
+        "facts": facts,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if len(_explain_cache) >= EXPLAIN_CACHE_MAX:
+        _explain_cache.clear()
+    _explain_cache[ticker] = (time.monotonic(), response)
+    return response
 
 
 # ---------------------------------------------------------------------------
