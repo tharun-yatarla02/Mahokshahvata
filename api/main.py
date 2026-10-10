@@ -636,6 +636,7 @@ def _plan_order(portfolio_id, user_id, req):
         problem = f"You own {format_shares(owned)} {ticker}; can't sell {format_shares(quantity)}."
 
     cash_after = cash - value if req.side == "BUY" else cash + value
+    market = _market_view()
     return {
         "ticker": ticker,
         "side": req.side,
@@ -649,6 +650,9 @@ def _plan_order(portfolio_id, user_id, req):
         "max_buy_quantity": max_buy,
         "max_buy_whole_shares": int(max_buy),
         "ok": problem is None,
+        # Paper orders are allowed while the market is closed; they fill at the last close.
+        "market_open": market["open"],
+        "market_note": None if market["open"] else f"{market['label']}. This order fills at the last closing price.",
         "message": problem or (
             f"{'Buy' if req.side == 'BUY' else 'Sell'} {format_shares(quantity)} {ticker} at ${price:,.2f} "
             f"for ${value:,.2f}"
@@ -684,7 +688,7 @@ def trade_stock(portfolio_id: int, req: TradeStockRequest, user_id: int = Depend
         raise HTTPException(status_code=403, detail="This portfolio doesn't belong to you")
     except ValueError as e:
         raise _trade_error(e)
-    return {**result, "value": plan["value"], "price_source": plan["price_source"]}
+    return {**result, "value": plan["value"], "price_source": plan["price_source"], "market_note": plan["market_note"]}
 
 
 def _trade_error(e):

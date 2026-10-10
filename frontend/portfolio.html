@@ -608,7 +608,8 @@
         }
         const verb = plan.side === 'BUY' ? "You'll get" : "You'll sell";
         box.innerHTML = `<span>${verb} <strong>${formatShares(plan.quantity)} ${escapeHtml(plan.ticker)}</strong> for <strong>${formatCurrency(plan.value)}</strong></span>`
-          + `<span>Cash after ${formatCurrency(plan.cash_after)}</span>`;
+          + `<span>Cash after ${formatCurrency(plan.cash_after)}</span>`
+          + (plan.market_note ? `<span class="tag">${escapeHtml(plan.market_note)}</span>` : '');
         button.disabled = false;
       }
 
@@ -686,7 +687,8 @@
             method: 'POST', body: JSON.stringify(readOrder()),
           });
           await refreshPortfolioData();
-          portfolioOutput.textContent = `${data.side === 'BUY' ? 'Bought' : 'Sold'} ${formatShares(data.quantity)} ${data.ticker} at ${formatCurrency(data.price)} for ${formatCurrency(data.value)} • Cash now ${formatCurrency(data.cash_balance)}`;
+          portfolioOutput.textContent = `${data.side === 'BUY' ? 'Bought' : 'Sold'} ${formatShares(data.quantity)} ${data.ticker} at ${formatCurrency(data.price)} for ${formatCurrency(data.value)} • Cash now ${formatCurrency(data.cash_balance)}`
+            + (data.market_note ? ` • ${data.market_note}` : '');
         } catch (err) {
           portfolioOutput.textContent = String(err.message || err);
         } finally {

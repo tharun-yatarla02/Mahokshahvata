@@ -288,3 +288,17 @@ def test_price_history_returns_momentum_window_and_caches(client, monkeypatch):
 
     monkeypatch.setattr(api_main, "fetch_price_history", lambda tickers, lookback_days: pd.DataFrame())
     assert client.get("/price-history/ZZZZ").status_code == 404
+
+
+def test_orders_while_closed_are_allowed_but_labelled(client, monkeypatch):
+    monkeypatch.setattr(api_main, "latest_price", lambda ticker: 200.0)
+    monkeypatch.setattr(api_main, "_fallback_prices", {})   # another test caches "no price" for ZZZZ
+    monkeypatch.setattr(api_main, "market_status", lambda now=None: {
+        "open": False, "reason": "Saturday", "closes_at": None, "next_open": "2026-10-12T09:30:00-04:00"})
+    pid = client.post("/portfolio/default", headers=AUTH).json()["portfolio_id"]
+    order = {"ticker": "ZZZZ", "side": "BUY", "amount": 100}
+    preview = client.post(f"/portfolio/{pid}/trade-preview", json=order, headers=AUTH).json()
+    assert preview["ok"] and preview["market_open"] is False and "last closing price" in preview["market_note"]
+    trade = client.post(f"/portfolio/{pid}/trade-stock", json=order, headers=AUTH)
+    assert trade.status_code == 200 and "Market closed (Saturday)" in trade.json()["market_note"]
+
