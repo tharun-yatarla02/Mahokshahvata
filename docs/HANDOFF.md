@@ -223,7 +223,7 @@ git push
 
 ## 8. Where to pick up
 
-Full list with priorities: [PROJECT_STATUS.md → What's missing](PROJECT_STATUS.md#whats-missing).
+Full list with priorities: [PROJECT_STATUS.md → What's left](PROJECT_STATUS.md#whats-left).
 Starting points for the next tasks:
 
 | Task | Where to start |
