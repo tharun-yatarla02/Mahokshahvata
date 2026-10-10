@@ -80,6 +80,7 @@
         </div>
       </div>
 
+      <div class="status" id="apMarket" role="status" style="display: none;"></div>
       <div class="status warning" id="apPaused" role="status" style="display: none;"></div>
 
       <div class="grid">
@@ -103,7 +104,7 @@
           <div class="ap-actions">
             <button id="apSave" type="button" class="secondary">Save settings</button>
           </div>
-          <p class="tag" style="margin-top: 12px;">When on, it runs once each weekday between 10:00 and 15:30 New York time, at the same ~15-minute-delayed prices as your own trades.</p>
+          <p class="tag" style="margin-top: 12px;">When on, it runs once each trading day from 10:00 New York time until 30 minutes before the close, at the same ~15-minute-delayed prices as your own trades. It never trades on weekends or market holidays.</p>
           <div class="status" id="apSettingsStatus" role="status" style="margin-top: 14px; display: none;"></div>
         </div>
 
@@ -177,6 +178,9 @@
         $('apToggle').className = view.enabled ? 'secondary' : '';
         $('apToggle').disabled = false;
         show('apPaused', !view.enabled && view.paused_reason ? view.paused_reason : '', 'warning');
+        show('apMarket', view.market.label, view.market.open ? 'success' : 'warning');
+        $('apRun').disabled = !view.market.open;
+        $('apRun').title = view.market.open ? '' : 'Trades can only be placed while the market is open.';
         for (const key of FIELDS) {
           const input = $(key), { min, max } = view.limits[key];
           input.min = min; input.max = max; input.value = view.settings[key];
@@ -279,6 +283,7 @@
           show('apRunStatus', error.message, 'error');
         } finally {
           button.disabled = false; button.textContent = label;
+          load();  // refreshes the market status (Run now stays disabled while closed)
         }
       }
 
@@ -289,9 +294,9 @@
         if (!plan) return;
         const done = plan.trades.filter((t) => t.result === 'done').length;
         show('apRunStatus', plan.status === 'paused' ? 'Autopilot paused itself: daily loss limit hit.'
+          : plan.status === 'closed' ? plan.notes[0]
           : done ? `Placed ${done} trade${done === 1 ? '' : 's'}. See them on the Portfolio page.` : 'No trades needed right now.',
-          plan.status === 'paused' ? 'warning' : 'success');
-        load();
+          plan.status === 'paused' || plan.status === 'closed' ? 'warning' : 'success');
       });
 
       function setTheme(nextTheme) {

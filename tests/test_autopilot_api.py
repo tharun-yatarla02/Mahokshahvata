@@ -22,6 +22,10 @@ class FakeMarket:
         return self.rows.get((ticker or "").upper())
 
 
+OPEN = {"open": True, "reason": None, "closes_at": "2026-10-12T16:00:00-04:00", "next_open": None}
+SATURDAY = {"open": False, "reason": "Saturday", "closes_at": None, "next_open": "2026-10-12T09:30:00-04:00"}
+
+
 def stock(ticker, price, momentum, strength, cap=1e11):
     return {"ticker": ticker, "current_price": price, "momentum_pct": momentum, "relative_strength": strength,
             "market_cap": cap, "sector": "Technology"}
@@ -34,6 +38,7 @@ def setup(make_engine, monkeypatch):
     market = FakeMarket([stock("AAPL", 200, 20, 10), stock("NVDA", 100, 40, 30), stock("XOM", 50, -5, -15)])
     monkeypatch.setattr(api_main, "market_data", market)
     monkeypatch.setattr(api_main, "_autopilot_news", lambda rows: {})
+    monkeypatch.setattr(api_main, "market_status", lambda now=None: OPEN)   # tests must not depend on today's date
     client = TestClient(api_main.app)
     portfolio_id = client.post("/portfolio/default", headers=DEMO).json()["portfolio_id"]
     return client, market, portfolio_id
@@ -97,3 +102,17 @@ def test_other_users_cannot_touch_the_autopilot(setup):
         assert client.post(f"/portfolio/{pid}/autopilot/run", headers=DEMO).status_code == 403
     finally:
         api_main.app.dependency_overrides.clear()
+
+
+def test_no_trades_while_the_market_is_closed(setup, monkeypatch):
+    client, _, pid = setup
+    monkeypatch.setattr(api_main, "market_status", lambda now=None: SATURDAY)
+    run = client.post(f"/portfolio/{pid}/autopilot/run", headers=DEMO).json()
+    assert run["status"] == "closed" and run["trades"] == []
+    assert "Market closed (Saturday)" in run["notes"][0] and "Mon Oct 12, 9:30" in run["notes"][0]
+    assert client.get(f"/portfolio/{pid}", headers=DEMO).json()["holdings"] == []
+    preview = client.post(f"/portfolio/{pid}/autopilot/preview", headers=DEMO).json()
+    assert preview["trades"] and "last closing prices" in preview["notes"][0]   # preview still allowed, labelled
+    view = client.get(f"/portfolio/{pid}/autopilot", headers=DEMO).json()
+    assert view["market"]["open"] is False and view["runs"] == []
+

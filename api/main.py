@@ -80,6 +80,7 @@ from news_sentiment.suggestions import affected_stocks, build_suggestions, compa
 from fundamentals.sec_edgar import get_fundamentals
 from explain.stock_explainer import build_facts, explain_with_claude, explain_with_rules
 from autopilot.autopilot import SETTINGS as AUTOPILOT_SETTINGS, clamp_settings, plan_run
+from momentum.market_calendar import market_status
 
 @asynccontextmanager
 async def lifespan(app):
@@ -721,7 +722,8 @@ def trade_option(portfolio_id: int, req: TradeOptionRequest, user_id: int = Depe
 
 AUTOPILOT_CHECK_SECONDS = 10 * 60
 MARKET_TZ = ZoneInfo("America/New_York")
-AUTOPILOT_WINDOW = (clock_time(10, 0), clock_time(15, 30))  # once per weekday, after the open settles
+AUTOPILOT_START = clock_time(10, 0)             # let the open settle first
+AUTOPILOT_STOP_BEFORE_CLOSE = timedelta(minutes=30)
 _autopilot_lock = threading.Lock()  # one run at a time (manual or scheduled)
 
 AutopilotUpdate = create_model(
@@ -751,7 +753,20 @@ def _autopilot_view(portfolio_id, user_id):
         "managed": state.get("managed", []),
         "last_run_at": state.get("last_run_at"),
         "runs": engine.list_autopilot_runs(portfolio_id, user_id),
+        "market": _market_view(),
     }
+
+
+def _market_view():
+    """market_status() plus plain-language text for the page."""
+    status = market_status()
+    if status["open"]:
+        closes = datetime.fromisoformat(status["closes_at"])
+        status["label"] = f"Market open until {closes:%-H:%M} New York time"
+    else:
+        opens = datetime.fromisoformat(status["next_open"])
+        status["label"] = f"Market closed ({status['reason']}). Next open: {opens:%a %b %-d, %-H:%M} New York time"
+    return status
 
 
 def _autopilot_news(rows):
@@ -770,6 +785,9 @@ def _run_autopilot(portfolio_id, user_id, execute, trigger):
     Trades fill at the same tracked quotes as manual market orders."""
     with _autopilot_lock:
         state = engine.get_autopilot(portfolio_id, user_id)
+        market = _market_view()
+        if execute and not market["open"]:
+            return {"status": "closed", "trades": [], "notes": [market["label"] + ". Nothing was traded."]}
         status = market_data.status()
         if status["warming_up"] or status["stale"]:
             return {"status": "idle", "trades": [], "retry": True,
@@ -785,6 +803,9 @@ def _run_autopilot(portfolio_id, user_id, execute, trigger):
                         _autopilot_news(rows) if settings["use_news"] else {},
                         engine.last_close_value(portfolio_id, today))
         if not execute:
+            if not market["open"]:
+                plan["notes"].insert(0, market["label"] + ". This preview uses the last closing prices; "
+                                     "trades can only be placed while the market is open.")
             return plan
 
         managed = [t for t in state.get("managed", []) if any(h["ticker"] == t for h in holdings)]
@@ -811,12 +832,16 @@ def _run_autopilot(portfolio_id, user_id, execute, trigger):
 
 
 def _autopilot_scheduler():
-    """Runs every enabled autopilot once per weekday, inside AUTOPILOT_WINDOW
-    (New York time). Prices are the same ~15-minute-delayed quotes as the app."""
+    """Runs every enabled autopilot once per trading day, from 10:00 New York
+    time until 30 minutes before the close (13:00 on early-close days), never
+    on weekends or NYSE holidays. Prices are the same ~15-minute-delayed
+    quotes as the rest of the app."""
     while True:
         time.sleep(AUTOPILOT_CHECK_SECONDS)
         now = datetime.now(MARKET_TZ)
-        if now.weekday() >= 5 or not (AUTOPILOT_WINDOW[0] <= now.time() <= AUTOPILOT_WINDOW[1]):
+        market = market_status(now)  # weekends, NYSE holidays and early closes
+        if not market["open"] or now.time() < AUTOPILOT_START or \
+                now > datetime.fromisoformat(market["closes_at"]) - AUTOPILOT_STOP_BEFORE_CLOSE:
             continue
         today = now.date().isoformat()
         try:
@@ -867,7 +892,8 @@ def preview_autopilot(portfolio_id: int, user_id: int = Depends(get_current_user
 
 @app.post("/portfolio/{portfolio_id}/autopilot/run")
 def run_autopilot(portfolio_id: int, user_id: int = Depends(get_current_user)):
-    """Runs the autopilot once now (even while it's switched off) and logs the run."""
+    """Runs the autopilot once now (even while it's switched off) and logs the
+    run. Refused while the market is closed."""
     return _portfolio_errors(lambda: _run_autopilot(portfolio_id, user_id, execute=True, trigger="manual"))
 
 

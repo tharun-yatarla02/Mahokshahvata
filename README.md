@@ -193,9 +193,12 @@ the stocks it bought itself: your own holdings and options are never touched.
 - **Preview** shows the planned trades with a reason for each; **Run now**
   places them at the same tracked quotes as manual orders. Every run is
   logged, and its trades show "by Autopilot" in the trade history.
-- When on, it runs once each weekday between 10:00 and 15:30 New York time.
-  It skips any run while prices are loading or stale. Set
-  `AUTOPILOT_SCHEDULER=off` to disable the schedule (manual runs still work).
+- It trades only while the US market is open (`momentum/market_calendar.py`:
+  weekdays 9:30-16:00 New York, minus NYSE holidays, 13:00 early closes).
+  When closed, Run now is refused and Preview is labelled as using the last
+  closing prices. When on, it runs once each trading day from 10:00 until 30
+  minutes before the close, and skips runs while prices are loading or stale.
+  Set `AUTOPILOT_SCHEDULER=off` to disable the schedule.
 
 
 The **AI** and **Growth** filters are rules, recomputed on every refresh
