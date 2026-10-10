@@ -1,10 +1,16 @@
+import pandas as pd
+
+import momentum.momentum_engine as engine
 from momentum.momentum_engine import filter_by_group, rank_momentum
 
 
-def test_rank_momentum_uses_sector_lookup():
+def test_rank_momentum_uses_sector_lookup(monkeypatch):
+    # Fixed prices instead of a live Yahoo download, so the test runs offline and can't flake.
+    closes = pd.DataFrame({"AAPL": [100.0, 110.0], "MSFT": [200.0, 190.0], "NVDA": [50.0, 75.0]})
+    monkeypatch.setattr(engine, "fetch_price_history", lambda tickers, lookback_days: closes[tickers])
     ranked = rank_momentum(["AAPL", "MSFT", "NVDA"], lookback_days=30, include_benchmark=False)
 
-    assert ranked
+    assert [item["ticker"] for item in ranked] == ["NVDA", "AAPL", "MSFT"]   # +50%, +10%, -5%
     sectors = {item["ticker"]: item["sector"] for item in ranked}
     assert sectors["AAPL"] != "Unknown"
     assert sectors["MSFT"] != "Unknown"

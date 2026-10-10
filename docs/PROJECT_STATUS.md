@@ -68,7 +68,6 @@ Behind the scenes:
 13. **Own sentiment model (optional):** train a local model so sentiment runs free and offline. The scaffolding exists (`news_sentiment/model/`, `SENTIMENT_BACKEND=local`) but nothing is trained and PyTorch isn't installed. Plan: save every Claude-labeled headline as training data, fine-tune DistilBERT on public financial datasets plus those headlines, measure agreement with Claude on held-out headlines, then switch via `.env`.
 
 ### Housekeeping
-- One test (`tests/test_momentum_sector_lookup.py::test_rank_momentum_uses_sector_lookup`) downloads live prices, so the suite fails offline.
 - Money is stored as `REAL` rounded to cents; move to integer cents before adding fees or tax lots.
 
 ## Suggested order
