@@ -199,6 +199,10 @@ the stocks it bought itself: your own holdings and options are never touched.
   closing prices. When on, it runs once each trading day from 10:00 until 30
   minutes before the close, and skips runs while prices are loading or stale.
   Set `AUTOPILOT_SCHEDULER=off` to disable the schedule.
+- `python autopilot/backtest_intraday.py` replays the buy rules on the last
+  ~60 trading days with 5-minute data: picks each morning, buys at 10:00,
+  tracks the basket to the close next to SPY. It ignores news, the quote
+  delay and sell rules, and uses today's 500 largest stocks.
 
 
 The **AI** and **Growth** filters are rules, recomputed on every refresh
