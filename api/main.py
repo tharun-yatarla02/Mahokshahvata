@@ -36,15 +36,16 @@ import sys
 import threading
 import time
 from contextlib import asynccontextmanager
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time as clock_time, timedelta, timezone
 from pathlib import Path
 from typing import Annotated
+from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, HTTPException, Depends, Header, Query, Request, Path as FastAPIPath
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel, BeforeValidator, Field, model_validator
+from pydantic import BaseModel, BeforeValidator, Field, create_model, model_validator
 
 
 def _load_dotenv(path=Path(__file__).parent.parent / ".env"):
@@ -75,9 +76,10 @@ from politician_trades.politician_trades import list_politicians, get_trades_for
 from auth.firebase_auth import verify_firebase_token
 from auth.passwords import SESSION_DAYS, hash_password, new_session_token, token_hash, verify_password
 from news_sentiment.news_sentiment_scraper import Anthropic, collect_sentiment_results
-from news_sentiment.suggestions import affected_stocks, build_suggestions, company_aliases, largest_by_sector
+from news_sentiment.suggestions import affected_stocks, build_suggestions, company_aliases, largest_by_sector, news_by_ticker
 from fundamentals.sec_edgar import get_fundamentals
 from explain.stock_explainer import build_facts, explain_with_claude, explain_with_rules
+from autopilot.autopilot import SETTINGS as AUTOPILOT_SETTINGS, clamp_settings, plan_run
 
 @asynccontextmanager
 async def lifespan(app):
@@ -85,6 +87,8 @@ async def lifespan(app):
     # a background thread (see momentum/market_data.py).
     market_data.start()
     engine.fill_unknown_sectors(lambda ticker: (market_data.lookup(ticker) or {}).get("sector"))
+    if os.environ.get("AUTOPILOT_SCHEDULER", "on").lower() != "off":
+        threading.Thread(target=_autopilot_scheduler, name="autopilot", daemon=True).start()
     yield
 
 
@@ -711,6 +715,162 @@ def trade_option(portfolio_id: int, req: TradeOptionRequest, user_id: int = Depe
         raise _trade_error(e)
 
 
+# ---------------------------------------------------------------------------
+# Autopilot: paper-trades a portfolio by rules (see autopilot/autopilot.py)
+# ---------------------------------------------------------------------------
+
+AUTOPILOT_CHECK_SECONDS = 10 * 60
+MARKET_TZ = ZoneInfo("America/New_York")
+AUTOPILOT_WINDOW = (clock_time(10, 0), clock_time(15, 30))  # once per weekday, after the open settles
+_autopilot_lock = threading.Lock()  # one run at a time (manual or scheduled)
+
+AutopilotUpdate = create_model(
+    "AutopilotUpdate",
+    enabled=(bool | None, None),
+    use_news=(bool | None, None),
+    **{key: (int | None, Field(None, ge=low, le=high)) for key, (_, low, high) in AUTOPILOT_SETTINGS.items()},
+)
+
+
+def _portfolio_errors(fn):
+    try:
+        return fn()
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="This portfolio doesn't belong to you")
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+def _autopilot_view(portfolio_id, user_id):
+    state = engine.get_autopilot(portfolio_id, user_id)
+    return {
+        "enabled": bool(state.get("enabled")),
+        "paused_reason": state.get("paused_reason"),
+        "settings": clamp_settings(state.get("settings")),
+        "limits": {key: {"min": low, "max": high} for key, (_, low, high) in AUTOPILOT_SETTINGS.items()},
+        "managed": state.get("managed", []),
+        "last_run_at": state.get("last_run_at"),
+        "runs": engine.list_autopilot_runs(portfolio_id, user_id),
+    }
+
+
+def _autopilot_news(rows):
+    """{ticker: tone and verdict} from the current headlines, or None when
+    there's no real news (feeds down, or only the demo fallback)."""
+    try:
+        data, _ = _sentiment_data(rows)
+    except Exception as e:
+        print(f"[warn] news unavailable for autopilot: {type(e).__name__}", file=sys.stderr)
+        return None
+    return None if data.get("fallback") else news_by_ticker(data["results"], market_data.lookup)
+
+
+def _run_autopilot(portfolio_id, user_id, execute, trigger):
+    """Plans a run and, when execute is set, places its trades and logs it.
+    Trades fill at the same tracked quotes as manual market orders."""
+    with _autopilot_lock:
+        state = engine.get_autopilot(portfolio_id, user_id)
+        status = market_data.status()
+        if status["warming_up"] or status["stale"]:
+            return {"status": "idle", "trades": [], "retry": True,
+                    "notes": ["Market prices are still loading or out of date; try again shortly."]}
+        rows = market_data.snapshot()
+        summary = engine.get_portfolio_summary(portfolio_id, user_id, price_for=_live_price)
+        holdings = [h for h in summary["holdings"] if h.get("instrument_type") != "OPTION"]
+        settings = clamp_settings(state.get("settings"))
+        universe = sorted(rows, key=lambda r: r.get("market_cap") or 0, reverse=True)[:BUILD_UNIVERSE_SIZE]
+        today = datetime.now(MARKET_TZ).date().isoformat()
+        plan = plan_run(settings, summary["cash_balance"], summary["total_portfolio_value"], holdings,
+                        state.get("managed", []), market_data.lookup, universe,
+                        _autopilot_news(rows) if settings["use_news"] else {},
+                        engine.last_close_value(portfolio_id, today))
+        if not execute:
+            return plan
+
+        managed = [t for t in state.get("managed", []) if any(h["ticker"] == t for h in holdings)]
+        for trade in plan["trades"]:
+            try:
+                engine.trade_stock(portfolio_id, user_id, trade["ticker"], trade["quantity"], trade["price"],
+                                   trade["side"], sector=trade.get("sector") or "Unknown", source="autopilot")
+                trade["result"] = "done"
+                if trade["side"] == "BUY":
+                    managed.append(trade["ticker"])
+                elif trade["ticker"] in managed:
+                    managed.remove(trade["ticker"])
+            except ValueError as e:  # cash moved since the plan, etc.
+                trade["result"] = f"skipped: {e}"
+        now = datetime.now(timezone.utc).isoformat()
+        changes = {"managed": managed, "last_run_at": now}
+        if plan["status"] == "paused":
+            changes.update(enabled=False, paused_reason=plan["notes"][-1])
+        engine.update_autopilot(portfolio_id, user_id, changes)
+        engine.save_autopilot_run(portfolio_id, {"at": now, "trigger": trigger, "status": plan["status"],
+                                                 "value_before": summary["total_portfolio_value"],
+                                                 "trades": plan["trades"], "notes": plan["notes"]})
+        return plan
+
+
+def _autopilot_scheduler():
+    """Runs every enabled autopilot once per weekday, inside AUTOPILOT_WINDOW
+    (New York time). Prices are the same ~15-minute-delayed quotes as the app."""
+    while True:
+        time.sleep(AUTOPILOT_CHECK_SECONDS)
+        now = datetime.now(MARKET_TZ)
+        if now.weekday() >= 5 or not (AUTOPILOT_WINDOW[0] <= now.time() <= AUTOPILOT_WINDOW[1]):
+            continue
+        today = now.date().isoformat()
+        try:
+            due = engine.autopilot_portfolios()
+        except Exception as e:
+            print(f"[warn] autopilot: can't list portfolios: {type(e).__name__}: {e}", file=sys.stderr)
+            continue
+        for portfolio_id, user_id in due:
+            try:
+                if engine.get_autopilot(portfolio_id, user_id).get("last_scheduled_date") == today:
+                    continue
+                plan = _run_autopilot(portfolio_id, user_id, execute=True, trigger="scheduled")
+                if not plan.get("retry"):  # stale prices: try again at the next check
+                    engine.update_autopilot(portfolio_id, user_id, {"last_scheduled_date": today})
+            except Exception as e:  # one bad portfolio mustn't stop the others
+                print(f"[warn] autopilot run failed for portfolio {portfolio_id}: {type(e).__name__}: {e}", file=sys.stderr)
+
+
+@app.get("/portfolio/{portfolio_id}/autopilot")
+def get_autopilot(portfolio_id: int, user_id: int = Depends(get_current_user)):
+    """Settings, status and the last 20 runs of this portfolio's autopilot."""
+    return _portfolio_errors(lambda: _autopilot_view(portfolio_id, user_id))
+
+
+@app.put("/portfolio/{portfolio_id}/autopilot")
+def update_autopilot(portfolio_id: int, req: AutopilotUpdate, user_id: int = Depends(get_current_user)):
+    """Turns the autopilot on or off and changes its limits. Turning it on
+    clears a pause from the daily loss limit."""
+    def apply():
+        state = engine.get_autopilot(portfolio_id, user_id)
+        changes = req.model_dump(exclude_none=True)
+        settings = {**state.get("settings", {}), **{k: v for k, v in changes.items() if k != "enabled"}}
+        update = {"settings": clamp_settings(settings)}
+        if "enabled" in changes:
+            update["enabled"] = changes["enabled"]
+            if changes["enabled"]:
+                update["paused_reason"] = None
+        engine.update_autopilot(portfolio_id, user_id, update)
+        return _autopilot_view(portfolio_id, user_id)
+    return _portfolio_errors(apply)
+
+
+@app.post("/portfolio/{portfolio_id}/autopilot/preview")
+def preview_autopilot(portfolio_id: int, user_id: int = Depends(get_current_user)):
+    """The trades the autopilot would make right now, with reasons. Places nothing."""
+    return _portfolio_errors(lambda: _run_autopilot(portfolio_id, user_id, execute=False, trigger="preview"))
+
+
+@app.post("/portfolio/{portfolio_id}/autopilot/run")
+def run_autopilot(portfolio_id: int, user_id: int = Depends(get_current_user)):
+    """Runs the autopilot once now (even while it's switched off) and logs the run."""
+    return _portfolio_errors(lambda: _run_autopilot(portfolio_id, user_id, execute=True, trigger="manual"))
+
+
 @app.get("/portfolio/{portfolio_id}/history")
 def get_history(portfolio_id: int, user_id: int = Depends(get_current_user)):
     try:
@@ -785,6 +945,14 @@ def login_page():
     if page.exists():
         return FileResponse(page, headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"})
     raise HTTPException(status_code=404, detail="Login page not found")
+
+
+@app.get("/autopilot.html")
+def autopilot_page():
+    page = frontend_dir / "autopilot.html"
+    if page.exists():
+        return FileResponse(page, headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"})
+    raise HTTPException(status_code=404, detail="Autopilot page not found")
 
 
 @app.get("/profile.html")

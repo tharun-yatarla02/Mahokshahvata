@@ -206,6 +206,25 @@ def _sector_condition(sector_rows):
     }
 
 
+def news_by_ticker(results, lookup):
+    """{ticker: {"tone_label", "view"}} for every stock named in the news (no
+    cap, unlike build_suggestions), with the same tone and verdict rules.
+    Used by the autopilot to skip or sell stocks with bad news."""
+    buckets = {}
+    for article in results:
+        if article.get("sentiment") == "Unknown":
+            continue
+        for ticker in (t.strip() for t in (article.get("tickers") or "").split(",")):
+            if ticker:
+                _add(buckets.setdefault(ticker, _new_bucket()), article)
+    out = {}
+    for ticker, b in buckets.items():
+        label = _tone_label(_tone(b["positive"], b["negative"], b["mentions"]))
+        row = lookup(ticker)
+        out[ticker] = {"tone_label": label, "view": investment_view(label, row.get("momentum_pct")) if row else None}
+    return out
+
+
 def build_suggestions(results, lookup, market_rows):
     """results: classified articles from the scraper. lookup(ticker) -> the
     tracked market row or None. market_rows: every tracked row (for sector

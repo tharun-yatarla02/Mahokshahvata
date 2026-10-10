@@ -141,3 +141,14 @@ def test_picks_are_positive_news_on_a_rising_trend_best_first():
     assert all(p["view"] == "Good" for p in suggestions["picks"])
     views = {s["ticker"]: s["view"] for s in suggestions["stocks"]}
     assert views == {"AAPL": "Good", "MSFT": "Good", "XOM": "Wait", "TGT": "Wait", "SMLL": "No clear signal"}
+
+
+def test_news_by_ticker_covers_every_stock_with_the_same_verdicts():
+    from news_sentiment.suggestions import news_by_ticker
+    results = [article("Apple beats", "Positive", "AAPL"), article("Microsoft outage", "Negative", "MSFT"),
+               article("Unclassified", "Unknown", "NVDA")]
+    rows = {r["ticker"]: r for r in MARKET}
+    news = news_by_ticker(results, rows.get)
+    assert set(news) == {"AAPL", "MSFT"}                       # Unknown sentiment is skipped
+    assert news["AAPL"]["tone_label"] == "Positive" and news["MSFT"]["tone_label"] == "Negative"
+

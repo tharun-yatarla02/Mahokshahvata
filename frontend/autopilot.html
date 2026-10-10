@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mahokshahvata | Autopilot</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <style>
+      .ap-settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px 18px; }
+      .ap-settings label { display: grid; gap: 6px; }
+      .ap-settings input[type="number"] { width: 100%; }
+      .ap-settings small { color: var(--muted); }
+      .ap-check { display: flex !important; align-items: center; gap: 10px; grid-column: 1 / -1; }
+      .ap-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+      .ap-notes { margin: 12px 0 0; padding-left: 18px; color: var(--muted); }
+      .ap-table { min-width: 720px; }
+      .ap-table td.reason { white-space: normal; min-width: 260px; }
+      .ap-run { border-bottom: 1px solid var(--line); padding: 12px 0; }
+      .ap-run:last-child { border-bottom: 0; }
+      .ap-run summary { cursor: pointer; display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; }
+      .ap-run ul { margin: 10px 0 0; padding-left: 18px; }
+      .ap-run small, .ap-muted { color: var(--muted); }
+      .ap-managed { display: flex; flex-wrap: wrap; gap: 8px; }
+    </style>
+  </head>
+  <body>
+    <nav class="navbar">
+      <div class="nav-inner">
+        <div class="brand">
+          <div class="brand-mark">M</div>
+          <span>Mahokshahvata</span>
+        </div>
+        <div class="nav-links">
+          <a href="/">Overview</a>
+          <a href="/market.html">Market</a>
+          <a href="/portfolio.html">Portfolio</a>
+          <a href="/sentiment.html">Sentiment</a>
+          <a href="/options.html">Options</a>
+          <a href="/autopilot.html" class="active">Autopilot</a>
+          <a href="/billing.html">Billing</a>
+        </div>
+        <div class="nav-actions">
+          <button id="themeToggle" class="theme-toggle" type="button" aria-label="Switch color mode">Light mode</button>
+          <div style="position: relative;">
+            <button id="profileButton" class="profile-button" type="button" aria-label="Open profile">
+              <span class="profile-avatar">U</span>
+              <span id="profileLabel">Profile</span>
+            </button>
+            <div id="profileMenu" class="profile-menu" aria-live="polite">
+              <div class="profile-card">
+                <span id="profileMenuAvatar" class="profile-avatar">U</span>
+                <div>
+                  <p id="profileName" class="profile-name"></p>
+                  <p id="profileEmail" class="profile-email"></p>
+                </div>
+              </div>
+              <div class="profile-menu-actions">
+                <button id="accountButton" type="button" class="secondary">Profile</button>
+                <button id="logoutButton" type="button" class="logout-btn">Logout</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </nav>
+
+    <div class="page">
+      <div class="hero premium-hero">
+        <div class="hero-top hero-top-extended">
+          <div class="hero-copy">
+            <span class="eyebrow">Paper trading · rules-based</span>
+            <h1>Autopilot</h1>
+            <p>Buys the strongest of the 500 largest US stocks (rising and beating the S&amp;P 500, no negative news) and sells its own positions when a stop-loss, trend or news rule says so. It never touches stocks you bought yourself or your options. Paper money only; not investment advice.</p>
+          </div>
+          <div class="hero-metric-box">
+            <span>Status</span>
+            <strong id="apStatus">…</strong>
+            <small id="apLastRun">&nbsp;</small>
+          </div>
+        </div>
+      </div>
+
+      <div class="status warning" id="apPaused" role="status" style="display: none;"></div>
+
+      <div class="grid">
+        <div class="card premium-card">
+          <div class="premium-header">
+            <div>
+              <div class="mini-label">Guardrails</div>
+              <h2>Settings</h2>
+            </div>
+            <button id="apToggle" type="button" disabled>Turn on</button>
+          </div>
+          <form id="apForm" class="ap-settings" novalidate>
+            <label>Most stocks held<input id="max_positions" type="number" step="1" /><small></small></label>
+            <label>Most in one stock (%)<input id="max_position_pct" type="number" step="1" /><small></small></label>
+            <label>Cash kept aside (%)<input id="cash_reserve_pct" type="number" step="1" /><small></small></label>
+            <label>Stop-loss (% below cost)<input id="stop_loss_pct" type="number" step="1" /><small></small></label>
+            <label>Pause after a daily drop of (%)<input id="daily_loss_limit_pct" type="number" step="1" /><small></small></label>
+            <label>Most trades per run<input id="max_trades_per_run" type="number" step="1" /><small></small></label>
+            <label class="ap-check"><input id="use_news" type="checkbox" /> Use news: skip stocks with negative headlines, prefer good news on a rising trend</label>
+          </form>
+          <div class="ap-actions">
+            <button id="apSave" type="button" class="secondary">Save settings</button>
+          </div>
+          <p class="tag" style="margin-top: 12px;">When on, it runs once each weekday between 10:00 and 15:30 New York time, at the same ~15-minute-delayed prices as your own trades.</p>
+          <div class="status" id="apSettingsStatus" role="status" style="margin-top: 14px; display: none;"></div>
+        </div>
+
+        <div class="card premium-card">
+          <div class="premium-header">
+            <div>
+              <div class="mini-label">Positions it manages</div>
+              <h2>Managed stocks</h2>
+            </div>
+          </div>
+          <div id="apManaged" class="ap-managed"><span class="ap-muted">None yet.</span></div>
+          <p class="tag" style="margin-top: 14px;">Only these are ever sold by the autopilot. Sell one yourself on the Portfolio page and it stops managing it.</p>
+        </div>
+      </div>
+
+      <div class="card premium-card" style="margin-top: 20px;">
+        <div class="premium-header">
+          <div>
+            <div class="mini-label">Next run</div>
+            <h2>Planned trades</h2>
+          </div>
+          <div class="ap-actions" style="margin-top: 0;">
+            <button id="apPreview" type="button" class="secondary">Preview</button>
+            <button id="apRun" type="button">Run now</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="ap-table">
+            <thead><tr><th>Action</th><th>Stock</th><th>Shares</th><th>Price</th><th>Value</th><th>Why</th></tr></thead>
+            <tbody id="apPlanBody"><tr><td colspan="6" class="empty-table-row">Click Preview to see what it would do right now. Nothing is traded until you click Run now.</td></tr></tbody>
+          </table>
+        </div>
+        <ul class="ap-notes" id="apPlanNotes"></ul>
+        <div class="status" id="apRunStatus" role="status" style="margin-top: 14px; display: none;"></div>
+      </div>
+
+      <div class="card premium-card" style="margin-top: 20px;">
+        <div class="premium-header">
+          <div>
+            <div class="mini-label">Log</div>
+            <h2>Recent runs</h2>
+          </div>
+        </div>
+        <div id="apRuns"><span class="ap-muted">No runs yet.</span></div>
+      </div>
+    </div>
+
+    <script src="/api.js"></script>
+    <script>
+      const FIELDS = ['max_positions', 'max_position_pct', 'cash_reserve_pct', 'stop_loss_pct', 'daily_loss_limit_pct', 'max_trades_per_run'];
+      const $ = (id) => document.getElementById(id);
+      let portfolioId = null;
+      let enabled = false;
+
+      const money = (v) => `$${Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      const shares = (v) => Number(v).toLocaleString(undefined, { maximumFractionDigits: 6 });
+      const when = (iso) => new Date(iso).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+
+      function show(id, message, kind) {
+        const el = $(id);
+        el.textContent = message;
+        el.className = message ? `status ${kind}` : 'status';
+        el.style.display = message ? '' : 'none';
+      }
+
+      function render(view) {
+        enabled = view.enabled;
+        $('apStatus').textContent = view.enabled ? 'On' : (view.paused_reason ? 'Paused' : 'Off');
+        $('apLastRun').textContent = view.last_run_at ? `Last run ${when(view.last_run_at)}` : 'Never run';
+        $('apToggle').textContent = view.enabled ? 'Turn off' : 'Turn on';
+        $('apToggle').className = view.enabled ? 'secondary' : '';
+        $('apToggle').disabled = false;
+        show('apPaused', !view.enabled && view.paused_reason ? view.paused_reason : '', 'warning');
+        for (const key of FIELDS) {
+          const input = $(key), { min, max } = view.limits[key];
+          input.min = min; input.max = max; input.value = view.settings[key];
+          input.nextElementSibling.textContent = `${min} to ${max}`;
+        }
+        $('use_news').checked = view.settings.use_news;
+        $('apManaged').innerHTML = view.managed.length
+          ? view.managed.map((t) => `<span class="badge">${escapeHtml(t)}</span>`).join('')
+          : '<span class="ap-muted">None yet.</span>';
+        renderRuns(view.runs);
+      }
+
+      function tradeRows(trades) {
+        return trades.map((t) => `
+          <tr>
+            <td><span class="badge ${t.side === 'BUY' ? 'positive' : 'negative'}">${t.side === 'BUY' ? 'Buy' : 'Sell'}</span></td>
+            <td><strong>${escapeHtml(t.ticker)}</strong></td>
+            <td>${shares(t.quantity)}</td>
+            <td>${money(t.price)}</td>
+            <td>${money(t.value)}</td>
+            <td class="reason">${escapeHtml(t.reason)}${t.result && t.result !== 'done' ? `<br><small class="neg">${escapeHtml(t.result)}</small>` : ''}</td>
+          </tr>`).join('');
+      }
+
+      function renderPlan(plan) {
+        $('apPlanBody').innerHTML = plan.trades.length
+          ? tradeRows(plan.trades)
+          : '<tr><td colspan="6" class="empty-table-row">No trades right now.</td></tr>';
+        $('apPlanNotes').innerHTML = plan.notes.map((n) => `<li>${escapeHtml(n)}</li>`).join('');
+      }
+
+      const STATUS_LABEL = { ok: 'Traded', idle: 'No trades', paused: 'Paused itself' };
+      const TRIGGER_LABEL = { manual: 'Run now', scheduled: 'Scheduled' };
+
+      function renderRuns(runs) {
+        if (!runs.length) { $('apRuns').innerHTML = '<span class="ap-muted">No runs yet.</span>'; return; }
+        $('apRuns').innerHTML = runs.map((r) => {
+          const done = r.trades.filter((t) => t.result === 'done');
+          const buys = done.filter((t) => t.side === 'BUY').length, sells = done.length - buys;
+          const detail = [
+            ...r.trades.map((t) => `<li>${t.side === 'BUY' ? 'Bought' : 'Sold'} ${shares(t.quantity)} ${escapeHtml(t.ticker)} at ${money(t.price)}: ${escapeHtml(t.reason)}${t.result !== 'done' ? ` <span class="neg">(${escapeHtml(t.result)})</span>` : ''}</li>`),
+            ...r.notes.map((n) => `<li class="ap-muted">${escapeHtml(n)}</li>`),
+          ].join('');
+          return `
+            <details class="ap-run">
+              <summary>
+                <strong>${when(r.at)}</strong>
+                <span class="badge ${r.status === 'paused' ? 'negative' : ''}">${STATUS_LABEL[r.status] || r.status}</span>
+                <small>${TRIGGER_LABEL[r.trigger] || r.trigger} · ${buys} bought, ${sells} sold · portfolio ${money(r.value_before)}</small>
+              </summary>
+              <ul>${detail || '<li class="ap-muted">Nothing to do.</li>'}</ul>
+            </details>`;
+        }).join('');
+      }
+
+      async function load() {
+        try {
+          portfolioId = await getPortfolioId();
+          render(await apiFetch(`/portfolio/${portfolioId}/autopilot`));
+        } catch (error) {
+          show('apSettingsStatus', error.message, 'error');
+        }
+      }
+
+      async function save(extra = {}) {
+        const body = { use_news: $('use_news').checked, ...extra };
+        for (const key of FIELDS) {
+          const input = $(key), value = Number(input.value);
+          if (!Number.isInteger(value) || value < Number(input.min) || value > Number(input.max)) {
+            input.focus();
+            throw new Error(`${input.parentElement.firstChild.textContent.trim()} must be a whole number from ${input.min} to ${input.max}.`);
+          }
+          body[key] = value;
+        }
+        render(await apiFetch(`/portfolio/${portfolioId}/autopilot`, { method: 'PUT', body: JSON.stringify(body) }));
+      }
+
+      $('apSave').addEventListener('click', async () => {
+        try { await save(); show('apSettingsStatus', 'Settings saved.', 'success'); }
+        catch (error) { show('apSettingsStatus', error.message, 'error'); }
+      });
+
+      $('apToggle').addEventListener('click', async () => {
+        $('apToggle').disabled = true;
+        try {
+          await save({ enabled: !enabled });
+          show('apSettingsStatus', enabled ? 'Autopilot is on. It runs once each weekday; use Run now to start immediately.' : 'Autopilot is off.', 'success');
+        } catch (error) { show('apSettingsStatus', error.message, 'error'); $('apToggle').disabled = false; }
+      });
+
+      async function runOrPreview(path, button, busyText) {
+        const label = button.textContent;
+        button.disabled = true; button.textContent = busyText;
+        show('apRunStatus', '', '');
+        try {
+          const plan = await apiFetch(`/portfolio/${portfolioId}/autopilot/${path}`, { method: 'POST' });
+          renderPlan(plan);
+          return plan;
+        } catch (error) {
+          show('apRunStatus', error.message, 'error');
+        } finally {
+          button.disabled = false; button.textContent = label;
+        }
+      }
+
+      $('apPreview').addEventListener('click', () => runOrPreview('preview', $('apPreview'), 'Checking…'));
+
+      $('apRun').addEventListener('click', async () => {
+        const plan = await runOrPreview('run', $('apRun'), 'Running…');
+        if (!plan) return;
+        const done = plan.trades.filter((t) => t.result === 'done').length;
+        show('apRunStatus', plan.status === 'paused' ? 'Autopilot paused itself: daily loss limit hit.'
+          : done ? `Placed ${done} trade${done === 1 ? '' : 's'}. See them on the Portfolio page.` : 'No trades needed right now.',
+          plan.status === 'paused' ? 'warning' : 'success');
+        load();
+      });
+
+      function setTheme(nextTheme) {
+        document.body.setAttribute('data-theme', nextTheme);
+        try { localStorage.setItem('theme', nextTheme); } catch {}
+        $('themeToggle').textContent = nextTheme === 'dark' ? 'Light mode' : 'Dark mode';
+      }
+      let savedTheme = null;
+      try { savedTheme = localStorage.getItem('theme'); } catch {}
+      setTheme(savedTheme || (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'));
+      $('themeToggle').addEventListener('click', () => setTheme(document.body.dataset.theme === 'light' ? 'dark' : 'light'));
+
+      load();
+    </script>
+  </body>
+</html>

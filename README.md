@@ -27,6 +27,7 @@ ai_stock_platform/
 │   ├── portfolio.html               # holdings, sector allocation, trade history
 │   ├── sentiment.html               # live news sentiment feed
 │   ├── options.html                 # option trades + history
+│   ├── autopilot.html               # rules-based autopilot: settings, preview, run, log
 │   ├── billing.html                 # add cash to a portfolio
 │   ├── styles.css                   # shared light/dark theme
 │   └── ticker-picker.js             # ticker autocomplete used on Portfolio and Options
@@ -44,6 +45,8 @@ ai_stock_platform/
 │   └── model/                       # optional local sentiment model (train + inference)
 ├── paper_trading/
 │   └── paper_trading_engine.py      # simulated portfolios, trades, P/L (stored in Firestore)
+├── autopilot/
+│   └── autopilot.py                 # autopilot decisions: what to buy and sell, and why
 ├── politician_trades/
 │   └── politician_trades.py         # congressional trade disclosures via Quiver Quantitative
 ├── deploy/
@@ -170,6 +173,29 @@ Stock trades are market orders, like a real broker's:
 Options premiums are entered by hand (there's no free options price feed).
 P/L is the account value (stocks at market price, options at cost, plus
 cash) minus everything deposited.
+
+### Autopilot
+
+The Autopilot page (`/autopilot.html`) paper-trades a portfolio by fixed
+rules, in `autopilot/autopilot.py`. It is off by default, and it manages only
+the stocks it bought itself: your own holdings and options are never touched.
+
+- **Buys** from the 500 largest stocks: rising over 90 days and beating the
+  S&P 500, never with negative news. Good news on a rising trend goes first,
+  then the strongest against the S&P 500. Positions are equal-sized.
+- **Sells** its own positions on a stop-loss (down X% from cost), a 90-day
+  trend turned negative, falling 10+ points behind the S&P 500, or negative
+  news while trailing it.
+- **Guardrails** (per portfolio): most stocks held, most in one stock (%),
+  cash kept aside (%), stop-loss (%), most trades per run, and a daily loss
+  limit: if the portfolio is down that much since its last close, it pauses
+  itself and trades nothing until turned back on.
+- **Preview** shows the planned trades with a reason for each; **Run now**
+  places them at the same tracked quotes as manual orders. Every run is
+  logged, and its trades show "by Autopilot" in the trade history.
+- When on, it runs once each weekday between 10:00 and 15:30 New York time.
+  It skips any run while prices are loading or stale. Set
+  `AUTOPILOT_SCHEDULER=off` to disable the schedule (manual runs still work).
 
 
 The **AI** and **Growth** filters are rules, recomputed on every refresh
@@ -347,7 +373,11 @@ user only sees their own portfolios.
 | POST | `/portfolio/{id}/trade-stock` 🔒 | Market order: `ticker`, `side` (`BUY`/`SELL`) and either `quantity` (shares) or `amount` (dollars) |
 | POST | `/portfolio/{id}/trade-option` 🔒 | Buy/sell a call or put |
 | GET | `/portfolio/{id}/history` 🔒 | Daily portfolio value history (for the performance chart) |
-| GET | `/portfolio/{id}/trade-history` 🔒 | Trade history |
+| GET | `/portfolio/{id}/trade-history` 🔒 | Trade history (autopilot trades have `source: "autopilot"`) |
+| GET | `/portfolio/{id}/autopilot` 🔒 | Autopilot status, settings and limits, managed stocks, last 20 runs |
+| PUT | `/portfolio/{id}/autopilot` 🔒 | Turn it on or off (`enabled`) and change limits (`max_positions`, `max_position_pct`, `cash_reserve_pct`, `stop_loss_pct`, `daily_loss_limit_pct`, `max_trades_per_run`, `use_news`) |
+| POST | `/portfolio/{id}/autopilot/preview` 🔒 | The trades it would make now, with reasons; places nothing |
+| POST | `/portfolio/{id}/autopilot/run` 🔒 | Run it once now and log the run |
 
 Example (demo mode):
 

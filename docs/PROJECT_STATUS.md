@@ -27,6 +27,7 @@ tests pass, and GitHub Actions runs them plus a Docker build on every push.
 | **Sentiment** | Headlines from 4 RSS sources (or Benzinga), labelled by Claude Haiku 4.5; each headline tagged with the stocks it names (48 of 49 found on a live test, no wrong tags); Good / Bad / Wait verdicts; "Good to invest in right now" picks |
 | **Options** | Buy and close calls and puts with a cost preview; open positions; options history |
 | **Billing** | Add funds; cash / allocation / risk views |
+| **Autopilot** | Rules-based paper trading of a portfolio: preview planned trades with reasons, run now or once each weekday, guardrails and a daily-loss kill switch; touches only stocks it bought |
 
 Behind the scenes:
 - **Hosting:** Docker image (non-root, health-checked, no secrets inside) in
@@ -76,8 +77,10 @@ Behind the scenes:
 10. **Watchlists and price alerts**, plus a per-stock performance drill-down.
 11. **Options pricing:** premiums are typed by hand (no free options price
     feed) and there's no 100-share contract multiplier.
-12. **AI autopilot:** automatic buy/sell from signals, with explicit risk
-    guardrails (position limits, daily loss limit, kill switch).
+12. ~~**AI autopilot**~~ ✅ Done Oct 10: rules-based autopilot with guardrails
+    and a daily-loss kill switch (see README → Autopilot). Next steps: a
+    performance view comparing it to the S&P 500, and trimming positions that
+    grow past the per-stock cap.
 13. **Own sentiment model (optional):** train a local model so sentiment runs
     free and offline. Scaffolding exists (`news_sentiment/model/`,
     `SENTIMENT_BACKEND=local`) but nothing is trained and PyTorch isn't
@@ -113,5 +116,5 @@ Behind the scenes:
 2. Replace the hardcoded labels (item 6): small, and the first thing a reviewer
    notices on the Overview page.
 3. Portfolio build and multiple portfolios UI (items 7–8): the backend exists.
-4. Watchlists and alerts (item 10), then options pricing (11), then autopilot
-   (12) once the rest is stable. The own sentiment model (13) is independent.
+4. Watchlists and alerts (item 10), then options pricing (11). The own
+   sentiment model (13) is independent.

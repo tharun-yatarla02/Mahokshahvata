@@ -513,9 +513,11 @@ class PaperTradingEngine:
         return {"cash": round(float(portfolio["cash_balance"]), 2), "owned": float(held["quantity"]) if held else 0.0}
 
     @_locked
-    def trade_stock(self, portfolio_id, user_id, ticker, quantity, price, side="BUY", timestamp=None, sector="Unknown"):
+    def trade_stock(self, portfolio_id, user_id, ticker, quantity, price, side="BUY", timestamp=None, sector="Unknown",
+                    source=None):
         """Market order for `quantity` shares (fractional allowed) at `price`,
-        which must be the current market price. See the order rules above."""
+        which must be the current market price. See the order rules above.
+        source: who placed it, e.g. "autopilot"; stored on the transaction."""
         portfolio = self._assert_owner(portfolio_id, user_id)
         ticker = (ticker or "").strip().upper()
         if not ticker:
@@ -564,7 +566,7 @@ class PaperTradingEngine:
 
         batch.update(self._portfolio_ref(portfolio_id), {"cash_balance": cash_after})
         self._new_transaction(batch, portfolio_id, ticker=ticker, instrument_type="STOCK", type=side,
-                              quantity=quantity, price=trade_price, timestamp=ts)
+                              quantity=quantity, price=trade_price, timestamp=ts, **({"source": source} if source else {}))
         batch.commit()
 
         return {
@@ -781,6 +783,40 @@ class PaperTradingEngine:
     def get_history(self, portfolio_id, user_id):
         self._assert_owner(portfolio_id, user_id)
         return self._snapshots(portfolio_id)
+
+    # -- autopilot (decisions are in autopilot/autopilot.py) ----------
+
+    @_locked
+    def get_autopilot(self, portfolio_id, user_id):
+        """The portfolio's autopilot state: enabled, settings, managed tickers, ..."""
+        return dict(self._assert_owner(portfolio_id, user_id).get("autopilot") or {})
+
+    @_locked
+    def update_autopilot(self, portfolio_id, user_id, changes):
+        state = {**(self._assert_owner(portfolio_id, user_id).get("autopilot") or {}), **changes}
+        self._portfolio_ref(portfolio_id).update({"autopilot": state})
+        return state
+
+    @_locked
+    def save_autopilot_run(self, portfolio_id, run):
+        self._portfolio_ref(portfolio_id).collection("autopilot_runs").add(run)
+
+    @_locked
+    def list_autopilot_runs(self, portfolio_id, user_id, limit=20):
+        self._assert_owner(portfolio_id, user_id)
+        rows = [r.to_dict() for r in self._portfolio_ref(portfolio_id).collection("autopilot_runs").stream()]
+        return sorted(rows, key=lambda r: r["at"], reverse=True)[:limit]
+
+    @_locked
+    def autopilot_portfolios(self):
+        """(portfolio_id, user_id) for every portfolio with the autopilot on."""
+        return [(p["id"], p["user_id"]) for p in self._where("portfolios", "autopilot.enabled", True)]
+
+    @_locked
+    def last_close_value(self, portfolio_id, before_date):
+        """The most recent daily value recorded before `before_date` (ISO), or None."""
+        earlier = [s for s in self._snapshots(portfolio_id) if s["as_of"] < before_date]
+        return earlier[-1]["total_value"] if earlier else None
 
     @_locked
     def get_trade_history(self, portfolio_id, user_id):

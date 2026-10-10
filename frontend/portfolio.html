@@ -19,6 +19,7 @@
           <a href="/portfolio.html" class="active">Portfolio</a>
           <a href="/sentiment.html">Sentiment</a>
           <a href="/options.html">Options</a>
+          <a href="/autopilot.html">Autopilot</a>
           <a href="/billing.html">Billing</a>
         </div>
         <div class="nav-actions">
@@ -754,7 +755,7 @@
               <td>${timestamp}</td>
               <td><span class="trade-pill ${sideClass}">${escapeHtml(side)}</span></td>
               <td>${escapeHtml(symbol)}</td>
-              <td>${formatShares(quantity)} shares<br><small>${formatCurrency(price)} each · ${formatCurrency(quantity * price)}</small></td>
+              <td>${formatShares(quantity)} shares<br><small>${formatCurrency(price)} each · ${formatCurrency(quantity * price)}${trade.source === 'autopilot' ? ' · by Autopilot' : ''}</small></td>
             </tr>
           `;
         }).join('');
