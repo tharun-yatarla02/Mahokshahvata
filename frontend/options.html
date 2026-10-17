@@ -56,9 +56,9 @@
             <p>Trade paper options and review trade history, expiries, and premium activity in a single desk view.</p>
           </div>
           <div class="hero-metric-box">
-            <span>Strategy mode</span>
-            <strong>Defined risk</strong>
-            <small>Paper option desk</small>
+            <span>Open positions</span>
+            <strong id="openOptionsValue">--</strong>
+            <small id="openOptionsSub">Loading…</small>
           </div>
         </div>
         <div class="hero-bottom-row">
@@ -311,6 +311,11 @@
           ['Account value', formatCurrency(summary.total_portfolio_value), ''],
           ['Total P/L', `${formatSignedCurrency(pnl)} (${Number(summary.total_pl_pct || 0).toFixed(2)}%)`, pnl >= 0 ? 'pos' : 'neg'],
         ].map(([label, value, cls]) => `<li><span>${label}</span> <strong class="${cls}">${escapeHtml(value)}</strong></li>`).join('');
+        const contracts = options.reduce((sum, h) => sum + Number(h.quantity || 0), 0);
+        $('openOptionsValue').textContent = String(options.length);
+        $('openOptionsSub').textContent = options.length
+          ? `${contracts} contract${contracts === 1 ? '' : 's'} · ${formatCurrency(optionsValue)} at cost`
+          : 'No open calls or puts';
         renderPositions(options);
         renderCostPreview();
       }

@@ -480,6 +480,7 @@ def get_momentum(
         "results": page,
         "sectors": market_data.sectors(),
         "status": market_data.status(),
+        "market": _market_view(),
     }
 
 

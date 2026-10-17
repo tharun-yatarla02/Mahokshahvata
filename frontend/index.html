@@ -56,9 +56,9 @@
             <p>AI-assisted market monitoring, sentiment scanning, and paper-trading workflow in one premium command center.</p>
           </div>
           <div class="hero-metric-box">
-            <span>Signal quality</span>
-            <strong>Strong</strong>
-            <small>Adaptive opportunity scan</small>
+            <span>News tone</span>
+            <strong id="newsToneValue">--</strong>
+            <small id="newsToneSub">Reading headlines…</small>
           </div>
         </div>
         <div class="hero-bottom-row">
@@ -68,7 +68,7 @@
             <button class="sector-pill" type="button" data-sector="Health" aria-pressed="false">Health</button>
             <button class="sector-pill" type="button" data-sector="Energy" aria-pressed="false">Energy</button>
           </div>
-          <span class="badge">Demo Live</span>
+          <span class="badge">Paper trading</span>
         </div>
       </div>
 
@@ -105,13 +105,12 @@
         </div>
 
         <div class="card premium-card">
-          <h2>AI Market Signal</h2>
-          <p>Growth momentum remains strongest in technology and AI infrastructure names.</p>
-          <ul class="list">
-            <li><span class="tag">Technology</span> <span class="pos">Bullish</span></li>
-            <li><span class="tag">Healthcare</span> <span class="pos">Stable</span></li>
-            <li><span class="tag">Energy</span> <span class="neg">Cautious</span></li>
+          <h2>Sectors in the News</h2>
+          <p id="sectorSignalNote">Tone of today's headlines for the most-covered sectors, with each sector's median 90-day momentum.</p>
+          <ul class="list" id="sectorSignalList">
+            <li><span>Loading headlines…</span></li>
           </ul>
+          <a href="/sentiment.html">Open Sentiment →</a>
         </div>
       </div>
 
@@ -255,6 +254,41 @@
         }
       }
 
+      // News tone (hero) and "Sectors in the News", from the same cached
+      // /news-sentiment call the Sentiment page makes.
+      async function loadNewsSignals() {
+        const toneValue = document.getElementById('newsToneValue');
+        const toneSub = document.getElementById('newsToneSub');
+        const list = document.getElementById('sectorSignalList');
+        try {
+          const data = await apiFetch('/news-sentiment');
+          const suggestions = data.suggestions || {};
+          const overview = suggestions.overview || {};
+          if (data.fallback || !overview.headlines) {
+            toneValue.textContent = '--';
+            toneSub.textContent = 'No live headlines right now';
+            list.innerHTML = '<li><span>No live headlines right now.</span></li>';
+            return;
+          }
+          const net = (overview.positive - overview.negative) / overview.headlines;
+          toneValue.textContent = net >= 0.25 ? 'Positive' : net <= -0.25 ? 'Negative' : 'Mixed';
+          toneSub.textContent = `${overview.headlines} headlines · ${overview.positive} positive, ${overview.negative} negative`;
+          const sectors = (suggestions.sectors || []).slice(0, 4);
+          const toneClass = { Positive: 'pos', Negative: 'neg' };
+          list.innerHTML = sectors.length
+            ? sectors.map((item) => {
+                const momentum = item.condition?.median_momentum_pct;
+                const trend = momentum == null ? '' : ` · <span class="${momentum >= 0 ? 'pos' : 'neg'}">${formatPercent(momentum)}</span>`;
+                return `<li><span class="tag">${escapeHtml(item.sector)}</span> <span><span class="${toneClass[item.tone_label] || ''}">${escapeHtml(item.tone_label)}</span>${trend}</span></li>`;
+              }).join('')
+            : '<li><span>No sector is in today\'s headlines.</span></li>';
+        } catch (error) {
+          toneValue.textContent = '--';
+          toneSub.textContent = 'News unavailable';
+          list.innerHTML = '<li><span>Could not load headlines.</span></li>';
+        }
+      }
+
       document.querySelectorAll('.hero-pill-row .sector-pill').forEach((pill) => {
         pill.addEventListener('click', () => {
           document.querySelectorAll('.hero-pill-row .sector-pill').forEach((other) => {
@@ -268,6 +302,7 @@
       applyTheme();
       refreshOverviewData();
       loadTopMovers('AI');
+      loadNewsSignals();
     </script>
   </body>
 </html>

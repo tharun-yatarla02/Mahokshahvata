@@ -215,7 +215,8 @@ The **AI** and **Growth** filters are rules, recomputed on every refresh
   S&P 500.
 
 `/momentum` also returns `status.quotes_updated_at`, `status.price_source`
-and `status.stale` (no successful price refresh in 10 minutes). The Market
+and `status.stale` (no successful price refresh in 10 minutes), plus `market`:
+whether the US market is open now, with its closing time or next open. The Market
 page and the Portfolio trade form show the price time and source, and warn
 when prices are stale.
 

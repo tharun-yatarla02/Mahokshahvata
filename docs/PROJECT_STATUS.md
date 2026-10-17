@@ -1,6 +1,6 @@
 # Project Status
 
-_Last updated: 2026-10-17 (sign-in rate limiting)_
+_Last updated: 2026-10-17 (sign-in rate limiting, live page labels)_
 
 Picking this up? Read [HANDOFF.md](HANDOFF.md) first (setup, architecture,
 gotchas, and a starting point for each open task).
@@ -61,11 +61,10 @@ Behind the scenes:
    Firebase Admin key.
 
 ### Placeholder content
-6. **Hardcoded labels** that never change: Overview "Signal quality: Strong"
-   and the "AI Market Signal" card (Technology Bullish / Healthcare Stable /
-   Energy Cautious); Portfolio "Balanced Growth"; Options "Defined risk";
-   Market "Scanning in real time". Compute them (e.g. from the sentiment
-   sector suggestions) or remove them.
+6. ~~**Hardcoded labels**~~ ✅ Done Oct 17: Overview shows the news tone and
+   "Sectors in the News" (tone + median momentum) from `/news-sentiment`;
+   Market shows open/closed from the NYSE calendar; Portfolio its largest
+   sector; Options its open positions.
 
 ### Backend features with no screen yet
 7. **Build portfolio from momentum** (`POST /portfolio/{id}/build`).
@@ -113,8 +112,7 @@ Behind the scenes:
 
 ## Suggested order
 1. ~~Sign-in rate limiting (item 1)~~ ✅
-2. Replace the hardcoded labels (item 6): small, and the first thing a reviewer
-   notices on the Overview page.
+2. ~~Replace the hardcoded labels (item 6)~~ ✅
 3. Portfolio build and multiple portfolios UI (items 7–8): the backend exists.
 4. Watchlists and alerts (item 10), then options pricing (11). The own
    sentiment model (13) is independent.

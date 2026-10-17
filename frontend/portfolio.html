@@ -56,9 +56,9 @@
             <p>Monitor capital allocation, position quality, and portfolio momentum in one premium overview.</p>
           </div>
           <div class="hero-metric-box">
-            <span>Strategy</span>
-            <strong>Balanced Growth</strong>
-            <small>Adaptive allocation</small>
+            <span>Largest sector</span>
+            <strong id="topSectorValue">--</strong>
+            <small id="topSectorSub">No holdings yet</small>
           </div>
         </div>
         <div class="hero-bottom-row">
@@ -394,10 +394,15 @@
         const entries = Object.entries(sectorBreakdownData || {});
         if (!entries.length) {
           sectorBreakdown.innerHTML = '<div class="empty-state">No sector data yet.</div>';
+          document.getElementById('topSectorValue').textContent = '--';
+          document.getElementById('topSectorSub').textContent = 'No holdings yet';
           return;
         }
 
         const total = entries.reduce((sum, [, value]) => sum + Number(value || 0), 0) || 1;
+        const [topSector, topValue] = entries.reduce((best, entry) => (Number(entry[1] || 0) > Number(best[1] || 0) ? entry : best));
+        document.getElementById('topSectorValue').textContent = topSector;
+        document.getElementById('topSectorSub').textContent = `${((Number(topValue || 0) / total) * 100).toFixed(1)}% of holdings value`;
         sectorBreakdown.innerHTML = entries.map(([sector, value]) => {
           const numericValue = Number(value || 0);
           const width = Math.max((numericValue / total) * 100, 6);

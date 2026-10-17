@@ -56,9 +56,9 @@
             <p>Track market breadth, sector rotation, and signal quality across the most relevant equities in one premium view.</p>
           </div>
           <div class="hero-metric-box">
-            <span>Market state</span>
-            <strong>Active</strong>
-            <small>Scanning in real time</small>
+            <span>US market</span>
+            <strong id="marketStateValue">--</strong>
+            <small id="marketStateSub">Checking market hours…</small>
           </div>
         </div>
         <div class="hero-bottom-row">
@@ -511,6 +511,16 @@
         loadMomentumData();
       }
 
+      // Open or closed, from the NYSE calendar on the server (holidays, early closes).
+      function renderMarketState(market) {
+        if (!market) return;
+        const newYork = (iso, options) => new Date(iso).toLocaleString([], { timeZone: 'America/New_York', ...options });
+        document.getElementById('marketStateValue').textContent = market.open ? 'Open' : 'Closed';
+        document.getElementById('marketStateSub').textContent = market.open
+          ? `Until ${newYork(market.closes_at, { hour: 'numeric', minute: '2-digit' })} New York time`
+          : `Opens ${newYork(market.next_open, { weekday: 'short', hour: 'numeric', minute: '2-digit' })} New York time`;
+      }
+
       async function loadMomentumData() {
         const requestId = ++marketRequest;
         clearTimeout(warmupTimer);
@@ -536,6 +546,7 @@
             ? new Date(status.quotes_updated_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
             : '--';
           document.getElementById('priceSourceNote').textContent = `Refreshes every 5 min · ${status.price_source || 'delayed quotes'}`;
+          renderMarketState(data.market);
 
           if (status.warming_up) {
             marketTableBody.innerHTML = '<tr><td colspan="7">Loading market data…</td></tr>';
