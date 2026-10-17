@@ -310,7 +310,7 @@ class PaperTradingEngine:
 
     def log_auth_event(self, event, user_id=None, method=None, email=None, ip=None, user_agent=None):
         """Appends a sign-in history row: event is register, login,
-        login_failed or logout; method is email, google or demo."""
+        login_failed, login_throttled or logout; method is email, google or demo."""
         self.db.collection("auth_events").add({
             "event": event, "user_id": user_id, "method": method, "email": email,
             "ip": ip, "user_agent": user_agent, "at": _now(),

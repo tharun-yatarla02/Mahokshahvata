@@ -7,6 +7,7 @@ Each engine gets its own project id, so tests never see each other's data.
 """
 import os
 import socket
+import sys
 import uuid
 
 import pytest
@@ -27,3 +28,12 @@ def make_engine():
     except OSError:
         pytest.fail("Firestore emulator isn't running: gcloud emulators firestore start --host-port=127.0.0.1:8681")
     return lambda: PaperTradingEngine(firestore.Client(project=f"test-{uuid.uuid4().hex[:12]}"))
+
+
+@pytest.fixture(autouse=True)
+def _fresh_login_limiter():
+    """Every test client signs in from the same address, so failed logins in
+    one test mustn't throttle the next."""
+    api_main = sys.modules.get("api.main")
+    if api_main:
+        api_main.login_limiter.reset()

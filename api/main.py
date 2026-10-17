@@ -75,6 +75,7 @@ from paper_trading.paper_trading_engine import (
 from politician_trades.politician_trades import list_politicians, get_trades_for_politician, refresh_cache
 from auth.firebase_auth import verify_firebase_token
 from auth.passwords import SESSION_DAYS, hash_password, new_session_token, token_hash, verify_password
+from auth.rate_limit import LoginRateLimiter
 from news_sentiment.news_sentiment_scraper import Anthropic, collect_sentiment_results
 from news_sentiment.suggestions import affected_stocks, build_suggestions, company_aliases, largest_by_sector, news_by_ticker
 from fundamentals.sec_edgar import get_fundamentals
@@ -301,14 +302,17 @@ class GoogleLoginRequest(BaseModel):
     id_token: str = Field(min_length=1, max_length=4096)
 
 
-def _log_auth(request, event, user_id=None, method=None, email=None):
-    """Records a sign-in history row in Firestore (auth_events). Caddy
-    replaces X-Forwarded-For with the real client address, so it can't be
-    spoofed from outside; without Caddy (local runs) the socket address is used."""
+def _client_ip(request):
+    """Caddy replaces X-Forwarded-For with the real client address, so it can't
+    be spoofed from outside; without Caddy (local runs) the socket address is used."""
     forwarded = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
-    ip = forwarded or (request.client.host if request.client else None)
+    return forwarded or (request.client.host if request.client else None)
+
+
+def _log_auth(request, event, user_id=None, method=None, email=None):
+    """Records a sign-in history row in Firestore (auth_events)."""
     engine.log_auth_event(event, user_id=user_id, method=method, email=email,
-                          ip=ip, user_agent=request.headers.get("user-agent"))
+                          ip=_client_ip(request), user_agent=request.headers.get("user-agent"))
 
 
 def _start_session(user_id):
@@ -332,21 +336,32 @@ def register(req: RegisterRequest, request: Request):
     return _start_session(user_id)
 
 
-# ponytail: no rate limit on login; add per-IP/per-email throttling before
-# exposing this beyond localhost.
+login_limiter = LoginRateLimiter()
+
+
 @app.post("/auth/login")
 def login(req: LoginRequest, request: Request):
     """Signs in with email and password. The same message for an unknown
     email and a wrong password. (Registration still reveals whether an email
-    is taken, via 409, as most sign-up forms do.)"""
+    is taken, via 409, as most sign-up forms do.) Repeated failures for one
+    email or from one IP are refused with 429 for a while (auth/rate_limit.py)."""
     email = req.email.strip().lower()
+    ip = _client_ip(request)
+    wait = login_limiter.retry_after(email, ip)
+    if wait:
+        _log_auth(request, "login_throttled", method="email", email=email)
+        minutes = -(-wait // 60)
+        raise HTTPException(status_code=429, headers={"Retry-After": str(wait)},
+                            detail=f"Too many sign-in attempts. Try again in {minutes} minute{'s' if minutes > 1 else ''}.")
     found = engine.get_local_login(email)
     if found and found[1] is None:  # one account per email, and this one uses Google
         _log_auth(request, "login_failed", found[0], "email", email)
         raise HTTPException(status_code=400, detail="This account signs in with Google. Use Continue with Google.")
     if not found or not verify_password(req.password, found[1]):
+        login_limiter.record_failure(email, ip)
         _log_auth(request, "login_failed", found[0] if found else None, "email", email)
         raise HTTPException(status_code=401, detail="Invalid email or password")
+    login_limiter.record_success(email)
     _log_auth(request, "login", found[0], "email", email)
     return _start_session(found[0])
 

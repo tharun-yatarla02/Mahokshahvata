@@ -19,6 +19,7 @@ ai_stock_platform/
 │   └── main.py                      # FastAPI app: REST endpoints + serves the frontend
 ├── auth/
 │   ├── passwords.py                 # password hashing + session tokens for email/password accounts
+│   ├── rate_limit.py                # throttles repeated failed sign-ins per email and per IP
 │   ├── firebase_auth.py             # verifies Firebase ID tokens (plus local demo mode)
 │   └── README.md                    # Firebase project setup + frontend sign-in snippet
 ├── frontend/                        # static dashboard pages, served by the API
@@ -318,8 +319,14 @@ sent to the sign-in page and returned where they were afterwards.
   `localStorage` and sends as `Authorization: Bearer <token>`. The `sessions`
   collection stores only its SHA-256 hash, with a 30-day expiry. Logging out
   deletes it; changing the password deletes the user's other sessions.
-- **Sign-in history:** every register, login, failed login and logout is
-  recorded in the `auth_events` collection (user, method, IP, browser, time).
+- **Sign-in throttling:** after 5 failed sign-ins for one email, or 20 from
+  one IP address, within 15 minutes, `POST /auth/login` returns 429 ("Too many
+  sign-in attempts. Try again in N minutes", with `Retry-After`) until the
+  oldest failure is 15 minutes old, even for the right password. A successful
+  sign-in clears that email's count. Counts are in memory (`auth/rate_limit.py`),
+  so a restart clears them.
+- **Sign-in history:** every register, login, failed login, throttled login
+  and logout is recorded in the `auth_events` collection (user, method, IP, browser, time).
 - **One account per email**, whatever the sign-in method:
   - Registering, or changing a profile email, to an address another account
     uses is refused (409). When that account uses Google, the message says so.
@@ -355,7 +362,7 @@ user only sees their own portfolios.
 |---|---|---|
 | POST | `/auth/google` | Exchange a Firebase ID token from the Google popup (`id_token`) for a session token. An email that already has an account signs into it; 409 if the email is taken and unverified |
 | POST | `/auth/register` | Create an email/password account (`name`, `email`, `password` of 8+ characters). Returns a session token; 409 if any account uses the email |
-| POST | `/auth/login` | Sign in (`email`, `password`). Returns a session token; 401 for a wrong email or password, 400 if the account signs in with Google |
+| POST | `/auth/login` | Sign in (`email`, `password`). Returns a session token; 401 for a wrong email or password, 400 if the account signs in with Google, 429 after too many failures |
 | POST | `/auth/logout` | End this session |
 | GET | `/auth/me` 🔒 | The signed-in user's profile |
 | PATCH | `/auth/me` 🔒 | Change name, and email for email/password accounts; 409 if another account uses the email |
@@ -432,8 +439,7 @@ pytest
 See [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) for the full roadmap.
 
 - **Accounts** have no email verification or password reset (the app
-  sends no email), and no rate limiting on sign-in. Add both before
-  exposing the app beyond your own machine. A forgotten password currently
+  sends no email). Add both before opening the app to the public. A forgotten password currently
   means a locked-out account. Email verification would also let a joined
   account keep its password (see [Accounts and sign-in](#accounts-and-sign-in)).
 - **Sign-in history** (`auth_events`, with IP and browser) is kept forever;
@@ -449,8 +455,11 @@ See [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) for the full roadmap.
   still misses nicknames not in `company_tickers.csv` and names that are
   everyday words (e.g. "American" for American Airlines). If the feed has no relevant headlines, it returns
   a curated demo fallback.
-- **Paper trading** buys whole shares only; leftover cash stays as cash.
+- **Building a portfolio from momentum** (`POST /portfolio/{id}/build`) buys
+  whole shares only; leftover cash stays as cash. Manual orders can be
+  fractional.
 - **One server process** — trades are serialized by an in-process lock, so
   run a single uvicorn worker. Several would need Firestore transactions.
-- **No scheduled jobs** — momentum and news update only when the endpoints
-  are called. A deployment should add a scheduler to refresh data.
+- **News is refreshed on demand** — market data refreshes in a background
+  thread and the autopilot runs on its own schedule, but headlines are only
+  fetched when `/news-sentiment` is called (cached 5 minutes).

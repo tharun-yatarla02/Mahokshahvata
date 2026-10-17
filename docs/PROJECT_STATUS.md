@@ -1,6 +1,6 @@
 # Project Status
 
-_Last updated: 2026-10-10 (after Milestone 3: containers)_
+_Last updated: 2026-10-17 (sign-in rate limiting)_
 
 Picking this up? Read [HANDOFF.md](HANDOFF.md) first (setup, architecture,
 gotchas, and a starting point for each open task).
@@ -12,7 +12,7 @@ http://34.122.164.209 on a Google Cloud VM (firewalled to the team's IPs), with
 real sign-in and accounts stored in Cloud Firestore. It tracks the 3,000
 largest US stocks (~15 min delayed), reads live news with Claude, and lets each
 user paper-trade stocks and options. The same image (`app:v1` in Artifact
-Registry) runs on laptops with `docker compose up` and on the VM. 117 automated
+Registry) runs on laptops with `docker compose up` and on the VM. 144 automated
 tests pass, and GitHub Actions runs them plus a Docker build on every push.
 
 ## What works today
@@ -46,8 +46,8 @@ Behind the scenes:
 ## What's left
 
 ### Security and accounts
-1. **Sign-in rate limiting.** Passwords can be guessed without limit. Add
-   per-IP and per-email throttling on `POST /auth/login`. Highest priority.
+1. ~~**Sign-in rate limiting.**~~ ✅ Done Oct 17: 5 failures per email or 20
+   per IP in 15 minutes return 429 (`auth/rate_limit.py`, in memory).
 2. **Forgot password (parked).** Needs a way to send email. Firebase can send
    reset emails only for accounts it manages, and our email/password accounts
    are managed by the app, so this needs either moving them to Firebase Auth or
@@ -112,7 +112,7 @@ Behind the scenes:
 - **Tests no longer need the internet** (the momentum test used live prices).
 
 ## Suggested order
-1. Sign-in rate limiting (item 1): small, and closes the biggest risk.
+1. ~~Sign-in rate limiting (item 1)~~ ✅
 2. Replace the hardcoded labels (item 6): small, and the first thing a reviewer
    notices on the Overview page.
 3. Portfolio build and multiple portfolios UI (items 7–8): the backend exists.
