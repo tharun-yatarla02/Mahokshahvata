@@ -11,7 +11,7 @@ gotchas, and a starting point for each open task).
 http://34.122.164.209 on a Google Cloud VM (firewalled to the team's IPs), with
 real sign-in and accounts stored in Cloud Firestore. It tracks the 3,000
 largest US stocks (~15 min delayed), reads live news with Claude, and lets each
-user paper-trade stocks and options. The same image (`app:v1` in Artifact
+user paper-trade stocks and options. The same image (`app:v2` in Artifact
 Registry) runs on laptops with `docker compose up` and on the VM. 144 automated
 tests pass, and GitHub Actions runs them plus a Docker build on every push.
 
@@ -92,6 +92,12 @@ Behind the scenes:
     switches quotes and history over; streaming quotes are not built.
 15. **Money as integer cents** instead of decimals rounded to cents, before
     adding fees or tax lots.
+
+## Done Oct 17
+
+- **`v2` deployed** to the VM (`sha256:b9e27321…`; roll back with
+  `TAG=v1 ./deploy/docker_deploy.sh`): sign-in rate limiting, live page labels
+  instead of hardcoded ones, and the autopilot from Oct 10.
 
 ## Done since the last update (Sep 24 → Oct 10)
 
