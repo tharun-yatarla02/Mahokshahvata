@@ -580,6 +580,7 @@ h1, h2, h3 { font-family: var(--font-display); color: var(--text); }
 }
 .list li:last-child { border-bottom: 0; padding-bottom: 0; }
 .list li:first-child { padding-top: 0; }
+.list + a { display: inline-block; margin-top: 16px; }  /* "View … →" link under a card's list */
 .list .pos, .pos { color: var(--pos); font-weight: 500; }
 .list .neg, .neg { color: var(--neg); font-weight: 500; }
 

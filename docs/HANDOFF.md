@@ -8,7 +8,7 @@ how it fits together, avoid the known traps, and start on the next task.
 - **This file:** how to work on it.
 
 _Last verified: 2026-09-24, from a fresh `git clone` on macOS with Python 3.11
-(install ~20 s, 82 tests pass, all pages load)._
+(install ~20 s, all pages load). Tests last run 2026-10-17: 144 pass._
 
 ---
 
@@ -228,10 +228,8 @@ Starting points for the next tasks:
 
 | Task | Where to start |
 |---|---|
-| **Real stock chart** on the Market page (currently fabricated) | `renderMarketDetail()` in `frontend/market.html` builds `chartSeries` from fixed percentages. Add an endpoint returning daily closes (yfinance, cached like `_market_price`) and plot them |
-| **Replace hardcoded labels** ("Signal quality: Strong", static "AI Market Signal" card, "Balanced Growth", "Defined risk", "Scanning in real time") | Search those strings in `frontend/*.html`. The sector signals already exist in `/news-sentiment` → `suggestions.sectors` |
-| **Related news** shows unrelated headlines when none match | `getRelatedNews()` in `frontend/market.html` (the `headlineMatches.length ? ... : ...` fallback) |
-| **Real sign-in** | `getAuthToken()` in `frontend/api.js` (the only place the token is set) + the Firebase snippet in `auth/README.md`; turn off `USE_DEMO_AUTH` |
 | **Portfolio builder / multiple portfolios UI** | Endpoints exist: `POST /portfolio/{id}/build`, `GET/POST /portfolio`. Pages pick the portfolio via `getPortfolioId()` in `frontend/api.js` |
+| **Sign-in history retention** | `log_auth_event()` in `paper_trading/paper_trading_engine.py` writes `auth_events`; add a cleanup (or a Firestore TTL policy on `at`) for rows older than ~90 days |
+| **Watchlists and price alerts** | New per-user Firestore collection; prices come from `market_data.lookup()` in `api/main.py` |
+| **Options contract multiplier** | Cost is `quantity × premium` in `trade_option()` (engine) and `renderCostPreview()` in `frontend/options.html`; a real contract is 100 shares |
 | **Own sentiment model** | `news_sentiment/model/` + `SENTIMENT_BACKEND=local`. Plan in PROJECT_STATUS item 13. Note `classify_all_local()` reloads the model on every call; cache it |
-| **Hosting** | Needs a Dockerfile/deploy config, production `.env` (Firebase credentials, `ALLOWED_ORIGINS`, API key), and one server process (or Postgres) |

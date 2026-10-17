@@ -7,7 +7,7 @@ A short checklist. The [README](../README.md) has the full API and project layou
 - **Python 3.11+** (tested on 3.14). On macOS use `python3`, since there's no `python`.
 - **Git**
 - An internet connection. Market data comes from Nasdaq and yfinance, and news from RSS feeds.
-- **Java 21+** for the local Firestore emulator (`brew install openjdk`; it doesn't replace your default Java), and the emulator itself: `gcloud components install cloud-firestore-emulator`.
+- **Java 21+** for the local Firestore emulator (`brew install openjdk@21`; it doesn't replace your default Java), and the emulator itself: `gcloud components install cloud-firestore-emulator`.
 
 Accounts, portfolios and trades live in Cloud Firestore (the Firebase project's database). Locally you run against the emulator, so you never touch real data. Caches are JSON/SQLite files, and the frontend is plain HTML/JS served by the API.
 
@@ -23,7 +23,7 @@ python3 -m venv .venv
 Start the Firestore emulator in one terminal (data is kept in memory and is gone when you stop it):
 
 ```bash
-PATH=/opt/homebrew/opt/openjdk/bin:$PATH gcloud emulators firestore start --host-port=127.0.0.1:8681
+PATH=/opt/homebrew/opt/openjdk@21/bin:$PATH gcloud emulators firestore start --host-port=127.0.0.1:8681
 ```
 
 Then the app in another:
