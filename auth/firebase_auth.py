@@ -15,7 +15,7 @@ Why Firebase instead of raw Google Cloud OAuth:
     registration needed.
 
 Setup: checking an ID token needs only the Firebase project id
-(FIREBASE_PROJECT_ID, default mahokshahvata-ae5f9): the SDK verifies the
+(FIREBASE_PROJECT_ID, default mahokshahvata): the SDK verifies the
 token's signature against Google's public keys. No service-account key file
 is needed, and none is used on the VM. Full steps in auth/README.md.
 """
@@ -45,7 +45,7 @@ def _get_app():
     global _app
     with _app_lock:  # two first requests at once would both try to initialize
         if _app is None:
-            project = os.environ.get("FIREBASE_PROJECT_ID", "mahokshahvata-ae5f9")
+            project = os.environ.get("FIREBASE_PROJECT_ID", "mahokshahvata")
             _app = firebase_admin.initialize_app(_NoCredentials(), {"projectId": project})
     return _app
 

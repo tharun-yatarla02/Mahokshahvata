@@ -93,7 +93,7 @@ pip install -r requirements-dev.txt   # app + test tools
 | `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_SSLMODE` | Database | PostgreSQL connection. Defaults: `localhost:5432`, database `mahokshahvata`, user `app`, no password (a local container that trusts local connections). On the VM: Cloud SQL's private IP, with the password from Secret Manager |
 | `DATA_BUCKET` | Files (VM) | Storage bucket for the market cache, sentiment history and profile photos. Unset locally: files go to `DATA_DIR` (default `.data/`) |
 | `SECRETS_PROJECT` | Secrets (VM) | GCP project whose Secret Manager holds `db-password`, `anthropic-api-key` and the optional provider keys; loaded at startup. Unset locally: `.env` is used |
-| `FIREBASE_PROJECT_ID` | Google sign-in | Firebase project whose ID tokens are accepted (default `mahokshahvata-ae5f9`). No key file is needed — see [auth/README.md](auth/README.md) |
+| `FIREBASE_PROJECT_ID` | Google sign-in | Firebase project whose ID tokens are accepted (default `mahokshahvata`). No key file is needed — see [auth/README.md](auth/README.md) |
 | `USE_DEMO_AUTH` | Local development | `true` enables the shared demo account ("Continue with demo account" on the sign-in page, token `demo-token`). Leave it off in any shared deployment |
 | `QUIVER_API_KEY` | Politician trades | Free-tier key from quiverquant.com, used by `POST /politicians/refresh` |
 | `MARKET_UNIVERSE_SIZE` | Market data | How many of the largest US stocks to track (default 3000) |

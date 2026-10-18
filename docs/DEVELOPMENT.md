@@ -52,7 +52,7 @@ Put them in a `.env` file in the project folder (loaded on startup; shell variab
 | `MASSIVE_API_KEY` | Prices come from the free Nasdaq screener and yfinance (~15 min delayed) |
 | `BENZINGA_API_KEY` | News comes from RSS feeds, matched to companies by name |
 | `SEC_USER_AGENT` | Fundamentals still work but send a placeholder contact. SEC asks for your app name + email |
-| `FIREBASE_PROJECT_ID` | Defaults to `mahokshahvata-ae5f9`; "Continue with Google" checks tokens for this project (no key file needed) |
+| `FIREBASE_PROJECT_ID` | Defaults to `mahokshahvata`; "Continue with Google" checks tokens for this project (no key file needed) |
 
 On the VM there is no `.env`: `SECRETS_PROJECT` makes the app load the same keys (and the database password) from Secret Manager at startup (`cloud/secrets.py`).
 

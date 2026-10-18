@@ -6,7 +6,7 @@
 - `firebase_auth.py` — verifies a Firebase ID token (plus the local demo token)
 - `passwords.py` — email/password hashing and session tokens
 
-The Firebase project is **`mahokshahvata-ae5f9`** (free Spark plan). It is used for Google sign-in only; the app's data moved from its Firestore database to Cloud SQL in Milestone 4 (`db/migrations/001_initial.sql`).
+The Firebase project is **`mahokshahvata`**, owned by the team's Google account. It is used for Google sign-in only: no data lives in Firebase (accounts and portfolios are in Cloud SQL, `db/migrations/001_initial.sql`). Through Milestone 4's move the app used an older project, `mahokshahvata-ae5f9`, whose Firestore still holds the Milestone 3 copy of the data.
 
 ---
 
@@ -27,7 +27,7 @@ Google's OAuth "brand verification" only applies once an app is published to Pro
 
 Swapping the short-lived Firebase token for our session means the page needs no token-refresh logic, and every sign-in and sign-out passes through the server, so it can be recorded.
 
-## Setup (already done for `mahokshahvata-ae5f9`; repeat only for a new project)
+## Setup (already done for `mahokshahvata`; repeat only for a new project)
 1. **console.firebase.google.com → Create a project** (skip Google Analytics)
 2. **Build → Authentication → Get started → Sign-in method → Google → Enable**, pick a support email, **Save**
 3. **Authentication → Settings → Authorized domains**: add every address the site is served from (the VM's IP `34.122.164.209` is there; `localhost` is by default)

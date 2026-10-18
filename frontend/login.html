@@ -176,12 +176,12 @@
       // Google: Firebase shows the popup and hands back an ID token, which the
       // server swaps for one of our sessions (POST /auth/google). The Firebase
       // sign-in itself isn't kept; our session is the only one. Public web config
-      // (project mahokshahvata-ae5f9); Firestore rules deny all browser access.
+      // (Firebase project mahokshahvata; sign-in only, no data lives in Firebase).
       const FIREBASE_CONFIG = {
-        apiKey: 'AIzaSyC1MRo0OW_slh8cNwXtNjubi4WRB8-dw_A',
-        authDomain: 'mahokshahvata-ae5f9.firebaseapp.com',
-        projectId: 'mahokshahvata-ae5f9',
-        appId: '1:148447370236:web:8b547e3b0161a69994b079',
+        apiKey: 'AIzaSyBNsDqR-A3RxDo-QjFG8IrWsXO0QHUVHjM',
+        authDomain: 'mahokshahvata.firebaseapp.com',
+        projectId: 'mahokshahvata',
+        appId: '1:478034842814:web:02cff0b2325b80bf51baef',
       };
       const googleButton = document.getElementById('googleButton');
       googleButton.addEventListener('click', async () => {

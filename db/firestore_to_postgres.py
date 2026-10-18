@@ -110,7 +110,7 @@ def report(before, after):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--count-only", action="store_true", help="print Firestore's row counts and stop")
-    parser.add_argument("--project", default=os.environ.get("FIREBASE_PROJECT_ID", "mahokshahvata-ae5f9"))
+    parser.add_argument("--project", default="mahokshahvata-ae5f9")  # where the Milestone 3 data was
     args = parser.parse_args()
 
     from google.cloud import firestore

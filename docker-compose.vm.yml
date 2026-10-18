@@ -14,4 +14,4 @@ services:
       DB_SSLMODE: require
       DATA_BUCKET: ${DATA_BUCKET:?set by deploy/docker_deploy.sh}
       SECRETS_PROJECT: ${SECRETS_PROJECT:?set by deploy/docker_deploy.sh}
-      FIREBASE_PROJECT_ID: mahokshahvata-ae5f9
+      FIREBASE_PROJECT_ID: mahokshahvata   # Google sign-in only; no key file
