@@ -95,13 +95,12 @@ Behind the scenes:
 ### Optional
 14. **Real-time prices:** a paid Massive key (`MASSIVE_API_KEY`) already
     switches quotes and history over; streaming quotes are not built.
+15. **Money as integer cents** instead of decimals rounded to cents, before
+    adding fees or tax lots.
 16. **Ship container logs to Cloud Logging** (Docker `gcplogs` driver): today they
     live only on the VM's disk and would be lost with it.
 17. **Remove the old default service account's leftover access** (Artifact Registry
     reader) now that the VM runs as `mahokshahvata-vm`.
-
-15. **Money as integer cents** instead of decimals rounded to cents, before
-    adding fees or tax lots.
 
 ## Done Oct 18 (Milestone 4)
 
