@@ -1,0 +1,15 @@
+Firestore (Milestone 3) vs Cloud SQL PostgreSQL (Milestone 4), 2026-10-18,
+printed by db/firestore_to_postgres.py on the VM right after the copy.
+
+table             Firestore  PostgreSQL  match
+----------------------------------------------
+users                     6           6  yes
+sessions                  3           3  yes
+auth_events               6           6  yes
+portfolios                6           6  yes
+holdings                  4           4  yes
+transactions              6           6  yes
+snapshots                 8           8  yes
+autopilot_runs            0           0  yes
+----------------------------------------------
+total                    39          39  yes
