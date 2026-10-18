@@ -11,6 +11,9 @@ these secrets, so there is no key file. Without SECRETS_PROJECT (laptops,
 CI) nothing happens and the usual environment / .env applies.
 
 A secret that doesn't exist is skipped: the data-provider keys are optional.
+Secret Manager reports a secret the caller has no access to as permission
+denied (it won't confirm that the name exists), so for optional keys that is
+treated the same as missing. DB_PASSWORD is required and always raises.
 """
 
 import logging
@@ -26,6 +29,7 @@ SECRETS = {
     "MASSIVE_API_KEY": "massive-api-key",
     "BENZINGA_API_KEY": "benzinga-api-key",
 }
+REQUIRED = {"DB_PASSWORD"}
 
 
 def load_secrets(project=None, client=None):
@@ -34,7 +38,7 @@ def load_secrets(project=None, client=None):
     project = project or os.environ.get("SECRETS_PROJECT")
     if not project:
         return []
-    from google.api_core.exceptions import NotFound
+    from google.api_core.exceptions import NotFound, PermissionDenied
     if client is None:
         from google.cloud import secretmanager
         client = secretmanager.SecretManagerServiceClient()
@@ -44,7 +48,10 @@ def load_secrets(project=None, client=None):
         name = f"projects/{project}/secrets/{secret}/versions/latest"
         try:
             value = client.access_secret_version(name=name).payload.data.decode("utf-8").strip()
-        except NotFound:
+        except (NotFound, PermissionDenied) as e:
+            if variable in REQUIRED:
+                raise
+            log.info("Secret %s not available (%s); skipping", secret, type(e).__name__)
             continue  # optional key that this deployment doesn't use
         if value:
             os.environ[variable] = value

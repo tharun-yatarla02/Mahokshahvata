@@ -4,18 +4,21 @@ SECRETS_PROJECT."""
 import os
 from types import SimpleNamespace
 
-from google.api_core.exceptions import NotFound
+import pytest
+from google.api_core.exceptions import NotFound, PermissionDenied
 
 from cloud.secrets import load_secrets
 
 
 class FakeClient:
-    def __init__(self, values):
-        self.values, self.asked = values, []
+    def __init__(self, values, denied=()):
+        self.values, self.denied, self.asked = values, set(denied), []
 
     def access_secret_version(self, name):
         self.asked.append(name)
         secret = name.split("/")[3]
+        if secret in self.denied:
+            raise PermissionDenied("no access")  # what Secret Manager says for a secret you can't see
         if secret not in self.values:
             raise NotFound("no such secret")
         return SimpleNamespace(payload=SimpleNamespace(data=self.values[secret].encode()))
@@ -37,3 +40,12 @@ def test_loads_existing_secrets_and_skips_missing_ones(monkeypatch):
 def test_does_nothing_without_a_project(monkeypatch):
     monkeypatch.delenv("SECRETS_PROJECT", raising=False)
     assert load_secrets(client=FakeClient({})) == []
+
+
+def test_optional_secrets_without_access_are_skipped_but_the_db_password_is_required(monkeypatch):
+    for var in ("DB_PASSWORD", "QUIVER_API_KEY"):
+        monkeypatch.setenv(var, "")
+        monkeypatch.delenv(var)
+    assert load_secrets("p", FakeClient({"db-password": "pw"}, denied={"quiver-api-key"})) == ["DB_PASSWORD"]
+    with pytest.raises(PermissionDenied):
+        load_secrets("p", FakeClient({}, denied={"db-password"}))
