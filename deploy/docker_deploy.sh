@@ -29,6 +29,8 @@ DB_HOST=$(g sql instances describe "$SQL_INSTANCE" --format='value(ipAddresses.f
 
 g compute scp docker-compose.yml docker-compose.vm.yml "$VM:/tmp/" --zone "$ZONE"
 g compute ssh "$VM" --zone "$ZONE" --command "set -euo pipefail
+# First run on a new VM: swap (the e2-micro has 1 GB of RAM) and Docker.
+test -f /swapfile || { sudo fallocate -l 1G /swapfile && sudo chmod 600 /swapfile && sudo mkswap -q /swapfile && sudo swapon /swapfile && echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab >/dev/null; }
 command -v docker >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq docker.io docker-compose-v2; }
 sudo mkdir -p $DIR && sudo mv /tmp/docker-compose.yml /tmp/docker-compose.vm.yml $DIR/
 
