@@ -136,7 +136,8 @@ def test_option_trade_rejects_bad_ticker_or_expiry(client, portfolio_id, overrid
     assert res.status_code == 422
 
 
-def test_option_trade_errors_use_400_not_404(client, portfolio_id):
+def test_option_trade_errors_use_400_not_404(client, portfolio_id, monkeypatch):
+    monkeypatch.setattr(api_main.market_data, "lookup", lambda ticker: {"ticker": ticker, "current_price": 250.0})
     expired = client.post(f"/portfolio/{portfolio_id}/trade-option", json={**OPTION, "expiry": "2020-01-17"}, headers=AUTH)
     too_expensive = client.post(f"/portfolio/{portfolio_id}/trade-option", json={**OPTION, "premium": 999999}, headers=AUTH)
     missing = client.post("/portfolio/999999/trade-option", json=OPTION, headers=AUTH)
@@ -302,3 +303,43 @@ def test_orders_while_closed_are_allowed_but_labelled(client, monkeypatch):
     trade = client.post(f"/portfolio/{pid}/trade-stock", json=order, headers=AUTH)
     assert trade.status_code == 200 and "Market closed (Saturday)" in trade.json()["market_note"]
 
+
+
+def _option(client, portfolio_id, **override):
+    return client.post(f"/portfolio/{portfolio_id}/trade-option", json={**OPTION, **override}, headers=AUTH)
+
+
+def test_selling_an_option_at_a_made_up_premium_creates_no_cash(client, portfolio_id, monkeypatch):
+    # AAPL at $250: a $200 call is worth at least $50 (intrinsic), at most $250.
+    monkeypatch.setattr(api_main.market_data, "lookup", lambda ticker: {"ticker": ticker, "current_price": 250.0})
+    assert _option(client, portfolio_id, premium=0.01).status_code == 400          # below intrinsic
+    assert _option(client, portfolio_id, premium=300).status_code == 400           # above the stock price
+    assert _option(client, portfolio_id, premium=55).status_code == 200
+    res = _option(client, portfolio_id, side="SELL", premium=1_000_000)
+    assert res.status_code == 400 and "at most $55.00" in res.json()["detail"]
+    assert client.get(f"/portfolio/{portfolio_id}", headers=AUTH).json()["cash_balance"] == 945
+
+    # The stock rises to $270: intrinsic is now $70, so selling at $70 is a real profit.
+    monkeypatch.setattr(api_main.market_data, "lookup", lambda ticker: {"ticker": ticker, "current_price": 270.0})
+    assert _option(client, portfolio_id, side="SELL", premium=70).status_code == 200
+    assert client.get(f"/portfolio/{portfolio_id}", headers=AUTH).json()["cash_balance"] == 1015
+
+
+def test_put_premium_is_capped_at_its_strike(client, portfolio_id, monkeypatch):
+    monkeypatch.setattr(api_main.market_data, "lookup", lambda ticker: {"ticker": ticker, "current_price": 250.0})
+    assert _option(client, portfolio_id, option_type="PUT", strike=100, premium=101).status_code == 400
+    assert _option(client, portfolio_id, option_type="PUT", strike=100, premium=2).status_code == 200
+
+
+def test_mark_to_market_ignores_prices_sent_by_the_client(client, portfolio_id, monkeypatch):
+    monkeypatch.setattr(api_main.market_data, "lookup", lambda ticker: {"ticker": ticker, "current_price": 100.0})
+    monkeypatch.setattr(api_main.market_data, "status", lambda: {"tracked": 1, "stale": False})
+    client.post(f"/portfolio/{portfolio_id}/trade-stock", json={"ticker": "AAPL", "side": "BUY", "quantity": 5}, headers=AUTH)
+    res = client.post(f"/portfolio/{portfolio_id}/mark-to-market", json={"prices": {"AAPL": 1_000_000}}, headers=AUTH)
+    assert res.status_code == 200 and res.json()["total_portfolio_value"] == 1000
+    history = client.get(f"/portfolio/{portfolio_id}/history", headers=AUTH).json()["history"]
+    assert [h["total_value"] for h in history] == [1000]
+
+
+def test_overview_page_is_not_cached(client):
+    assert "no-store" in client.get("/").headers["cache-control"]

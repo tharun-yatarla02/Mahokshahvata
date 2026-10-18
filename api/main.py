@@ -28,7 +28,7 @@ Endpoints:
     POST /portfolio                            create a portfolio
     POST /portfolio/{id}/build                 build it from a momentum list
     GET  /portfolio/{id}                       get portfolio summary
-    POST /portfolio/{id}/mark-to-market         update with current prices
+    POST /portfolio/{id}/mark-to-market         record today's value at live prices
 """
 
 import os
@@ -81,7 +81,7 @@ from news_sentiment.suggestions import affected_stocks, build_suggestions, compa
 from fundamentals.sec_edgar import get_fundamentals
 from explain.stock_explainer import build_facts, explain_with_claude, explain_with_rules
 from autopilot.autopilot import SETTINGS as AUTOPILOT_SETTINGS, clamp_settings, plan_run
-from momentum.market_calendar import market_status
+from momentum.market_calendar import market_status, session as market_session
 
 @asynccontextmanager
 async def lifespan(app):
@@ -210,14 +210,6 @@ class BuildPortfolioRequest(BaseModel):
     max_positions: int = Field(default=5, gt=0, le=20)
     max_allocation_per_stock: float = Field(default=0.30, gt=0, le=1.0)
     max_allocation_per_sector: float = Field(default=0.50, gt=0, le=1.0)
-
-
-Price = Annotated[float, _money()]
-
-
-class MarkToMarketRequest(BaseModel):
-    prices: dict[str, Price]  # {"NVDA": 190.12, "PLTR": 42.5, ...}
-    option_prices: dict[str, Price] | None = None
 
 
 class AddCashRequest(BaseModel):
@@ -574,13 +566,20 @@ def get_portfolio(portfolio_id: int, user_id: int = Depends(get_current_user)):
 
 
 @app.post("/portfolio/{portfolio_id}/mark-to-market")
-def mark_to_market(portfolio_id: int, req: MarkToMarketRequest, user_id: int = Depends(get_current_user)):
+def mark_to_market(portfolio_id: int, user_id: int = Depends(get_current_user)):
+    """Records today's value at the tracked prices. It used to take prices
+    from the caller, which let anyone write made-up values into the
+    performance history that the autopilot's daily loss limit reads."""
     try:
-        return engine.mark_to_market(portfolio_id, user_id, req.prices, current_option_prices=req.option_prices)
+        summary = engine.get_portfolio_summary(portfolio_id, user_id, price_for=_live_price)
     except PermissionError:
         raise HTTPException(status_code=403, detail="This portfolio doesn't belong to you")
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Portfolio not found")
+    if not market_data.status()["tracked"]:
+        raise HTTPException(status_code=503, detail="Market data is still loading. Try again in a couple of minutes.")
+    engine.record_daily_snapshot(portfolio_id, summary)
+    return {key: summary[key] for key in ("total_portfolio_value", "cash_balance", "holdings_value", "total_pl", "total_pl_pct")}
 
 
 @app.post("/portfolio/{portfolio_id}/cash")
@@ -718,17 +717,22 @@ def _trade_error(e):
 def trade_option(portfolio_id: int, req: TradeOptionRequest, user_id: int = Depends(get_current_user)):
     if req.side == "BUY" and req.expiry < date.today():
         raise HTTPException(status_code=400, detail=f"Option expired on {req.expiry.isoformat()}")
+    ticker = _normalize_ticker(req.ticker)
+    underlying, _ = _market_price(ticker)  # bounds the hand-typed premium
+    if underlying is None:
+        raise HTTPException(status_code=404, detail=f"No market price found for {ticker}. Check the ticker symbol.")
     try:
         return engine.trade_option(
             portfolio_id,
             user_id,
-            _normalize_ticker(req.ticker),
+            ticker,
             req.option_type,
             req.strike,
             req.expiry.isoformat(),
             req.quantity,
             req.premium,
             req.side,
+            underlying_price=underlying,
         )
     except PermissionError:
         raise HTTPException(status_code=403, detail="This portfolio doesn't belong to you")
@@ -744,6 +748,7 @@ AUTOPILOT_CHECK_SECONDS = 10 * 60
 MARKET_TZ = ZoneInfo("America/New_York")
 AUTOPILOT_START = clock_time(10, 0)             # let the open settle first
 AUTOPILOT_STOP_BEFORE_CLOSE = timedelta(minutes=30)
+CLOSE_SNAPSHOT_DELAY = timedelta(minutes=20)    # quotes are ~15 min delayed
 _autopilot_lock = threading.Lock()  # one run at a time (manual or scheduled)
 
 AutopilotUpdate = create_model(
@@ -859,11 +864,14 @@ def _autopilot_scheduler():
     while True:
         time.sleep(AUTOPILOT_CHECK_SECONDS)
         now = datetime.now(MARKET_TZ)
+        today = now.date().isoformat()
         market = market_status(now)  # weekends, NYSE holidays and early closes
+        hours = market_session(now.date())
+        if hours and now >= hours[1] + CLOSE_SNAPSHOT_DELAY:
+            _record_closing_values(today)
         if not market["open"] or now.time() < AUTOPILOT_START or \
                 now > datetime.fromisoformat(market["closes_at"]) - AUTOPILOT_STOP_BEFORE_CLOSE:
             continue
-        today = now.date().isoformat()
         try:
             due = engine.autopilot_portfolios()
         except Exception as e:
@@ -878,6 +886,28 @@ def _autopilot_scheduler():
                     engine.update_autopilot(portfolio_id, user_id, {"last_scheduled_date": today})
             except Exception as e:  # one bad portfolio mustn't stop the others
                 print(f"[warn] autopilot run failed for portfolio {portfolio_id}: {type(e).__name__}: {e}", file=sys.stderr)
+
+
+def _record_closing_values(today):
+    """Saves each autopilot portfolio's value after the close, once a day. The
+    daily loss limit compares against the last value saved before today; without
+    this, that was whenever someone last opened the Portfolio page."""
+    if market_data.status()["stale"]:
+        return
+    try:
+        due = engine.autopilot_portfolios()
+    except Exception as e:
+        print(f"[warn] closing values: can't list portfolios: {type(e).__name__}: {e}", file=sys.stderr)
+        return
+    for portfolio_id, user_id in due:
+        try:
+            if engine.get_autopilot(portfolio_id, user_id).get("last_close_recorded") == today:
+                continue
+            summary = engine.get_portfolio_summary(portfolio_id, user_id, price_for=_live_price)
+            engine.record_daily_snapshot(portfolio_id, summary, as_of=today)
+            engine.update_autopilot(portfolio_id, user_id, {"last_close_recorded": today})
+        except Exception as e:
+            print(f"[warn] closing value failed for portfolio {portfolio_id}: {type(e).__name__}: {e}", file=sys.stderr)
 
 
 @app.get("/portfolio/{portfolio_id}/autopilot")
@@ -941,7 +971,7 @@ def get_trade_history(portfolio_id: int, user_id: int = Depends(get_current_user
 def root():
     index_path = frontend_dir / "index.html"
     if index_path.exists():
-        return FileResponse(index_path)
+        return FileResponse(index_path, headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"})
     return {"status": "ok"}
 
 

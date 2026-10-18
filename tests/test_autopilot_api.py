@@ -116,3 +116,14 @@ def test_no_trades_while_the_market_is_closed(setup, monkeypatch):
     view = client.get(f"/portfolio/{pid}/autopilot", headers=DEMO).json()
     assert view["market"]["open"] is False and view["runs"] == []
 
+
+
+def test_closing_value_is_saved_once_a_day_for_the_daily_loss_limit(setup):
+    client, market, portfolio_id = setup
+    client.put(f"/portfolio/{portfolio_id}/autopilot", json={"enabled": True}, headers=DEMO)
+    api_main._record_closing_values("2026-10-12")
+    assert api_main.engine.last_close_value(portfolio_id, "2026-10-13") == 100_000
+
+    client.post(f"/portfolio/{portfolio_id}/cash", json={"amount": 500}, headers=DEMO)
+    api_main._record_closing_values("2026-10-12")                        # already saved today
+    assert api_main.engine.last_close_value(portfolio_id, "2026-10-13") == 100_000

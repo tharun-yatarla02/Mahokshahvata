@@ -37,6 +37,7 @@ import functools
 import secrets
 import threading
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from dataclasses import dataclass
 from decimal import ROUND_DOWN, ROUND_UP, Decimal
 
@@ -101,6 +102,31 @@ def _normalize_timestamp(ts=None):
     if ts is None:
         return datetime.now(timezone.utc).isoformat()
     return ts
+
+
+def option_premium_problem(option_type, strike, underlying_price, premium, side, paid=None):
+    """Why a typed-in option premium is impossible, or None. There's no options
+    price feed, so premiums are entered by hand; these bounds hold for any real
+    option and stop a sale at a made-up price from creating cash.
+        - Buy: at least the intrinsic value (what exercising now is worth), at
+          most the stock price for a call or the strike for a put.
+        - Sell: at most the higher of the intrinsic value now and what was paid,
+          so a profit needs the stock to move, not a bigger number."""
+    intrinsic = max(0.0, underlying_price - strike) if option_type == "CALL" else max(0.0, strike - underlying_price)
+    if side == "BUY":
+        ceiling = underlying_price if option_type == "CALL" else strike
+        if premium < intrinsic - 0.005:
+            return (f"A {option_type.lower()} at ${strike:,.2f} with the stock at ${underlying_price:,.2f} "
+                    f"is worth at least ${intrinsic:,.2f} (its intrinsic value)")
+        if premium > ceiling + 0.005:
+            limit = "the stock price" if option_type == "CALL" else "its strike"
+            return f"A {option_type.lower()} can't cost more than {limit} (${ceiling:,.2f})"
+        return None
+    ceiling = max(intrinsic, paid or 0.0)
+    if premium > ceiling + 0.005:
+        return (f"Sell price can be at most ${ceiling:,.2f}: the higher of its intrinsic value "
+                f"(${intrinsic:,.2f}, stock at ${underlying_price:,.2f}) and what you paid")
+    return None
 
 
 def _option_position_key(ticker, option_type, strike, expiry):
@@ -581,7 +607,10 @@ class PaperTradingEngine:
         }
 
     @_locked
-    def trade_option(self, portfolio_id, user_id, ticker, option_type, strike, expiry, quantity, premium, side="BUY", timestamp=None):
+    def trade_option(self, portfolio_id, user_id, ticker, option_type, strike, expiry, quantity, premium, side="BUY",
+                     timestamp=None, underlying_price=None):
+        """underlying_price: the stock's current price; when given, the premium
+        is checked against option_premium_problem()."""
         portfolio = self._assert_owner(portfolio_id, user_id)
         ticker = (ticker or "").strip().upper()
         if not ticker:
@@ -598,6 +627,11 @@ class PaperTradingEngine:
         position_key = self._get_position_key(ticker, "OPTION", option_type, strike, expiry)
         existing = self._get_holding(portfolio_id, position_key)
         cash = float(portfolio["cash_balance"])
+        if underlying_price is not None:
+            problem = option_premium_problem(option_type, float(strike), float(underlying_price), float(premium), side,
+                                             paid=float(existing["avg_buy_price"]) if existing else None)
+            if problem:
+                raise ValueError(problem)
 
         batch = self.db.batch()
         if side == "BUY":
@@ -775,7 +809,7 @@ class PaperTradingEngine:
         """Stores today's value from a summary, one per portfolio per day
         (later calls the same day overwrite it). This is what the
         performance chart plots."""
-        as_of = as_of or datetime.now(timezone.utc).date().isoformat()
+        as_of = as_of or datetime.now(ZoneInfo("America/New_York")).date().isoformat()  # the trading day
         self._save_snapshot(portfolio_id, as_of, summary["total_portfolio_value"], summary["cash_balance"],
                             summary["holdings_value"], summary["total_pl"], summary["total_pl_pct"])
 

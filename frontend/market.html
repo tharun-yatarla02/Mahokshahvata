@@ -246,7 +246,7 @@
             <div>
               <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom: 12px;">
                 <div>
-                  <div class="mini-label">${item.sector || 'Market'}</div>
+                  <div class="mini-label">${escapeHtml(item.sector || 'Market')}</div>
                   <strong style="font-size: 1.75rem; font-weight: 600; letter-spacing: -0.025em; font-variant-numeric: tabular-nums;">$${currentPrice.toFixed(2)}</strong>
                 </div>
                 <span class="badge ${positive ? 'positive' : 'negative'}">${Number(item.momentum_pct || 0).toFixed(2)}%</span>
@@ -268,7 +268,7 @@
                 <li>Today: ${formatSignedPercent(item.day_change_pct)}</li>
                 <li>Live trade price: $${currentPrice.toFixed(2)}</li>
                 <li>Momentum score: ${Number(item.momentum_pct || 0).toFixed(2)}%</li>
-                <li>Sector: ${item.sector || 'Unknown'}</li>
+                <li>Sector: ${escapeHtml(item.sector || 'Unknown')}</li>
                 <li>Strategy bias: ${positive ? 'Positive trend' : 'Cooling trend'}</li>
               </ul>
             </div>

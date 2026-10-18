@@ -171,7 +171,11 @@ Stock trades are market orders, like a real broker's:
 - `POST /portfolio/{id}/trade-preview` returns exactly what an order would
   do without placing it; the Portfolio page uses it as a live preview.
 
-Options premiums are entered by hand (there's no free options price feed).
+Options premiums are entered by hand (there's no free options price feed), so
+they're checked against bounds every real option obeys: a buy costs at least
+its intrinsic value (what exercising now is worth) and at most the stock price
+(calls) or the strike (puts); a sale gets at most the higher of today's
+intrinsic value and what was paid, so a profit needs the stock to move.
 P/L is the account value (stocks at market price, options at cost, plus
 cash) minus everything deposited.
 
@@ -382,7 +386,7 @@ user only sees their own portfolios.
 | POST | `/portfolio` 🔒 | Create a portfolio (`name`, `starting_capital`) |
 | POST | `/portfolio/{id}/build` 🔒 | Build it from the top momentum names among the 500 largest stocks |
 | GET | `/portfolio/{id}` 🔒 | Portfolio summary, stocks valued at live prices, P/L vs deposits |
-| POST | `/portfolio/{id}/mark-to-market` 🔒 | Update with current prices |
+| POST | `/portfolio/{id}/mark-to-market` 🔒 | Record today's value at the tracked prices (for the performance chart) |
 | POST | `/portfolio/{id}/cash` 🔒 | Add cash (`amount` > 0) |
 | POST | `/portfolio/{id}/trade-preview` 🔒 | What a market order would do (shares, cost, cash after, or why it's rejected); places nothing |
 | POST | `/portfolio/{id}/trade-stock` 🔒 | Market order: `ticker`, `side` (`BUY`/`SELL`) and either `quantity` (shares) or `amount` (dollars) |
