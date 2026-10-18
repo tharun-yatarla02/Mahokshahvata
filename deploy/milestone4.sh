@@ -10,9 +10,11 @@
 #   2. Cloud SQL for PostgreSQL 16 with a PRIVATE IP ONLY (no public IP), TLS
 #      required, daily backups; database "mahokshahvata", user "app".
 #   3. A private storage bucket (uniform access, public access prevented).
-#   4. Secrets in Secret Manager. db-password is generated here and piped
-#      straight in: never printed, never written to a file. anthropic-api-key
-#      is created empty; add its value yourself (see the end of this script).
+#   4. Secrets in Secret Manager. db-password (the app's user) and
+#      db-admin-password (the built-in "postgres" admin) are generated here and
+#      piped straight in: never printed, never written to a file. The VM can
+#      read db-password but not the admin one. anthropic-api-key is created
+#      empty; add its value yourself (see the end of this script).
 #   5. A dedicated service account for the VM with only what the app uses:
 #        secretmanager.secretAccessor  on each secret, not the whole project
 #        storage.objectUser            on the bucket only
@@ -36,7 +38,8 @@ BUCKET=${BUCKET:-$PROJECT-app-data}
 SA_NAME=mahokshahvata-vm
 SA=$SA_NAME@$PROJECT.iam.gserviceaccount.com
 REPO=mahokshahvata
-SECRETS=(db-password anthropic-api-key)
+SECRETS=(db-password anthropic-api-key)   # the VM's service account can read these
+ADMIN_SECRET=db-admin-password            # ...and not this one
 
 g() { gcloud --project "$PROJECT" --quiet "$@"; }
 step() { printf '\n== %s\n' "$*"; }
@@ -64,9 +67,17 @@ g sql databases describe "$DB_NAME" --instance="$SQL_INSTANCE" >/dev/null 2>&1 |
   g sql databases create "$DB_NAME" --instance="$SQL_INSTANCE"
 
 step "Secrets"
-for secret in "${SECRETS[@]}"; do
+for secret in "${SECRETS[@]}" "$ADMIN_SECRET"; do
   g secrets describe "$secret" >/dev/null 2>&1 || g secrets create "$secret" --replication-policy=automatic
 done
+if ! g secrets versions list "$ADMIN_SECRET" --format='value(name)' --limit=1 | grep -q .; then
+  # The instance's built-in admin user starts without a password; give it a random one.
+  password=$(openssl rand -base64 48 | tr -dc 'A-Za-z0-9' | cut -c1-32)
+  g sql users set-password postgres --instance="$SQL_INSTANCE" --password="$password" >/dev/null
+  printf '%s' "$password" | g secrets versions add "$ADMIN_SECRET" --data-file=- >/dev/null
+  unset password
+  echo "Set a password for the postgres admin user; it is only in Secret Manager ($ADMIN_SECRET)."
+fi
 if ! g sql users list --instance="$SQL_INSTANCE" --format='value(name)' | grep -qx "$DB_USER"; then
   # Generated, handed to Cloud SQL and Secret Manager, then dropped. Never echoed or saved.
   password=$(openssl rand -base64 48 | tr -dc 'A-Za-z0-9' | cut -c1-32)
