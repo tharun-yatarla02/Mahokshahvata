@@ -61,6 +61,11 @@ runs as image `app:v3` at **http://34.122.164.209** (firewalled to the team's IP
 | All secrets in Secret Manager; none in code, image or `.env` (8) | [cloud/secrets.py](../../cloud/secrets.py) loads `db-password` and `anthropic-api-key` at startup into the process's memory. [docker-compose.vm.yml](../../docker-compose.vm.yml) has no `env_file`; `.dockerignore` keeps `.env` and key files out of the image. |
 | Written analysis (6) | Below. |
 
+**About the `apiKey` in `frontend/login.html`:** it is Firebase's public web
+configuration, which every browser downloads to show the Google sign-in popup.
+Google documents it as an identifier, not a secret: it grants no access to data,
+and the server never uses it. The app's real secrets are only in Secret Manager.
+
 ### Row counts: Firestore vs Cloud SQL
 
 Printed by [db/firestore_to_postgres.py](../../db/firestore_to_postgres.py) on the VM right after the copy (saved in [row_counts.txt](row_counts.txt)):
