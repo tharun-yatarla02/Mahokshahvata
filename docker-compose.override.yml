@@ -1,26 +1,39 @@
 # Laptop only (docker compose loads this automatically; the VM never has it).
-# Builds the image from this checkout and runs a local Firestore emulator, so
-# `docker compose up --build` needs no cloud credentials and never touches real data.
+# Builds the image from this checkout and runs a local PostgreSQL, so
+# `docker compose up --build` needs no cloud access and never touches real data.
+# Keys for local runs (e.g. ANTHROPIC_API_KEY) come from your gitignored .env.
 
 services:
   app:
     build: .
-    image: mahokshahvata/app:local   # local builds never overwrite the registry's v1 tag
+    image: mahokshahvata/app:local   # local builds never overwrite a registry tag
+    env_file:
+      - path: .env
+        required: false
     environment:
-      FIRESTORE_EMULATOR_HOST: firestore:8681
-      GOOGLE_CLOUD_PROJECT: local-dev
-      USE_DEMO_AUTH: "true"   # "Continue with demo account"; never set on the VM
+      DB_HOST: postgres
+      DATA_DIR: /data          # local stand-in for the storage bucket
+      USE_DEMO_AUTH: "true"    # "Continue with demo account"; never set on the VM
+    volumes:
+      - app-data:/data
     depends_on:
-      firestore:
+      postgres:
         condition: service_healthy
 
-  firestore:
-    image: gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators
-    command: gcloud emulators firestore start --host-port=0.0.0.0:8681
-    expose:
-      - "8681"
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_DB: mahokshahvata
+      POSTGRES_HOST_AUTH_METHOD: trust   # reachable only inside this compose network
+    volumes:
+      - pg-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8681"]
-      interval: 5s
+      test: ["CMD", "pg_isready", "-U", "app", "-d", "mahokshahvata"]
+      interval: 3s
       timeout: 3s
       retries: 30
+
+volumes:
+  app-data:
+  pg-data:

@@ -3,8 +3,9 @@
 # Built for linux/amd64 (the VM) and linux/arm64 (Apple Silicon laptops) as one
 # tag, so the laptop and the VM run the same pushed artifact.
 #
-# No secrets are copied in: .env and the Firebase key are kept out by
-# .dockerignore and supplied at run time by docker-compose.
+# No secrets are copied in (.dockerignore keeps .env and key files out). On the
+# VM the app reads its keys from Secret Manager at startup and keeps all state
+# in Cloud SQL and Cloud Storage, so the container holds nothing worth keeping.
 
 # --- build: install dependencies into a venv (pip caches stay in this stage) ---
 FROM python:3.12-slim AS build
@@ -19,12 +20,12 @@ RUN /venv/bin/pip install --no-cache-dir --disable-pip-version-check -r /tmp/req
 FROM python:3.12-slim
 ENV PATH=/venv/bin:$PATH \
     PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    DATA_DIR=/data
+    PYTHONUNBUFFERED=1
+# /data: only used on laptops (DATA_DIR, a local stand-in for the storage bucket).
 RUN useradd --create-home --uid 10001 app && mkdir /data && chown app /data
 COPY --from=build /venv /venv
 WORKDIR /app
-# Code stays root-owned (read-only to the app user); runtime files go to /data, a volume.
+# Code stays root-owned (read-only to the app user).
 COPY . .
 USER app
 EXPOSE 8000

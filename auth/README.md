@@ -6,7 +6,7 @@
 - `firebase_auth.py` — verifies a Firebase ID token (plus the local demo token)
 - `passwords.py` — email/password hashing and session tokens
 
-The Firebase project is **`mahokshahvata-ae5f9`** (free Spark plan). Its Firestore database also holds the app's data; see the top of `paper_trading/paper_trading_engine.py`.
+The Firebase project is **`mahokshahvata-ae5f9`** (free Spark plan). It is used for Google sign-in only; the app's data moved from its Firestore database to Cloud SQL in Milestone 4 (`db/migrations/001_initial.sql`).
 
 ---
 
@@ -32,20 +32,7 @@ Swapping the short-lived Firebase token for our session means the page needs no 
 2. **Build → Authentication → Get started → Sign-in method → Google → Enable**, pick a support email, **Save**
 3. **Authentication → Settings → Authorized domains**: add every address the site is served from (the VM's IP `34.122.164.209` is there; `localhost` is by default)
 4. **Project settings → Your apps → Web (`</>`)**: register an app and copy `apiKey`, `authDomain`, `projectId`, `appId` into `FIREBASE_CONFIG` in `frontend/login.html`. These are public by design.
-5. **Firestore Database → Create database** (Native mode), and publish rules that deny all browser access — only the server reads and writes, via the Admin key, which bypasses rules:
-   ```
-   rules_version = '2';
-   service cloud.firestore {
-     match /databases/{database}/documents {
-       match /{document=**} { allow read, write: if false; }
-     }
-   }
-   ```
-6. **Project settings → Service accounts → Generate new private key**. Keep it outside the repo at `~/.config/mahokshahvata/firebase-admin.json` (never commit it) and point the server at it:
-   ```bash
-   export GOOGLE_APPLICATION_CREDENTIALS=~/.config/mahokshahvata/firebase-admin.json
-   ```
-   `deploy/gcp.sh` copies it to the VM on every deploy.
+5. That's all the server needs: checking an ID token uses only the project id (`FIREBASE_PROJECT_ID`) and Google's public signing keys, so there is **no service-account key file**. (Through Milestone 3 a Firebase Admin key was used for Firestore; it was deleted from the VM after the data moved to Cloud SQL.)
 
 ## Checks
 - No `Authorization` header → 401; an invalid token → 401

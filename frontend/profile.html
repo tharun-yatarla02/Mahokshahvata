@@ -82,6 +82,20 @@
           <div class="status" id="profileStatus" role="status" style="margin-top: 14px; display: none;"></div>
         </div>
 
+        <div class="card premium-card">
+          <h2>Profile photo</h2>
+          <div class="photo-row">
+            <div id="photoPreview" class="photo-preview" aria-label="Your profile photo"></div>
+            <div class="button-row">
+              <button id="uploadPhotoBtn" type="button">Upload photo</button>
+              <input id="photoInput" type="file" accept="image/jpeg,image/png,image/webp" style="display: none;" />
+              <button id="removePhotoBtn" type="button" class="secondary" hidden>Remove</button>
+            </div>
+          </div>
+          <p class="tag" style="margin-top: 10px;">JPEG, PNG or WebP, up to 2 MB. Stored privately; only you can see it.</p>
+          <div class="status" id="photoStatus" role="status" style="margin-top: 14px; display: none;"></div>
+        </div>
+
         <div class="card premium-card" id="passwordCard" hidden>
           <h2>Change password</h2>
           <form id="passwordForm" class="profile-form" novalidate>
@@ -121,7 +135,43 @@
         document.getElementById('accountType').textContent = ACCOUNT_LABELS[user.account_type] || user.account_type;
         document.getElementById('memberSince').textContent = user.created_at
           ? `Member since ${new Date(user.created_at).toLocaleDateString([], { dateStyle: 'medium' })}` : '';
+        renderPhoto(user);
       }
+
+      async function renderPhoto(user) {
+        const url = await loadPhotoUrl(user.has_photo);
+        paintAvatar(document.getElementById('photoPreview'), user.name || user.email, url);
+        document.getElementById('removePhotoBtn').hidden = !url;
+      }
+
+      const MAX_PHOTO_BYTES = 2 * 1024 * 1024;  // same limit as the server
+      document.getElementById('uploadPhotoBtn').addEventListener('click', () => document.getElementById('photoInput').click());
+      document.getElementById('photoInput').addEventListener('change', async (event) => {
+        const file = event.target.files[0];
+        event.target.value = '';  // picking the same file again still fires change
+        if (!file) return;
+        if (file.size > MAX_PHOTO_BYTES) return show('photoStatus', 'That photo is over 2 MB. Choose a smaller one.', 'error');
+        show('photoStatus', 'Uploading…', '');
+        try {
+          const user = await apiUpload('/auth/me/photo', 'photo', file);
+          await renderPhoto(user);
+          refreshAccountMenu();
+          show('photoStatus', 'Photo saved.', 'success');
+        } catch (error) {
+          show('photoStatus', error.message, 'error');
+        }
+      });
+
+      document.getElementById('removePhotoBtn').addEventListener('click', async () => {
+        try {
+          const user = await apiFetch('/auth/me/photo', { method: 'DELETE' });
+          await renderPhoto(user);
+          refreshAccountMenu();
+          show('photoStatus', 'Photo removed.', 'success');
+        } catch (error) {
+          show('photoStatus', error.message, 'error');
+        }
+      });
 
       async function loadProfile() {
         try {

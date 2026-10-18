@@ -65,6 +65,49 @@ async function apiFetch(path, options = {}) {
   return payload;
 }
 
+// Uploads a file as multipart form data (apiFetch always sends JSON).
+async function apiUpload(path, field, file, method = 'POST') {
+  const token = getAuthToken();
+  const body = new FormData();
+  body.append(field, file);
+  const res = await fetch(`${window.location.origin}${path}`, {
+    method, body, cache: 'no-store',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  const text = await res.text();
+  let payload = null;
+  try { payload = text ? JSON.parse(text) : null; } catch { payload = text; }
+  if (!res.ok) {
+    const error = new Error(errorMessage(payload) || `HTTP ${res.status}`);
+    error.status = res.status;
+    throw error;
+  }
+  return payload;
+}
+
+// The signed-in user's profile photo as an object URL, or null. It's private
+// (needs the Bearer token), so it can't be a plain <img src>.
+let photoUrl = null;
+async function loadPhotoUrl(hasPhoto) {
+  if (photoUrl) URL.revokeObjectURL(photoUrl);
+  photoUrl = null;
+  if (!hasPhoto) return null;
+  const token = getAuthToken();
+  const res = await fetch(`${window.location.origin}/auth/me/photo`, {
+    cache: 'no-store', headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (res.ok) photoUrl = URL.createObjectURL(await res.blob());
+  return photoUrl;
+}
+
+// Shows the photo in an avatar circle, or the initials when there isn't one.
+function paintAvatar(element, name, url) {
+  if (!element) return;
+  element.textContent = url ? '' : initials(name);
+  element.style.backgroundImage = url ? `url("${url}")` : '';
+  element.classList.toggle('has-photo', Boolean(url));
+}
+
 // The portfolio every page works with: the user's most recent one, created
 // with $100,000 on first visit (the server makes sure only one gets created).
 async function getPortfolioId() {
@@ -105,9 +148,10 @@ async function refreshAccountMenu() {
   try {
     const user = await apiFetch('/auth/me');
     const name = user.name || user.email || 'Account';
-    button.querySelector('.profile-avatar').textContent = initials(name);
+    const url = await loadPhotoUrl(user.has_photo);
+    paintAvatar(button.querySelector('.profile-avatar'), name, url);
     document.getElementById('profileLabel').textContent = name.split(' ')[0];
-    document.getElementById('profileMenuAvatar').textContent = initials(name);
+    paintAvatar(document.getElementById('profileMenuAvatar'), name, url);
     document.getElementById('profileName').textContent = name;
     document.getElementById('profileEmail').textContent = user.email || '';
   } catch { /* a 401 already redirected to sign-in */ }

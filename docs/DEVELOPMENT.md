@@ -7,9 +7,9 @@ A short checklist. The [README](../README.md) has the full API and project layou
 - **Python 3.11+** (tested on 3.14). On macOS use `python3`, since there's no `python`.
 - **Git**
 - An internet connection. Market data comes from Nasdaq and yfinance, and news from RSS feeds.
-- **Java 21+** for the local Firestore emulator (`brew install openjdk@21`; it doesn't replace your default Java), and the emulator itself: `gcloud components install cloud-firestore-emulator`.
+- **Docker**, for a local PostgreSQL.
 
-Accounts, portfolios and trades live in Cloud Firestore (the Firebase project's database). Locally you run against the emulator, so you never touch real data. Caches are JSON/SQLite files, and the frontend is plain HTML/JS served by the API.
+Accounts, portfolios and trades live in PostgreSQL (Cloud SQL in production, on a private IP only your VM can reach). Locally you run your own Postgres in a container, so you never touch real data. Files (market cache, sentiment history, profile photos) go to a local `.data/` folder instead of the storage bucket, and the frontend is plain HTML/JS served by the API.
 
 ## Setup (once)
 
@@ -20,24 +20,26 @@ python3 -m venv .venv
 
 ## Run
 
-Start the Firestore emulator in one terminal (data is kept in memory and is gone when you stop it):
+Start PostgreSQL once (it keeps running in the background; local connections are trusted, so there's no password):
 
 ```bash
-PATH=/opt/homebrew/opt/openjdk@21/bin:$PATH gcloud emulators firestore start --host-port=127.0.0.1:8681
+docker run -d --name mahokshahvata-pg -p 127.0.0.1:5433:5432 \
+  -e POSTGRES_HOST_AUTH_METHOD=trust -e POSTGRES_USER=app -e POSTGRES_DB=mahokshahvata postgres:16-alpine
 ```
 
-Then the app in another:
+Then the app (it creates the tables on first start, from `db/migrations/`):
 
 ```bash
-FIRESTORE_EMULATOR_HOST=127.0.0.1:8681 GOOGLE_CLOUD_PROJECT=local-dev USE_DEMO_AUTH=true .venv/bin/uvicorn api.main:app --reload
+DB_PORT=5433 USE_DEMO_AUTH=true .venv/bin/uvicorn api.main:app --reload
 ```
 
-To work against the real database instead, drop the first two variables and set `GOOGLE_APPLICATION_CREDENTIALS` to the Firebase Admin key.
+Or run everything in containers with `docker compose up --build` (see the README). The production database is on a private IP, so it can't be reached from a laptop at all.
 
 - Dashboard: http://localhost:8000/ (sign in or create an account first; "Continue with demo account" needs `USE_DEMO_AUTH=true`), API docs: http://localhost:8000/docs
 - The first start takes ~2 minutes before stock data appears (`/momentum` reports `warming_up: true`).
   For faster restarts while developing, add `MARKET_UNIVERSE_SIZE=100`.
-- Run a single process only (no `--workers`). The trade lock is per-process.
+- Run a single process only (no `--workers`): the market-data thread and the autopilot scheduler run inside the app.
+- Schema changes: add `db/migrations/002_<what>.sql`; never edit an applied migration. `python -m db.migrate --status` lists them.
 
 ## Keys (all optional)
 
@@ -50,7 +52,9 @@ Put them in a `.env` file in the project folder (loaded on startup; shell variab
 | `MASSIVE_API_KEY` | Prices come from the free Nasdaq screener and yfinance (~15 min delayed) |
 | `BENZINGA_API_KEY` | News comes from RSS feeds, matched to companies by name |
 | `SEC_USER_AGENT` | Fundamentals still work but send a placeholder contact. SEC asks for your app name + email |
-| `GOOGLE_APPLICATION_CREDENTIALS` | Path to the Firebase Admin key. Needed for "Continue with Google" and for the real Firestore database; not needed with the emulator |
+| `FIREBASE_PROJECT_ID` | Defaults to `mahokshahvata-ae5f9`; "Continue with Google" checks tokens for this project (no key file needed) |
+
+On the VM there is no `.env`: `SECRETS_PROJECT` makes the app load the same keys (and the database password) from Secret Manager at startup (`cloud/secrets.py`).
 
 ## Test
 
@@ -58,24 +62,25 @@ Put them in a `.env` file in the project folder (loaded on startup; shell variab
 .venv/bin/python -m pytest -q
 ```
 
-Start the Firestore emulator first (see Run); engine tests fail fast with a reminder if it isn't running. Each test gets its own empty emulator project, and other tests use temp files and canned API responses, so nothing touches real data or needs keys.
+Start the local PostgreSQL first (see Run); tests use `DB_PORT=5433` by default and fail fast with a reminder if it isn't running. Each test engine gets its own schema with the migrations applied (dropped afterwards), and other tests use temp folders and canned API responses, so nothing touches real data or needs keys. CI runs the same suite against a Postgres service container.
 
 ## Local data
 
-All of these are created at runtime and gitignored. Delete one to reset it.
+Database rows are in your local Postgres (`docker rm -f mahokshahvata-pg` resets it). Files are in `.data/` (gitignored; on the VM they're in the storage bucket). Delete one to reset it.
 
 | File | Holds |
 |---|---|
-| `politician_trades/politician_trades.db` | Cached congressional trade disclosures |
-| `momentum/market_cache.json` | Market snapshot, so restarts are instant |
-| `news_sentiment/sentiment_history.json` | Recent sentiment results |
+| `.data/market_cache.json` | Market snapshot, so restarts are instant |
+| `.data/sentiment_history.json` | Recent sentiment results |
+| `.data/avatars/<user>/` | Profile photos |
 
 ## Where to change things
 
 | To change | Edit |
 |---|---|
 | Endpoints | `api/main.py` |
-| Trading rules, P/L, schema | `paper_trading/paper_trading_engine.py` |
+| Trading rules, P/L | `paper_trading/paper_trading_engine.py` |
+| Database tables | a new `db/migrations/00N_*.sql` |
 | Stock universe, prices (Nasdaq / yfinance / Massive) | `momentum/market_data.py` |
 | Fundamentals and SEC filings | `fundamentals/sec_edgar.py` |
 | Momentum math, sector/theme filters | `momentum/momentum_engine.py` |

@@ -2,7 +2,7 @@
 politician_trades.py
 
 Fetches U.S. congressional stock trading disclosures (required under the
-STOCK Act) via the Quiver Quantitative API, caches them locally, and
+STOCK Act) via the Quiver Quantitative API, stores them in PostgreSQL, and
 exposes two things your dashboard needs:
   - a list of politicians who have disclosed trades
   - for a selected politician, every trade sorted newest to oldest
@@ -26,118 +26,87 @@ Note on the API endpoint:
 
 import csv
 import os
-import sqlite3
 import sys
-from contextlib import closing
-from datetime import datetime, timezone
-from pathlib import Path
 
 import requests
 
-QUIVER_API_KEY = os.environ.get("QUIVER_API_KEY")
+from db.connection import connect
+
 BULK_ENDPOINT = "https://api.quiverquant.com/beta/bulk/congresstrading"
-DB_PATH = Path(os.environ.get("DATA_DIR") or Path(__file__).parent) / "politician_trades.db"  # DATA_DIR: Docker volume
-
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS trades (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    politician TEXT NOT NULL,
-    chamber TEXT,
-    party TEXT,
-    ticker TEXT,
-    transaction_type TEXT,
-    transaction_date TEXT,
-    disclosure_date TEXT,
-    amount_range TEXT,
-    fetched_at TEXT NOT NULL,
-    UNIQUE(politician, ticker, transaction_date, transaction_type, amount_range)
-);
-CREATE INDEX IF NOT EXISTS idx_politician ON trades(politician);
-CREATE INDEX IF NOT EXISTS idx_transaction_date ON trades(transaction_date);
-"""
-
-
-def get_connection():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.executescript(SCHEMA)
-    return conn
+# Stored in PostgreSQL (table politician_trades, created by db/migrations/001_initial.sql).
 
 
 def fetch_from_quiver():
     """Pulls the latest bulk congressional trading data from Quiver Quantitative."""
-    if not QUIVER_API_KEY:
+    api_key = os.environ.get("QUIVER_API_KEY")  # read per call: Secret Manager fills it in at startup
+    if not api_key:
         raise RuntimeError("QUIVER_API_KEY is not set in the environment.")
 
-    headers = {"Authorization": f"Bearer {QUIVER_API_KEY}"}
+    headers = {"Authorization": f"Bearer {api_key}"}
     response = requests.get(BULK_ENDPOINT, headers=headers, timeout=30)
     response.raise_for_status()
     return response.json()
 
 
 def refresh_cache():
-    """Fetches fresh data from Quiver and stores it locally, so the dashboard
-    can query instantly without hitting the API on every page load."""
+    """Fetches fresh data from Quiver and stores it in the database, so the
+    dashboard can query instantly without hitting the API on every page load."""
     raw_trades = fetch_from_quiver()
-    with closing(get_connection()) as conn:
+    with connect() as conn:
         return _store_trades(conn, raw_trades)
 
 
 def _store_trades(conn, raw_trades):
-    fetched_at = datetime.now(timezone.utc).isoformat()
-
     inserted = 0
-    for t in raw_trades:
-        # Field names below follow Quiver's documented response shape —
-        # double check these keys against their docs if this errors, APIs
-        # do rename fields between versions.
-        # INSERT OR IGNORE: with the UNIQUE constraint above, re-running this
-        # on a schedule against overlapping data won't create duplicate rows
-        # — only genuinely new trades get inserted.
-        cur = conn.execute(
-            """INSERT OR IGNORE INTO trades (politician, chamber, party, ticker, transaction_type,
-                                    transaction_date, disclosure_date, amount_range, fetched_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                t.get("Representative") or t.get("Senator") or t.get("Name"),
-                t.get("Chamber") or ("Senate" if "Senator" in t else "House"),
-                t.get("Party"),
-                t.get("Ticker"),
-                t.get("Transaction"),
-                t.get("TransactionDate"),
-                t.get("ReportDate") or t.get("DisclosureDate"),
-                t.get("Range") or t.get("Amount"),
-                fetched_at,
-            ),
-        )
-        if cur.rowcount:  # actually inserted, not skipped as a duplicate
-            inserted += 1
-
-    conn.commit()
+    with conn.transaction():
+        for t in raw_trades:
+            name = t.get("Representative") or t.get("Senator") or t.get("Name")
+            if not name:  # unusable without a name (and the column is NOT NULL)
+                continue
+            # Field names below follow Quiver's documented response shape —
+            # double check these keys against their docs if this errors, APIs
+            # do rename fields between versions.
+            # ON CONFLICT DO NOTHING: the unique index on (politician, ticker,
+            # dates, type, amount) means re-running this against overlapping
+            # data only inserts genuinely new trades.
+            cur = conn.execute(
+                """INSERT INTO politician_trades (politician, chamber, party, ticker, transaction_type,
+                                                  transaction_date, disclosure_date, amount_range)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT DO NOTHING""",
+                (
+                    name,
+                    t.get("Chamber") or ("Senate" if "Senator" in t else "House"),
+                    t.get("Party"),
+                    t.get("Ticker"),
+                    t.get("Transaction"),
+                    t.get("TransactionDate"),
+                    t.get("ReportDate") or t.get("DisclosureDate"),
+                    t.get("Range") or t.get("Amount"),
+                ),
+            )
+            inserted += cur.rowcount  # 0 when skipped as a duplicate
     print(f"Refreshed cache: {inserted} new trade record(s) stored ({len(raw_trades)} fetched, rest already known).")
     return inserted
 
 
 def list_politicians():
     """Returns every politician with at least one disclosed trade, alphabetical."""
-    with closing(get_connection()) as conn:
-        rows = conn.execute(
-            "SELECT DISTINCT politician, party, chamber FROM trades WHERE politician IS NOT NULL ORDER BY politician"
+    with connect() as conn:
+        return conn.execute(
+            "SELECT DISTINCT politician, party, chamber FROM politician_trades ORDER BY politician"
         ).fetchall()
-    return [dict(r) for r in rows]
 
 
 def get_trades_for_politician(name):
     """Every trade for one politician, newest transaction date first."""
-    with closing(get_connection()) as conn:
-        rows = conn.execute(
+    with connect() as conn:
+        return conn.execute(
             """SELECT ticker, transaction_type, transaction_date, disclosure_date, amount_range
-               FROM trades
-               WHERE politician = ?
+               FROM politician_trades
+               WHERE politician = %s
                ORDER BY transaction_date DESC""",
             (name,),
         ).fetchall()
-    return [dict(r) for r in rows]
 
 
 def export_politician_csv(name, path=None):

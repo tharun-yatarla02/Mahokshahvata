@@ -42,20 +42,28 @@ ai_stock_platform/
 ├── news_sentiment/
 │   ├── news_sentiment_scraper.py    # Benzinga or RSS news -> sentiment via Claude (or local model)
 │   ├── company_tickers.csv          # ~1,000 company names -> tickers, as headlines spell them
-│   ├── sentiment_history.json       # recent sentiment history
 │   └── model/                       # optional local sentiment model (train + inference)
 ├── paper_trading/
-│   └── paper_trading_engine.py      # simulated portfolios, trades, P/L (stored in Firestore)
+│   └── paper_trading_engine.py      # simulated portfolios, trades, P/L (stored in PostgreSQL)
 ├── autopilot/
 │   └── autopilot.py                 # autopilot decisions: what to buy and sell, and why
 ├── politician_trades/
 │   └── politician_trades.py         # congressional trade disclosures via Quiver Quantitative
 ├── deploy/
 │   ├── gcp.sh                       # Milestone 2: creates the VM, firewall, IP and budget (first time)
-│   ├── docker_deploy.sh             # Milestone 3: pulls an image tag and runs it on the VM
-│   ├── registry-cleanup-policy.json # Artifact Registry: keep 5 newest + v1
-│   ├── migrate_sqlite_to_firestore.py  # one-off move of the old SQLite data into Firestore
+│   ├── docker_deploy.sh             # pulls an image tag and runs it on the VM
+│   ├── milestone4.sh                # Milestone 4: Cloud SQL (private IP), bucket, secrets, service account
+│   ├── migrate_data.sh              # Milestone 4, once: Firestore -> Cloud SQL with row counts
+│   └── registry-cleanup-policy.json # Artifact Registry: keep 5 newest + v1
+├── db/
+│   ├── migrations/001_initial.sql   # the tables (CREATE TABLE ...), applied by db/migrate.py
+│   ├── migrate.py                   # applies pending migrations at startup or by hand
+│   ├── connection.py                # PostgreSQL connection settings (DB_* variables)
+│   ├── firestore_to_postgres.py     # one-off copy of the Firestore data, with row counts
 │   └── find_duplicate_emails.py     # read-only: lists emails used by more than one account
+├── cloud/
+│   ├── blobs.py                     # files: the storage bucket on the VM, a local folder elsewhere
+│   └── secrets.py                   # loads passwords and API keys from Secret Manager at startup
 ├── docs/
 │   ├── HANDOFF.md                   # developer guide: setup, architecture, gotchas, next tasks
 │   └── PROJECT_STATUS.md            # current status and roadmap
@@ -82,7 +90,10 @@ pip install -r requirements-dev.txt   # app + test tools
 |---|---|---|
 | `ANTHROPIC_API_KEY` | News sentiment | Used to classify headlines with Claude (Haiku 4.5, structured outputs). Without it, a keyword fallback is used |
 | `SENTIMENT_BACKEND` | News sentiment | `claude` (default) or `local` — `local` needs a trained model, see `news_sentiment/model/train_sentiment_model.py` |
-| `GOOGLE_APPLICATION_CREDENTIALS` | Real sign-in | Path to your Firebase service-account JSON — see [auth/README.md](auth/README.md) |
+| `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_SSLMODE` | Database | PostgreSQL connection. Defaults: `localhost:5432`, database `mahokshahvata`, user `app`, no password (a local container that trusts local connections). On the VM: Cloud SQL's private IP, with the password from Secret Manager |
+| `DATA_BUCKET` | Files (VM) | Storage bucket for the market cache, sentiment history and profile photos. Unset locally: files go to `DATA_DIR` (default `.data/`) |
+| `SECRETS_PROJECT` | Secrets (VM) | GCP project whose Secret Manager holds `db-password`, `anthropic-api-key` and the optional provider keys; loaded at startup. Unset locally: `.env` is used |
+| `FIREBASE_PROJECT_ID` | Google sign-in | Firebase project whose ID tokens are accepted (default `mahokshahvata-ae5f9`). No key file is needed — see [auth/README.md](auth/README.md) |
 | `USE_DEMO_AUTH` | Local development | `true` enables the shared demo account ("Continue with demo account" on the sign-in page, token `demo-token`). Leave it off in any shared deployment |
 | `QUIVER_API_KEY` | Politician trades | Free-tier key from quiverquant.com, used by `POST /politicians/refresh` |
 | `MARKET_UNIVERSE_SIZE` | Market data | How many of the largest US stocks to track (default 3000) |
@@ -121,19 +132,22 @@ Then open:
 
 ### With Docker
 
-Everything in containers, with a local Firestore emulator (no cloud
-credentials needed, nothing touches real data):
+Everything in containers, with a local PostgreSQL (no cloud credentials
+needed, nothing touches real data):
 
 ```bash
 docker compose up --build        # then open http://localhost
 ```
 
-The app sits behind Caddy on port 80; market data is kept in the `app-data`
-volume across restarts. Your `.env` (e.g. `ANTHROPIC_API_KEY`) is passed in at
-run time, never built into the image.
+The app sits behind Caddy on port 80; the database and files are kept in the
+`pg-data` and `app-data` volumes across restarts. Your `.env` (e.g.
+`ANTHROPIC_API_KEY`) is passed in at run time on laptops only, never built into
+the image; the VM has no `.env` at all.
 
 To deploy: build and push a version, then run it on the VM (which needs only
-Docker). See [docs/deploy/MILESTONE3.md](docs/deploy/MILESTONE3.md).
+Docker). On the VM, every piece of state lives outside it: Cloud SQL (private
+IP), a Cloud Storage bucket and Secret Manager, reached as the VM's own service
+account. See [docs/deploy/MILESTONE4.md](docs/deploy/MILESTONE4.md).
 
 ```bash
 IMG=us-central1-docker.pkg.dev/project-262a2026-879b-4b49-88e/mahokshahvata/app
@@ -309,20 +323,19 @@ the price time and source and warns when prices are stale.
 Every page except `/login.html` requires sign-in; signed-out visitors are
 sent to the sign-in page and returned where they were afterwards.
 
-- **Storage:** users, sessions and portfolios live in Cloud Firestore, the
-  Firebase project's database (layout at the top of
-  `paper_trading/paper_trading_engine.py`).
-- **Email and password accounts** are stored in the `users` collection.
+- **Storage:** users, sessions and portfolios live in PostgreSQL (Cloud SQL on
+  a private IP in production); the tables are in `db/migrations/001_initial.sql`.
+- **Email and password accounts** are stored in the `users` table.
   Passwords are hashed with scrypt and a per-user salt
   (`auth/passwords.py`); the plain password is never stored.
 - **Google accounts:** "Continue with Google" opens Firebase's Google popup;
   the server checks the resulting Firebase ID token (`POST /auth/google`) and
-  starts a normal session. Needs the Firebase Admin key
-  (`GOOGLE_APPLICATION_CREDENTIALS`) and the site's address in Firebase
-  Authentication's authorized domains.
+  starts a normal session. Checking the token needs only the Firebase project
+  id (no key file), plus the site's address in Firebase Authentication's
+  authorized domains.
 - **Sessions:** signing in creates a random token that the browser keeps in
   `localStorage` and sends as `Authorization: Bearer <token>`. The `sessions`
-  collection stores only its SHA-256 hash, with a 30-day expiry. Logging out
+  table stores only its SHA-256 hash, with a 30-day expiry. Logging out
   deletes it; changing the password deletes the user's other sessions.
 - **Sign-in throttling:** after 5 failed sign-ins for one email, or 20 from
   one IP address, within 15 minutes, `POST /auth/login` returns 429 ("Too many
@@ -331,7 +344,7 @@ sent to the sign-in page and returned where they were afterwards.
   sign-in clears that email's count. Counts are in memory (`auth/rate_limit.py`),
   so a restart clears them.
 - **Sign-in history:** every register, login, failed login, throttled login
-  and logout is recorded in the `auth_events` collection (user, method, IP, browser, time).
+  and logout is recorded in the `auth_events` table (user, method, IP, browser, time).
 - **One account per email**, whatever the sign-in method:
   - Registering, or changing a profile email, to an address another account
     uses is refused (409). When that account uses Google, the message says so.
@@ -352,7 +365,7 @@ sent to the sign-in page and returned where they were afterwards.
 - **New accounts** start with a $100,000 simulated portfolio.
 - **Profile page** (`/profile.html`, from the account menu): change name, and
   email and password for email/password accounts (Google accounts get both
-  from Google).
+  from Google), and upload a profile photo, shown in the account menu.
 - **Demo account:** with `USE_DEMO_AUTH=true`, "Continue with demo account"
   signs in as the shared demo user (token `demo-token`).
 - Each account only ever sees its own portfolios, holdings and trades.
@@ -371,6 +384,9 @@ user only sees their own portfolios.
 | POST | `/auth/logout` | End this session |
 | GET | `/auth/me` 🔒 | The signed-in user's profile |
 | PATCH | `/auth/me` 🔒 | Change name, and email for email/password accounts; 409 if another account uses the email |
+| POST | `/auth/me/photo` 🔒 | Upload a profile photo (multipart field `photo`; JPEG, PNG or WebP by content, up to 2 MB), stored in the storage bucket; replaces the old one |
+| GET | `/auth/me/photo` 🔒 | Your profile photo (private: served only to its owner, never from a public URL) |
+| DELETE | `/auth/me/photo` 🔒 | Remove it from the bucket |
 | POST | `/auth/password` 🔒 | Change password (`current_password`, `new_password`); signs out other sessions |
 | GET | `/health` | Health check |
 | GET | `/momentum?top=50&offset=0` | Tracked stocks ranked by momentum. Also takes `q` (search ticker/company/sector), `sector` (name, alias like `Tech`, or theme like `AI`) and `sort` (`momentum`, `market_cap`, `day_change`, `volume`) |
@@ -427,13 +443,13 @@ curl http://localhost:8000/portfolio/1 -H "$AUTH"
 ```bash
 python momentum/momentum_engine.py                  # default universe
 python momentum/momentum_engine.py AAPL MSFT NVDA   # custom tickers
-python news_sentiment/news_sentiment_scraper.py
-python politician_trades/politician_trades.py       # needs QUIVER_API_KEY
+python -m news_sentiment.news_sentiment_scraper
+python -m politician_trades.politician_trades       # needs QUIVER_API_KEY and the database
 ```
 
 ## Tests
 
-Start the Firestore emulator first (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)), then:
+Start a local PostgreSQL first (one `docker run`, see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)), then:
 
 ```bash
 pytest
@@ -463,8 +479,9 @@ See [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) for the full roadmap.
 - **Building a portfolio from momentum** (`POST /portfolio/{id}/build`) buys
   whole shares only; leftover cash stays as cash. Manual orders can be
   fractional.
-- **One server process** — trades are serialized by an in-process lock, so
-  run a single uvicorn worker. Several would need Firestore transactions.
+- **One server process** — the market-data thread and the autopilot scheduler
+  run inside the app, so run a single uvicorn worker. (Trades themselves are
+  safe across processes: they lock the portfolio row in PostgreSQL.)
 - **News is refreshed on demand** — market data refreshes in a background
   thread and the autopilot runs on its own schedule, but headlines are only
   fetched when `/news-sentiment` is called (cached 5 minutes).

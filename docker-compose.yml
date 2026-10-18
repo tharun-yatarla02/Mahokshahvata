@@ -1,9 +1,12 @@
 # Shared by laptops and the VM. Laptops also pick up docker-compose.override.yml
-# automatically (local build + Firestore emulator); the VM adds docker-compose.vm.yml.
+# automatically (local build, local Postgres, a .env for keys); the VM adds
+# docker-compose.vm.yml (Cloud SQL, the storage bucket, Secret Manager).
 #
 #   laptop:  docker compose up --build              -> http://localhost
 #   VM:      docker compose -f docker-compose.yml -f docker-compose.vm.yml up -d
 #
+# The app keeps no state in its container or on the VM's disk: the database is
+# Cloud SQL, files are in Cloud Storage, and keys come from Secret Manager.
 # Network: both services share the default compose network; only Caddy
 # publishes a port. The app is reachable inside the network as app:8000.
 
@@ -12,13 +15,6 @@ name: mahokshahvata
 services:
   app:
     image: ${IMAGE:-us-central1-docker.pkg.dev/project-262a2026-879b-4b49-88e/mahokshahvata/app}:${TAG:-v1}
-    env_file:
-      - path: .env          # ANTHROPIC_API_KEY etc.; read at run time, never in the image
-        required: false
-    environment:
-      DATA_DIR: /data
-    volumes:
-      - app-data:/data      # market cache, sentiment history: survive restarts and new images
     expose:
       - "8000"
     restart: unless-stopped
@@ -38,6 +34,3 @@ services:
     logging:
       driver: json-file
       options: { max-size: "10m", max-file: "3" }
-
-volumes:
-  app-data:

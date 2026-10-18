@@ -36,8 +36,8 @@ uvicorn api.main:app --reload          # then open http://localhost:8000
 - The Market page says *"Loading market data…"* for about **2 minutes** while
   it downloads price history for 3,000 stocks. After that it's cached in
   `momentum/market_cache.json`, and restarts are instant.
-- The first page you open creates a $100,000 demo portfolio in Firestore
-  (the local emulator when developing; see docs/DEVELOPMENT.md).
+- The first page you open creates a $100,000 demo portfolio in PostgreSQL
+  (a local container when developing; see docs/DEVELOPMENT.md).
 - The Sentiment page uses Claude if `ANTHROPIC_API_KEY` is set; without it,
   headlines are labeled by a simple keyword fallback (works, less accurate).
   Use **your own** API key; never commit it.
@@ -60,10 +60,13 @@ uvicorn api.main:app --reload          # then open http://localhost:8000
 api/main.py                  FastAPI app: every endpoint, request validation, serves the frontend.
                              Also: .env loader, trade planning (_plan_order), sentiment cache.
 paper_trading/
-  paper_trading_engine.py    Paper-trading engine (Firestore): users, sessions, sign-in history,
+  paper_trading_engine.py    Paper-trading engine (PostgreSQL): users, sessions, sign-in history,
                              portfolios, trades, options, P/L, daily snapshots. Thread-safe (@_locked).
+db/                          Tables (migrations/001_initial.sql), migration runner, connection settings.
+cloud/                       blobs.py: files in the storage bucket (local .data/ folder on laptops);
+                             secrets.py: passwords and API keys from Secret Manager on the VM.
 momentum/
-  market_data.py             Background service: top-3,000 US stocks, quotes + history, disk cache.
+  market_data.py             Background service: top-3,000 US stocks, quotes + history, cached in the bucket.
   momentum_engine.py         Momentum math, sector/theme filters (AI, Tech, ...), stock search.
 news_sentiment/
   news_sentiment_scraper.py  RSS fetch -> match headlines to companies -> classify (Claude
@@ -229,7 +232,7 @@ Starting points for the next tasks:
 | Task | Where to start |
 |---|---|
 | **Portfolio builder / multiple portfolios UI** | Endpoints exist: `POST /portfolio/{id}/build`, `GET/POST /portfolio`. Pages pick the portfolio via `getPortfolioId()` in `frontend/api.js` |
-| **Sign-in history retention** | `log_auth_event()` in `paper_trading/paper_trading_engine.py` writes `auth_events`; add a cleanup (or a Firestore TTL policy on `at`) for rows older than ~90 days |
-| **Watchlists and price alerts** | New per-user Firestore collection; prices come from `market_data.lookup()` in `api/main.py` |
+| **Sign-in history retention** | `log_auth_event()` in `paper_trading/paper_trading_engine.py` writes `auth_events`; add a scheduled `DELETE FROM auth_events WHERE at < now() - interval '90 days'` |
+| **Watchlists and price alerts** | New table in a `db/migrations/002_*.sql`; prices come from `market_data.lookup()` in `api/main.py` |
 | **Options contract multiplier** | Cost is `quantity × premium` in `trade_option()` (engine) and `renderCostPreview()` in `frontend/options.html`; a real contract is 100 shares |
 | **Own sentiment model** | `news_sentiment/model/` + `SENTIMENT_BACKEND=local`. Plan in PROJECT_STATUS item 13. Note `classify_all_local()` reloads the model on every call; cache it |

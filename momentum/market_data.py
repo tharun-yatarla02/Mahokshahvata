@@ -44,6 +44,7 @@ import pandas as pd
 import requests
 import yfinance as yf
 
+from cloud.blobs import LocalStore, default_store
 from momentum.momentum_engine import BENCHMARK_TICKER, DEFAULT_SECTOR_LOOKUP, DEFAULT_UNIVERSE
 
 log = logging.getLogger(__name__)
@@ -59,8 +60,9 @@ HISTORY_REFRESH_SECONDS = 6 * 60 * 60
 HISTORY_RETRY_SECONDS = 15 * 60  # after a failed history download
 MIN_HISTORY_COVERAGE = 0.5       # a download with less than this is treated as failed
 HISTORY_CHUNK_SIZE = 500
-# DATA_DIR moves runtime files out of the code tree (the Docker volume).
-DEFAULT_CACHE_PATH = Path(os.environ.get("DATA_DIR") or Path(__file__).parent) / "market_cache.json"
+# The snapshot lives in the app's store (cloud/blobs.py): the storage bucket
+# on the VM, so a new VM starts with yesterday's prices instead of from zero.
+CACHE_OBJECT = "market_cache.json"
 
 # Nasdaq's sector names, mapped onto the names the rest of the app uses.
 SECTOR_NAMES = {"Finance": "Financials", "Health Care": "Healthcare", "": "Unknown"}
@@ -219,8 +221,12 @@ def fetch_lookback_prices_massive(tickers, lookback_days, api_key, today=None):
 
 
 class MarketData:
-    def __init__(self, cache_path=DEFAULT_CACHE_PATH, universe_size=None, lookback_days=90):
-        self.cache_path = Path(cache_path)
+    def __init__(self, cache_path=None, universe_size=None, lookback_days=90):
+        """cache_path: keep the snapshot in this local file instead of the app's store (tests)."""
+        if cache_path:
+            self.store, self.cache_name = LocalStore(Path(cache_path).parent), Path(cache_path).name
+        else:
+            self.store, self.cache_name = default_store(), CACHE_OBJECT
         self.universe_size = universe_size or int(os.environ.get("MARKET_UNIVERSE_SIZE", "3000"))
         self.lookback_days = lookback_days
         self._lock = threading.Lock()
@@ -394,8 +400,12 @@ class MarketData:
 
     def _load(self):
         try:
-            data = json.loads(self.cache_path.read_text())
-        except (OSError, ValueError):
+            raw = self.store.read(self.cache_name)
+            data = json.loads(raw) if raw else None
+        except Exception as e:  # unreadable or bucket unreachable: start empty, like a first run
+            log.warning("Could not load market cache from %s: %s", self.store, e)
+            return
+        if not isinstance(data, dict):
             return
         with self._lock:
             self._universe = data.get("universe", [])
@@ -413,12 +423,10 @@ class MarketData:
             "quotes_updated_at": self.quotes_updated_at,
             "history_updated_at": self.history_updated_at,
         }
-        tmp = self.cache_path.with_suffix(".tmp")
         try:
-            tmp.write_text(json.dumps(data))
-            tmp.replace(self.cache_path)
-        except OSError as e:
-            log.warning("Could not save market cache: %s", e)
+            self.store.write(self.cache_name, json.dumps(data).encode(), "application/json")
+        except Exception as e:  # keep serving from memory; the next refresh tries again
+            log.warning("Could not save market cache to %s: %s", self.store, e)
 
 
 def _now():

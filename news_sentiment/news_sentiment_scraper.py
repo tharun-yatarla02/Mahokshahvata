@@ -54,6 +54,8 @@ try:
 except ImportError:
     Anthropic = None  # only required when SENTIMENT_BACKEND="claude"
 
+from cloud.blobs import default_store
+
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
@@ -69,9 +71,13 @@ RSS_FEEDS = {
 }
 
 TICKER_CSV = Path(__file__).parent / "company_tickers.csv"
-DATA_DIR = Path(os.environ.get("DATA_DIR") or Path(__file__).parent)  # runtime files (the Docker volume)
-OUTPUT_CSV = DATA_DIR / "news_sentiment_output.csv"
-HISTORY_FILE = DATA_DIR / "sentiment_history.json"
+OUTPUT_CSV = Path(__file__).parent / "news_sentiment_output.csv"  # only when run from the command line
+HISTORY_OBJECT = "sentiment_history.json"  # in the app's store: the storage bucket on the VM
+history_store = None  # the app's store (cloud/blobs.py) unless a test swaps in its own
+
+
+def _history_store():
+    return history_store or default_store()
 HISTORY_RETENTION_DAYS = 5
 
 # Macro/geopolitical themes that move whole sectors even when no specific
@@ -738,12 +744,11 @@ def heuristic_sentiment(articles, reasoning):
 
 
 def load_history_store():
-    if not HISTORY_FILE.exists():
-        return []
     try:
-        with open(HISTORY_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except (json.JSONDecodeError, OSError):
+        raw = _history_store().read(HISTORY_OBJECT)
+        data = json.loads(raw) if raw else []
+    except Exception as e:  # unreadable, or the bucket is unreachable
+        print(f"[warn] could not read sentiment history: {type(e).__name__}: {e}", file=sys.stderr)
         return []
     if not isinstance(data, list):
         return []
@@ -774,8 +779,10 @@ def save_history(results):
     }
     history.append(entry)
     history = prune_history(history)
-    with open(HISTORY_FILE, "w", encoding="utf-8") as f:
-        json.dump(history, f, indent=2)
+    try:
+        _history_store().write(HISTORY_OBJECT, json.dumps(history, indent=2).encode(), "application/json")
+    except Exception as e:  # history is a record, not something a page needs; don't fail the request
+        print(f"[warn] could not save sentiment history: {type(e).__name__}: {e}", file=sys.stderr)
     return history
 
 

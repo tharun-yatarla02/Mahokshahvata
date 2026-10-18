@@ -14,9 +14,10 @@ Why Firebase instead of raw Google Cloud OAuth:
     verification wall raw Google Cloud OAuth can hit. No domain, no company
     registration needed.
 
-Setup: GOOGLE_APPLICATION_CREDENTIALS must point at the Firebase project's
-Admin key (Project settings -> Service accounts -> Generate new private key).
-Full steps in auth/README.md.
+Setup: checking an ID token needs only the Firebase project id
+(FIREBASE_PROJECT_ID, default mahokshahvata-ae5f9): the SDK verifies the
+token's signature against Google's public keys. No service-account key file
+is needed, and none is used on the VM. Full steps in auth/README.md.
 """
 
 import os
@@ -31,13 +32,21 @@ _app_lock = threading.Lock()
 DEMO_TOKEN = "demo-token"
 
 
+class _NoCredentials(credentials.Base):
+    """verify_id_token only checks signatures with Google's public keys, so the
+    SDK needs no credentials; this keeps it from looking for a key file."""
+
+    def get_credential(self):
+        return None
+
+
 def _get_app():
-    """Lazily initializes the Firebase Admin SDK on first use, using the
-    service account JSON pointed to by GOOGLE_APPLICATION_CREDENTIALS."""
+    """Lazily initializes the Firebase Admin SDK on first use, for token checks only."""
     global _app
     with _app_lock:  # two first requests at once would both try to initialize
         if _app is None:
-            _app = firebase_admin.initialize_app(credentials.ApplicationDefault())
+            project = os.environ.get("FIREBASE_PROJECT_ID", "mahokshahvata-ae5f9")
+            _app = firebase_admin.initialize_app(_NoCredentials(), {"projectId": project})
     return _app
 
 

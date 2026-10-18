@@ -1,33 +1,53 @@
-"""Engine tests run against the local Firestore emulator, never the real
-database. Start it first (it needs Java 21+):
+"""Engine tests run against a local PostgreSQL, never the real database.
+Start one first (local connections are trusted, so there is no password):
 
-    gcloud emulators firestore start --host-port=127.0.0.1:8681
+    docker run -d --name mahokshahvata-pg -p 127.0.0.1:5433:5432 \
+      -e POSTGRES_HOST_AUTH_METHOD=trust -e POSTGRES_USER=app -e POSTGRES_DB=mahokshahvata postgres:16-alpine
 
-Each engine gets its own project id, so tests never see each other's data.
+Each engine gets its own schema with the migrations applied, so tests never
+see each other's rows; the schemas are dropped when the run ends.
 """
 import os
-import socket
 import sys
 import uuid
 
+import psycopg
 import pytest
-from google.cloud import firestore
 
-# Set before api.main is imported: it builds its engine (a Firestore client) at import.
-os.environ["FIRESTORE_EMULATOR_HOST"] = os.environ.get("FIRESTORE_EMULATOR_HOST", "127.0.0.1:8681")
-os.environ.setdefault("GOOGLE_CLOUD_PROJECT", "test-project")
+# Set before api.main is imported. CI's Postgres listens on 5432.
+os.environ.setdefault("DB_HOST", "localhost")
+os.environ.setdefault("DB_PORT", "5433")
+os.environ.pop("DB_PASSWORD", None)
 
+from db.connection import connect  # noqa: E402
+from db.migrate import migrate  # noqa: E402
 from paper_trading.paper_trading_engine import PaperTradingEngine  # noqa: E402
+
+_schemas = []
+
+
+@pytest.fixture(scope="session")
+def _database():
+    try:
+        conn = connect()
+    except psycopg.OperationalError as e:
+        pytest.fail(f"PostgreSQL isn't running on {os.environ['DB_HOST']}:{os.environ['DB_PORT']} (see tests/conftest.py): {e}")
+    yield conn
+    for schema in _schemas:
+        conn.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")
+    conn.close()
 
 
 @pytest.fixture
-def make_engine():
-    host, port = os.environ["FIRESTORE_EMULATOR_HOST"].rsplit(":", 1)
-    try:
-        socket.create_connection((host, int(port)), timeout=1).close()
-    except OSError:
-        pytest.fail("Firestore emulator isn't running: gcloud emulators firestore start --host-port=127.0.0.1:8681")
-    return lambda: PaperTradingEngine(firestore.Client(project=f"test-{uuid.uuid4().hex[:12]}"))
+def make_engine(_database):
+    def make():
+        schema = f"test_{uuid.uuid4().hex[:12]}"
+        _database.execute(f"CREATE SCHEMA {schema}")
+        _schemas.append(schema)
+        with connect(schema=schema) as conn:
+            migrate(conn)
+        return PaperTradingEngine(lambda: connect(schema=schema))
+    return make
 
 
 @pytest.fixture(autouse=True)

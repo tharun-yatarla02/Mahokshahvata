@@ -221,6 +221,21 @@ h1, h2, h3 { font-family: var(--font-display); color: var(--text); }
   letter-spacing: 0;
 }
 
+.profile-avatar.has-photo { background-size: cover; background-position: center; }
+
+.photo-row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.photo-preview {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--surface-3) center / cover no-repeat;
+  color: var(--text);
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+
 .profile-menu {
   position: absolute;
   right: 0;

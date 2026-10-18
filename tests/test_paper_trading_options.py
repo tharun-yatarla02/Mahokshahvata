@@ -83,10 +83,8 @@ def test_summary_percentages_and_position_weights_are_consistent(make_engine):
     portfolio_id = engine.create_portfolio(user_id, "Math Portfolio", 10000)
 
     for ticker, sector, quantity, price in [("AAPL", "Technology", 10, 100.0), ("MSFT", "Technology", 5, 200.0), ("XOM", "Energy", 8, 75.0)]:
-        engine._holding_ref(portfolio_id, ticker).set({
-            "portfolio_id": portfolio_id, "ticker": ticker, "sector": sector, "instrument_type": "STOCK",
-            "position_key": ticker, "quantity": quantity, "avg_buy_price": price,
-        })
+        engine._add_to_holding(portfolio_id, ticker, None, quantity, price,
+                               {"ticker": ticker, "sector": sector, "instrument_type": "STOCK"})
 
     summary = engine.get_portfolio_summary(portfolio_id, user_id)
     total_invested = summary["total_invested"]
@@ -167,7 +165,7 @@ def test_cash_stays_exact_to_the_cent_after_many_trades(make_engine):
         engine.trade_stock(pid, user, "AAPL", 1, 33.33)  # 3 x 33.33 = 99.99 exactly
 
     assert engine.get_portfolio_summary(pid, user)["cash_balance"] == 0.01
-    raw = engine._portfolio_ref(pid).get().get("cash_balance")
+    raw = engine._row("SELECT cash_balance FROM portfolios WHERE id = %s", (pid,))["cash_balance"]
     assert raw == 0.01
 
 

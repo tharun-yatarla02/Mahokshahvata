@@ -32,6 +32,7 @@ Endpoints:
 """
 
 import os
+import secrets
 import sys
 import threading
 import time
@@ -41,10 +42,10 @@ from pathlib import Path
 from typing import Annotated
 from zoneinfo import ZoneInfo
 
-from fastapi import FastAPI, HTTPException, Depends, Header, Query, Request, Path as FastAPIPath
+from fastapi import FastAPI, HTTPException, Depends, File, Header, Query, Request, UploadFile, Path as FastAPIPath
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, BeforeValidator, Field, create_model, model_validator
 
 
@@ -65,7 +66,10 @@ def _load_dotenv(path=Path(__file__).parent.parent / ".env"):
 
 
 # Before the project imports: some modules read their settings at import time.
+# On the VM there is no .env: SECRETS_PROJECT makes the keys come from Secret Manager.
 _load_dotenv()
+from cloud.secrets import load_secrets  # noqa: E402
+print(f"[info] secrets from Secret Manager: {', '.join(load_secrets()) or 'none'}", file=sys.stderr)
 
 from momentum.momentum_engine import latest_price, fetch_price_history, filter_by_group, search_rows, DEFAULT_SECTOR_LOOKUP
 from momentum.market_data import MarketData
@@ -82,11 +86,18 @@ from fundamentals.sec_edgar import get_fundamentals
 from explain.stock_explainer import build_facts, explain_with_claude, explain_with_rules
 from autopilot.autopilot import SETTINGS as AUTOPILOT_SETTINGS, clamp_settings, plan_run
 from momentum.market_calendar import market_status, session as market_session
+from db.connection import connect as db_connect
+from cloud.blobs import default_store
+from db.migrate import migrate
 
 @asynccontextmanager
 async def lifespan(app):
-    # Loads the saved market snapshot, then keeps quotes and history fresh in
-    # a background thread (see momentum/market_data.py).
+    # Brings the database schema up to date (db/migrations), then loads the
+    # saved market snapshot and keeps quotes and history fresh in a background
+    # thread (see momentum/market_data.py).
+    with db_connect() as conn:
+        applied = migrate(conn)
+    print(f"[info] database migrations applied: {', '.join(applied) or 'none pending'}", file=sys.stderr)
     market_data.start()
     engine.fill_unknown_sectors(lambda ticker: (market_data.lookup(ticker) or {}).get("sector"))
     if os.environ.get("AUTOPILOT_SCHEDULER", "on").lower() != "off":
@@ -411,6 +422,56 @@ def update_me(req: UpdateProfileRequest, user_id: int = Depends(get_current_user
         engine.update_user(user_id, _clean_name(req.name), email)
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
+    return engine.get_user(user_id)
+
+
+# Profile photos: stored in the storage bucket (cloud/blobs.py) under
+# avatars/<user id>/, private, and served only to their owner through the API.
+MAX_PHOTO_BYTES = 2 * 1024 * 1024
+PHOTO_TYPES = {  # detected from the file's first bytes, not from its name or the browser's claim
+    "jpg": ("image/jpeg", lambda head: head.startswith(b"\xff\xd8\xff")),
+    "png": ("image/png", lambda head: head.startswith(b"\x89PNG\r\n\x1a\n")),
+    "webp": ("image/webp", lambda head: head[:4] == b"RIFF" and head[8:12] == b"WEBP"),
+}
+
+
+def _photo_type(data):
+    return next((ext for ext, (_, matches) in PHOTO_TYPES.items() if matches(data[:12])), None)
+
+
+@app.post("/auth/me/photo")
+def upload_photo(photo: UploadFile = File(...), user_id: int = Depends(get_current_user)):
+    """Saves a profile photo (JPEG, PNG or WebP, up to 2 MB) to the storage
+    bucket and replaces the previous one."""
+    data = photo.file.read(MAX_PHOTO_BYTES + 1)
+    if len(data) > MAX_PHOTO_BYTES:
+        raise HTTPException(status_code=413, detail="Photo is too large; the limit is 2 MB")
+    ext = _photo_type(data)
+    if ext is None:
+        raise HTTPException(status_code=415, detail="Upload a JPEG, PNG or WebP image")
+    name = f"avatars/{user_id}/{secrets.token_hex(8)}.{ext}"
+    default_store().write(name, data, PHOTO_TYPES[ext][0])
+    old = engine.set_photo_path(user_id, name)
+    if old:
+        default_store().delete(old)
+    return engine.get_user(user_id)
+
+
+@app.get("/auth/me/photo")
+def get_photo(user_id: int = Depends(get_current_user)):
+    name = engine.get_photo_path(user_id)
+    data = default_store().read(name) if name else None
+    if data is None:
+        raise HTTPException(status_code=404, detail="No profile photo")
+    return Response(data, media_type=PHOTO_TYPES[name.rsplit(".", 1)[-1]][0],
+                    headers={"Cache-Control": "private, max-age=300"})
+
+
+@app.delete("/auth/me/photo")
+def delete_photo(user_id: int = Depends(get_current_user)):
+    old = engine.set_photo_path(user_id, None)
+    if old:
+        default_store().delete(old)
     return engine.get_user(user_id)
 
 

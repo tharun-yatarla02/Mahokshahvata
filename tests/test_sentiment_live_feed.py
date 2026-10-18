@@ -1,12 +1,13 @@
 import pytest
 
 import news_sentiment.news_sentiment_scraper as scraper
+from cloud.blobs import LocalStore
 
 
 @pytest.fixture(autouse=True)
 def isolated_history(tmp_path, monkeypatch):
     """Keep tests from writing to the real sentiment_history.json."""
-    monkeypatch.setattr(scraper, "HISTORY_FILE", tmp_path / "sentiment_history.json")
+    monkeypatch.setattr(scraper, "history_store", LocalStore(tmp_path))
 
 
 def test_collect_sentiment_results_uses_live_feed_when_matches_exist(monkeypatch):
@@ -164,7 +165,7 @@ def test_classifier_failure_falls_back_to_heuristic(monkeypatch):
     assert data["results"][0]["sentiment"] == "Positive"   # "rallies" / "strong"
     assert "fallback" in data["results"][0]["reasoning"].lower()
     assert "history" not in data                             # saved to disk, not sent to the browser
-    assert scraper.HISTORY_FILE.exists()
+    assert scraper.history_store.read(scraper.HISTORY_OBJECT)
 
 
 def test_articles_are_sorted_by_publish_time_not_date_text(monkeypatch):

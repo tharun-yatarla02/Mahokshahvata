@@ -9,7 +9,8 @@ firebase-admin.json
 firebase-adminsdk-*.json
 *serviceAccountKey*.json
 
-# Runtime data: lives in the /data volume, and a stale copy would ship old prices
+# Runtime data: lives in Cloud SQL / Cloud Storage, and a stale copy would ship old prices
+.data/
 *.db
 *.sqlite3
 momentum/market_cache.json

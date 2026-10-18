@@ -11,7 +11,13 @@ brotli>=1.2  # anthropic's HTTP client decodes brotli replies; 1.0.x crashes it 
 # Auth (Firebase)
 firebase-admin>=6.5
 
+# State outside the VM (Milestone 4): Cloud SQL, Cloud Storage, Secret Manager
+psycopg[binary]>=3.2
+google-cloud-storage>=2.18
+google-cloud-secret-manager>=2.20
+
 # Backend API
 fastapi>=0.115
+python-multipart>=0.0.9  # file uploads (profile photos)
 uvicorn[standard]>=0.30
 pydantic>=2.0

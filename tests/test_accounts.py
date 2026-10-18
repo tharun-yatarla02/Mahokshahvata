@@ -63,8 +63,8 @@ def test_duplicate_email_and_weak_input_are_rejected(client):
 
 def test_password_is_stored_hashed_and_session_token_is_not_stored(client, engine):
     token = register(client, password="plain-text-never")
-    stored_password = engine._where("users", "email", "ada@example.com")[0]["password_hash"]
-    stored_tokens = [s.id for s in engine.db.collection("sessions").stream()]
+    stored_password = engine._row("SELECT password_hash FROM users WHERE email = 'ada@example.com'")["password_hash"]
+    stored_tokens = [s["token_hash"] for s in engine._rows("SELECT token_hash FROM sessions")]
     assert stored_password.startswith("scrypt$") and "plain-text-never" not in stored_password
     assert stored_tokens and token not in stored_tokens
 
@@ -114,7 +114,7 @@ def test_accounts_cannot_see_each_others_portfolios(client):
 
 
 def events(engine):
-    rows = [e.to_dict() for e in engine.db.collection("auth_events").stream()]
+    rows = engine._rows("SELECT * FROM auth_events")
     return sorted((e["event"], e["method"], e["user_id"] is not None) for e in rows)
 
 
@@ -135,7 +135,7 @@ def test_google_sign_in_gets_a_session_and_is_logged(client, engine, monkeypatch
     assert client.post("/auth/logout", headers=auth(first["token"])).status_code == 200
     assert events(engine) == [("login", "google", True), ("login", "google", True),
                               ("login_failed", "google", False), ("logout", None, True)]
-    ips = {e.get("ip") for e in (d.to_dict() for d in engine.db.collection("auth_events").stream())}
+    ips = {e["ip"] for e in engine._rows("SELECT ip FROM auth_events")}
     assert "203.0.113.7" in ips
 
 
@@ -164,7 +164,7 @@ def test_google_sign_in_joins_the_existing_account_for_that_email(client, engine
 
     assert session["user"]["id"] == user_id and session["user"]["account_type"] == "google"
     assert "Mine" in {p["name"] for p in client.get("/portfolio", headers=auth(session["token"])).json()["portfolios"]}
-    assert len(engine._where("users", "email", "ada@example.com")) == 1
+    assert len(engine._rows("SELECT id FROM users WHERE email = 'ada@example.com'")) == 1
     # Whoever set the password never proved they own the email, so it stops working.
     assert client.get("/auth/me", headers=auth(old_token)).status_code == 401
     res = client.post("/auth/login", json={"email": "ada@example.com", "password": "analytical-engine"})

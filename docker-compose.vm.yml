@@ -1,14 +1,17 @@
-# VM only: real Firestore, with the Firebase Admin key handed in at run time.
-# The key file sits next to this file on the VM (chmod 600) and is mounted
-# read-only at /run/secrets/firebase-admin; it is never part of the image.
+# VM only. Every piece of state lives outside the VM, reached as the VM's own
+# service account (no key files) or over the private network:
+#   - database: Cloud SQL for PostgreSQL on a private IP (DB_HOST), TLS required
+#   - files:    the private storage bucket DATA_BUCKET (market cache, sentiment
+#               history, profile photos)
+#   - secrets:  Secret Manager in SECRETS_PROJECT (DB password, API keys),
+#               read into memory at startup; there is no .env on the VM
+# deploy/docker_deploy.sh supplies the values when it starts the containers.
 
 services:
   app:
     environment:
-      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/firebase-admin
-    secrets:
-      - firebase-admin
-
-secrets:
-  firebase-admin:
-    file: ./firebase-admin.json
+      DB_HOST: ${DB_HOST:?set by deploy/docker_deploy.sh}
+      DB_SSLMODE: require
+      DATA_BUCKET: ${DATA_BUCKET:?set by deploy/docker_deploy.sh}
+      SECRETS_PROJECT: ${SECRETS_PROJECT:?set by deploy/docker_deploy.sh}
+      FIREBASE_PROJECT_ID: mahokshahvata-ae5f9
