@@ -5,7 +5,7 @@ PostgreSQL on a private IP only**, files are in a **private Cloud Storage
 bucket** reached as the VM's service account, and passwords and API keys are in
 **Secret Manager**. The VM holds two compose files and nothing else.
 Slides: [Milestone4_State.pptx](Milestone4_State.pptx) (2 slides, speaker notes included). The app
-runs as image `app:v3` at **http://34.122.164.209** (firewalled to the team's IPs).
+runs as image `app:v4` at **http://34.122.164.209** (firewalled to the team's IPs).
 
 ## Where state lived, before and after
 
@@ -18,6 +18,7 @@ runs as image `app:v3` at **http://34.122.164.209** (firewalled to the team's IP
 | Database credential | Firebase Admin **key file** on the VM | `db-password` in Secret Manager; key file **deleted** |
 | Anthropic API key | `.env` on laptops; none on the VM | `anthropic-api-key` in Secret Manager; no `.env` on the VM |
 | VM identity | Default Compute Engine service account | Dedicated `mahokshahvata-vm` with least-privilege roles |
+| Google sign-in | Firebase project `mahokshahvata-ae5f9` (another member's account), checked with the Admin key file | The team's own Firebase project `mahokshahvata`, checked with the project id and Google's public keys: no key file |
 
 ## Identity and network
 
@@ -47,6 +48,9 @@ runs as image `app:v3` at **http://34.122.164.209** (firewalled to the team's IP
 | Pull the app image | `roles/artifactregistry.reader` | the `mahokshahvata` repository only |
 | Write VM logs and metrics | `roles/logging.logWriter`, `roles/monitoring.metricWriter` | project |
 
+- **Google sign-in:** Firebase project `mahokshahvata` (team-owned). The browser gets an
+  ID token from Google's popup; the server verifies its signature against Google's public
+  keys for that project id. No credential is involved, so there is no key to leak.
 - **Public:** the VM's HTTP port (team IPs only) and the static IP.
 - **Private:** Cloud SQL (reachable only from inside the VPC), the bucket (public access prevention enforced), the secrets.
 - **Not granted:** no Cloud SQL IAM role (the app connects over the private IP with the database password), no project-wide Editor, and no access to `db-admin-password` (the database admin's password, which the app never needs).
@@ -94,7 +98,7 @@ transaction. Politician trades had no rows to move (no Quiver key was configured
   service with daily backups and deletion protection. Deleting the VM doesn't touch it.
 - **Profile photos, the market snapshot and sentiment history** are in the bucket.
 - **The database password and API key** are in Secret Manager.
-- **The images** (`v1` to `v3`) are in Artifact Registry.
+- **The images** (`v1` to `v4`) are in Artifact Registry.
 - **The static IP `34.122.164.209`** is a separate reserved address that outlives the
   VM, so the URL and Firebase's authorized domain for Google sign-in stay valid.
 - **The firewall rules, the service account and its role bindings, and the budget
@@ -104,7 +108,7 @@ transaction. Politician trades had no rows to move (no Quiver key was configured
 **What breaks.**
 - **The website is down until a new VM exists.** Nothing serves traffic in the
   meantime: there is no load balancer, managed instance group or second VM. Recovery
-  is manual: `ALLOWED_IPS=… ./deploy/gcp.sh` then `TAG=v3 ./deploy/docker_deploy.sh`,
+  is manual: `ALLOWED_IPS=… ./deploy/gcp.sh` then `TAG=v4 ./deploy/docker_deploy.sh`,
   about 10 minutes (create the VM, install Docker, pull the image, start). Both scripts
   copy no state and no keys; the new VM is created as `mahokshahvata-vm` and finds
   everything through IAM. Someone with `gcloud` access to the project has to run them.
@@ -182,6 +186,6 @@ with connect() as c:
 ## Re-running or rolling back
 
 - Infrastructure (safe to re-run): `./deploy/milestone4.sh` (add `--switch` to move the VM to the service account).
-- Deploy: `TAG=v3 ./deploy/docker_deploy.sh`.
+- Deploy: `TAG=v4 ./deploy/docker_deploy.sh` (`v4` is `v3` with sign-in on the `mahokshahvata` Firebase project).
 - The one-time data move was `TAG=v3 ./deploy/migrate_data.sh`; it refuses to copy into a database that already has rows.
 - Images `v1`/`v2` use Firestore and the Firebase key, which no longer exists on the VM, so a rollback past `v3` would need the Milestone 3 setup. Firestore itself still holds the Milestone 3 data, untouched.
