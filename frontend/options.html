@@ -175,6 +175,8 @@
       let currentPortfolioId = null;
       let currentCash = null;
       let quoteRequest = 0;
+      let underlyingPrice = null;
+      let exampleTouched = false;  // the user typed a strike or premium (or is closing a position)
 
       function setOptionsStatus(message, kind = 'success') {
         optionsStatus.textContent = message;
@@ -234,6 +236,28 @@
         };
       }
 
+      // Example strike and premium from the live price: the next $5 step above it
+      // for a call, below it for a put, so the example is always a valid order.
+      function suggestExample() {
+        if (exampleTouched || !(underlyingPrice > 0)) return;
+        const step = underlyingPrice >= 25 ? 5 : 1;
+        const isPut = $('optionType').value === 'PUT';
+        const strike = (isPut ? Math.floor(underlyingPrice / step) : Math.ceil(underlyingPrice / step)) * step;
+        $('optionStrike').value = strike > 0 ? strike : step;
+        $('optionPremium').value = Math.max(0.05, Math.round(underlyingPrice * 0.03 * 20) / 20).toFixed(2);
+        renderCostPreview();
+      }
+
+      // The same bounds the server enforces (option_premium_problem in the engine).
+      function premiumBounds() {
+        const { option_type: type, strike, side } = readForm();
+        if (!(underlyingPrice > 0) || !(strike > 0)) return '';
+        const intrinsic = Math.max(0, type === 'PUT' ? strike - underlyingPrice : underlyingPrice - strike);
+        return side === 'BUY'
+          ? `Allowed premium ${formatCurrency(intrinsic)}–${formatCurrency(type === 'PUT' ? strike : underlyingPrice)}`
+          : `Sells get at most the higher of ${formatCurrency(intrinsic)} (intrinsic value) and what you paid`;
+      }
+
       function syncTypePills() {
         const type = $('optionType').value;
         document.querySelectorAll('.hero-pill-row .sector-pill').forEach((pill) => {
@@ -260,6 +284,8 @@
           over = after < 0;
           detail += ` · Cash after ${formatCurrency(after)}`;
         }
+        const bounds = premiumBounds();
+        if (bounds) detail += ` · ${bounds}`;
         preview.innerHTML = `<span>${label} <strong>${formatCurrency(total)}</strong></span><span>${escapeHtml(detail)}</span>`;
         preview.classList.toggle('over-budget', over);
       }
@@ -273,6 +299,9 @@
           const data = await apiFetch(`/momentum?q=${encodeURIComponent(ticker)}&top=5`);
           if (requestId !== quoteRequest) return;
           const match = (data.results || []).find((row) => row.ticker === ticker);
+          underlyingPrice = match ? Number(match.current_price) : null;
+          suggestExample();
+          renderCostPreview();
           quote.innerHTML = match
             ? `${escapeHtml(ticker)} <strong>${formatCurrency(match.current_price)}</strong>`
             : `${escapeHtml(ticker)} · no live price`;
@@ -287,6 +316,8 @@
         $('optionQuantity').value = '2';
         $('optionPremium').value = '8.5';
         $('optionExpiry').value = defaultExpiry();
+        exampleTouched = false;
+        suggestExample();
         syncTypePills();
         renderCostPreview();
         setOptionsStatus('Ready for a new option trade.', 'success');
@@ -342,6 +373,7 @@
 
       // Fill the form to sell an open position back.
       function prefillClose(position) {
+        exampleTouched = true;
         $('optionTicker').value = position.ticker;
         $('optionType').value = position.option_type;
         $('optionSide').value = 'SELL';
@@ -432,14 +464,17 @@
         pill.addEventListener('click', () => {
           $('optionType').value = pill.dataset.optionType;
           syncTypePills();
+          suggestExample();
+          renderCostPreview();
         });
       });
-      $('optionType').addEventListener('change', syncTypePills);
-      ['optionQuantity', 'optionPremium', 'optionSide'].forEach((id) => {
+      $('optionType').addEventListener('change', () => { syncTypePills(); suggestExample(); renderCostPreview(); });
+      ['optionQuantity', 'optionPremium', 'optionSide', 'optionStrike'].forEach((id) => {
         $(id).addEventListener('input', renderCostPreview);
         $(id).addEventListener('change', renderCostPreview);
       });
-      $('optionTicker').addEventListener('change', refreshUnderlyingQuote);
+      ['optionStrike', 'optionPremium'].forEach((id) => $(id).addEventListener('input', () => { exampleTouched = true; }));
+      $('optionTicker').addEventListener('change', () => { exampleTouched = false; refreshUnderlyingQuote(); });
       $('resetOptionBtn').addEventListener('click', resetForm);
       $('tradeHistoryBtn').addEventListener('click', () => Promise.all([refreshAccount(), refreshHistory()]));
 

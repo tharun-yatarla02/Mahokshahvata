@@ -195,6 +195,7 @@
         rawResults: [],
         currentPage: 1,
         pageSize: 25,
+        focusedTicker: null,  // set by clicking a suggested stock; typing in the search clears it
       };
 
       function formatPublished(value) {
@@ -236,7 +237,12 @@
             const title = String(item.title || '');
             const summary = String(item.summary || '');
             const text = `${title} ${summary} ${item.tickers || ''} ${item.companies || ''} ${item.sectors_affected || ''}`.toLowerCase();
-            const matchesQuery = !query || text.includes(query);
+            // A clicked stock matches its tagged tickers exactly: as text, a one-letter
+            // ticker like C (Citigroup) would match nearly every headline.
+            const tagged = String(item.tickers || '').split(',').map((t) => t.trim().toLowerCase());
+            const matchesQuery = sentimentState.focusedTicker
+              ? tagged.includes(sentimentState.focusedTicker.toLowerCase())
+              : !query || text.includes(query);
             const matchesSentiment = sentimentFilter === 'all' || sentiment === sentimentFilter;
             const matchesSource = sourceFilter === 'all' || source === sourceFilter;
             return matchesQuery && matchesSentiment && matchesSource;
@@ -512,6 +518,7 @@
       function focusTicker(ticker) {
         const search = document.getElementById('sentimentSearch');
         search.value = ticker;
+        sentimentState.focusedTicker = ticker;
         sentimentState.currentPage = 1;
         renderFeed();
         document.getElementById('newsFeedCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -585,6 +592,7 @@
         });
       });
       document.getElementById('sentimentSearch').addEventListener('input', () => {
+        sentimentState.focusedTicker = null;
         sentimentState.currentPage = 1;
         renderFeed();
       });
