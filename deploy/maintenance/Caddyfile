@@ -1,0 +1,9 @@
+# Served by deploy/migrate_data.sh while the app is stopped; docker_deploy.sh removes it.
+:80 {
+	root * /srv
+	header Retry-After 300
+	rewrite * /index.html
+	file_server {
+		status 503
+	}
+}

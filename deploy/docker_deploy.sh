@@ -44,6 +44,7 @@ compose() {
     docker compose -f docker-compose.yml -f docker-compose.vm.yml \"\$@\"
 }
 compose pull
+sudo docker rm -f maintenance >/dev/null 2>&1 || true   # the "Under maintenance" page from migrate_data.sh, if up
 compose up -d --remove-orphans
 # Startup takes 60-90 s on the e2-micro; Caddy starts once the app's health check passes.
 for i in \$(seq 90); do curl -sf -o /dev/null localhost:80/health && break; sleep 3; done

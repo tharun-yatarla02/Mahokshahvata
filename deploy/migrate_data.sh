@@ -4,7 +4,8 @@
 #
 #   TAG=v3 ./deploy/migrate_data.sh
 #
-#   1. Stops the app, so nobody writes to Firestore during the copy.
+#   1. Stops the app, so nobody writes to Firestore during the copy, and serves
+#      an "Under maintenance" page (HTTP 503) until docker_deploy.sh replaces it.
 #   2. Copies Firestore into Cloud SQL (db/firestore_to_postgres.py, in a
 #      throwaway container from the new image) and prints the row counts of
 #      both side by side; saved to docs/deploy/row_counts.txt here.
@@ -29,10 +30,15 @@ g() { gcloud --project "$PROJECT" "$@"; }
 DB_HOST=$(g sql instances describe "$SQL_INSTANCE" --format='value(ipAddresses.filter("type:PRIVATE").extract(ipAddress).flatten())')
 
 mkdir -p docs/deploy
+g compute scp deploy/maintenance/index.html deploy/maintenance/Caddyfile "$VM:/tmp/" --zone "$ZONE"
 set +e  # check the copy's result ourselves, so a failure prints how to recover
 g compute ssh "$VM" --zone "$ZONE" --command "set -euo pipefail
 cd $DIR
 sudo docker compose -p mahokshahvata stop app caddy 2>/dev/null || true
+sudo mkdir -p $DIR/maintenance && sudo mv /tmp/index.html /tmp/Caddyfile $DIR/maintenance/
+sudo docker rm -f maintenance >/dev/null 2>&1 || true
+sudo docker run -d --name maintenance --restart unless-stopped -p 80:80 \
+  -v $DIR/maintenance:/srv:ro -v $DIR/maintenance/Caddyfile:/etc/caddy/Caddyfile:ro caddy:2-alpine >/dev/null
 sudo gcloud auth configure-docker $REGION-docker.pkg.dev --quiet >/dev/null 2>&1
 sudo docker pull -q $IMAGE >/dev/null
 # The Firebase key is mounted read-only for Firestore alone; Secret Manager and
@@ -54,7 +60,7 @@ for f in market_cache.json sentiment_history.json; do
   sudo test -f $VOLUME/\$f && sudo gcloud storage cp $VOLUME/\$f gs://$BUCKET/\$f --quiet
 done
 sudo shred -u $DIR/firebase-admin.json
-sudo docker compose -p mahokshahvata down 2>/dev/null || true
+sudo docker compose -p mahokshahvata down 2>/dev/null || true   # the maintenance page keeps serving
 sudo docker volume rm mahokshahvata_app-data
 echo 'Removed the Firebase key file and the old data volume from the VM.'
 sudo ls -la $DIR"
