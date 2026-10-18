@@ -125,9 +125,11 @@ transaction. Politician trades had no rows to move (no Quiver key was configured
   So the record of what happened just before the deletion would be gone. Switching the
   Docker log driver to `gcplogs` would fix this.
 
-**Not caused by the VM, but worth saying:** the VM and Cloud SQL are both in the
-single zone `us-central1-a`, so a zone outage would take down the database too.
-Cloud SQL's high-availability option would fix that at about twice the cost.
+**Not caused by the VM, but worth saying:** both halves are single-zone. The VM is
+in `us-central1-a` and Cloud SQL in `us-central1-c` (zonal, no standby), so an outage
+of either zone stops the site. The data itself is safe either way: Cloud SQL keeps 7
+daily backups in Google's US multi-region. Cloud SQL's high-availability option (a
+standby in a second zone) would remove the database's zone risk at about twice its cost.
 
 In short: deleting the VM loses no data and no configuration, only uptime, and roughly
 ten minutes of someone running two scripts brings it back.
