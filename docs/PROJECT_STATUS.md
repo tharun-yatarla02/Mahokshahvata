@@ -1,26 +1,29 @@
 # Project Status
 
-_Last updated: 2026-10-17 (sign-in rate limiting, live page labels)_
+_Last updated: 2026-10-18 (Milestone 4: all state moved off the VM)_
 
 Picking this up? Read [HANDOFF.md](HANDOFF.md) first (setup, architecture,
 gotchas, and a starting point for each open task).
 
 ## Where we are
 
-**Live website, running from a Docker image.** The app runs at
-http://34.122.164.209 on a Google Cloud VM (firewalled to the team's IPs), with
-real sign-in and accounts stored in Cloud Firestore. It tracks the 3,000
-largest US stocks (~15 min delayed), reads live news with Claude, and lets each
-user paper-trade stocks and options. The same image (`app:v2` in Artifact
-Registry) runs on laptops with `docker compose up` and on the VM. 144 automated
-tests pass, and GitHub Actions runs them plus a Docker build on every push.
+**Live website with no state on the VM.** The app runs at
+http://34.122.164.209 on a Google Cloud VM (firewalled to the team's IPs). Its
+data is in Cloud SQL for PostgreSQL on a private IP, files are in a private
+Cloud Storage bucket, and keys are in Secret Manager, all reached as the VM's
+own service account; deleting the VM would cost only downtime (see
+[deploy/MILESTONE4.md](deploy/MILESTONE4.md)). It tracks the 3,000 largest US
+stocks (~15 min delayed), reads live news with Claude, and lets each user
+paper-trade stocks and options. The same image (`app:v3`) runs on laptops with
+`docker compose up` (with a local Postgres) and on the VM. 159 automated tests
+pass, and GitHub Actions runs them against Postgres plus a Docker build on every push.
 
 ## What works today
 
 | Area | What a user can do |
 |---|---|
 | **Sign-in** | Create an account with email and password, or Continue with Google. One account per email; 30-day sessions; clear messages for a taken email or a wrong password |
-| **Profile** | Change name; email and password for email accounts (changing the password signs out other devices) |
+| **Profile** | Change name; email and password for email accounts (changing the password signs out other devices); upload a profile photo (stored in the bucket, shown in the account menu) |
 | **Overview** | Account value, P/L, risk level, holdings; live Top Movers per sector (AI / Tech / Health / Energy) |
 | **Market** | Search, sort and filter the 3,000 largest US stocks; stock detail with a real 90-day price chart, SEC fundamentals, related news, and **Explain this stock** (a plain-English summary by Claude, or by rules without a key) |
 | **Portfolio** | Holdings at live prices; P/L against money deposited; sector breakdown; daily value chart; market-order trading by shares or dollars (fractional, $1 minimum, cash checks); trade history |
@@ -33,9 +36,11 @@ Behind the scenes:
 - **Hosting:** Docker image (non-root, health-checked, no secrets inside) in
   Artifact Registry; the VM runs it with Docker Compose behind Caddy. Deploy or
   roll back with `TAG=<version> ./deploy/docker_deploy.sh`. See
-  [deploy/MILESTONE3.md](deploy/MILESTONE3.md).
-- **Data:** accounts, portfolios, sessions and sign-in history in Firestore
-  (Firebase project `mahokshahvata-ae5f9`); market cache in a Docker volume.
+  [deploy/MILESTONE3.md](deploy/MILESTONE3.md) and [deploy/MILESTONE4.md](deploy/MILESTONE4.md).
+- **Data:** Cloud SQL PostgreSQL 16 (`mahokshahvata-db`, private IP only, TLS,
+  daily backups), tables from `db/migrations/`; files in
+  `gs://project-262a2026-879b-4b49-88e-app-data`; secrets in Secret Manager.
+  Firestore still holds the Milestone 3 copy, unused.
 - **Cost controls:** $50 budget with alerts at 10/20/25/50/100% plus a $100
   budget; free-tier e2-micro; registry cleanup policy; capped container logs.
   Current spend is $0.00 after the free tier.
@@ -90,8 +95,25 @@ Behind the scenes:
 ### Optional
 14. **Real-time prices:** a paid Massive key (`MASSIVE_API_KEY`) already
     switches quotes and history over; streaming quotes are not built.
+16. **Ship container logs to Cloud Logging** (Docker `gcplogs` driver): today they
+    live only on the VM's disk and would be lost with it.
+17. **Remove the old default service account's leftover access** (Artifact Registry
+    reader) now that the VM runs as `mahokshahvata-vm`.
+
 15. **Money as integer cents** instead of decimals rounded to cents, before
     adding fees or tax lots.
+
+## Done Oct 18 (Milestone 4)
+
+- **Firestore → Cloud SQL** (private IP only), 39 of 39 rows copied with ids kept;
+  politician trades moved from SQLite into the same database.
+- **Bucket** for the market cache, sentiment history and the new **profile photos**.
+- **Secret Manager** for the database passwords and the Anthropic key; no `.env` and
+  no key file on the VM (the Firebase Admin key was deleted). Google sign-in checks
+  tokens with the project id alone.
+- **Dedicated service account** `mahokshahvata-vm` with per-resource roles.
+- `v3` deployed; maintenance page during the move.
+- Still to do for the submission: screenshots, the 2 slides and the video (see MILESTONE4.md).
 
 ## Done Oct 17
 
