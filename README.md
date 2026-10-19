@@ -11,6 +11,12 @@ No real money is traded — every portfolio is simulated.
 > setup from a fresh clone, how the code fits together, gotchas, and where
 > to pick up. Progress and open work: [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md).
 
+**Live:** http://34.122.164.209 (firewalled to the team's IPs), image `v4`. The VM
+keeps no state: data is in Cloud SQL for PostgreSQL on a private IP, files are in a
+private Cloud Storage bucket, and keys are in Secret Manager, all reached as the VM's
+own service account. Google sign-in uses the team's Firebase project `mahokshahvata`
+with no key file. Details: [docs/deploy/MILESTONE4.md](docs/deploy/MILESTONE4.md).
+
 ## Project layout
 
 ```
@@ -50,10 +56,11 @@ ai_stock_platform/
 ├── politician_trades/
 │   └── politician_trades.py         # congressional trade disclosures via Quiver Quantitative
 ├── deploy/
-│   ├── gcp.sh                       # Milestone 2: creates the VM, firewall, IP and budget (first time)
+│   ├── gcp.sh                       # budget, firewall, static IP, and the VM as the app's service account
 │   ├── docker_deploy.sh             # pulls an image tag and runs it on the VM
 │   ├── milestone4.sh                # Milestone 4: Cloud SQL (private IP), bucket, secrets, service account
 │   ├── migrate_data.sh              # Milestone 4, once: Firestore -> Cloud SQL with row counts
+│   ├── maintenance/                 # "Under maintenance" page served during migrations
 │   └── registry-cleanup-policy.json # Artifact Registry: keep 5 newest + v1
 ├── db/
 │   ├── migrations/001_initial.sql   # the tables (CREATE TABLE ...), applied by db/migrate.py
@@ -66,7 +73,10 @@ ai_stock_platform/
 │   └── secrets.py                   # loads passwords and API keys from Secret Manager at startup
 ├── docs/
 │   ├── HANDOFF.md                   # developer guide: setup, architecture, gotchas, next tasks
-│   └── PROJECT_STATUS.md            # current status and roadmap
+│   ├── PROJECT_STATUS.md            # current status and roadmap
+│   ├── DEVELOPMENT.md               # local setup with a Postgres container
+│   ├── deploy/                      # milestone write-ups, slides, row counts, video scripts
+│   └── session-logs/                # what each working session changed
 ├── tests/                           # pytest suite
 ├── Dockerfile, .dockerignore        # the app image
 ├── docker-compose*.yml              # shared, laptop (override) and VM files
@@ -151,9 +161,28 @@ account. See [docs/deploy/MILESTONE4.md](docs/deploy/MILESTONE4.md).
 
 ```bash
 IMG=us-central1-docker.pkg.dev/project-262a2026-879b-4b49-88e/mahokshahvata/app
-docker buildx build --platform linux/amd64,linux/arm64 -t "${IMG}:v2" --push .
-TAG=v2 ./deploy/docker_deploy.sh  # roll back: TAG=v1 ./deploy/docker_deploy.sh
+docker buildx build --platform linux/amd64,linux/arm64 -t "${IMG}:v5" --push .
+TAG=v5 ./deploy/docker_deploy.sh  # roll back: TAG=v4 ./deploy/docker_deploy.sh
 ```
+
+Images before `v3` used Firestore and a key file, so rolling back past `v3` would
+need the Milestone 3 setup. Other scripts:
+
+| Script | Does |
+|---|---|
+| `./deploy/milestone4.sh` | Creates or updates Cloud SQL (private IP only), the bucket, the secrets and the `mahokshahvata-vm` service account; `--switch` moves the VM onto it. Safe to re-run |
+| `ALLOWED_IPS=… ./deploy/gcp.sh` | Budget alerts, firewall, static IP, and the VM (as the app's service account). Rebuilding a deleted VM is this plus `docker_deploy.sh`, about 10 minutes |
+| `TAG=… ./deploy/migrate_data.sh` | The one-time Firestore → Cloud SQL copy (done Oct 18; it refuses a database that already has rows) |
+
+The production database has no public IP, so database commands run on the VM, e.g.
+`sudo docker compose -p mahokshahvata exec app python -m db.migrate --status`.
+
+### Milestone write-ups
+
+| Milestone | Write-up | Submission files |
+|---|---|---|
+| 3: containers | [docs/deploy/MILESTONE3.md](docs/deploy/MILESTONE3.md) | [slides](docs/deploy/Milestone3_Containers.pptx), [video runbook](docs/deploy/Milestone3_Video_Runbook.md) |
+| 4: state out of the VM | [docs/deploy/MILESTONE4.md](docs/deploy/MILESTONE4.md) | [slides](docs/deploy/Milestone4_State.pptx), [1-page analysis](docs/deploy/Milestone4_Written_Analysis.pdf), [row counts](docs/deploy/row_counts.txt), [video script](docs/deploy/MILESTONE4_VIDEO.md) |
 
 ### Market data
 
@@ -485,3 +514,9 @@ See [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) for the full roadmap.
 - **News is refreshed on demand** — market data refreshes in a background
   thread and the autopilot runs on its own schedule, but headlines are only
   fetched when `/news-sentiment` is called (cached 5 minutes).
+- **One VM, one zone each** — no load balancer or second VM, so the site is down
+  until a deleted or failed VM is rebuilt (about 10 minutes with the two scripts).
+  The VM (`us-central1-a`) and Cloud SQL (`us-central1-c`, no standby) are each
+  single-zone; data is protected by 7 daily backups.
+- **Container logs stay on the VM's disk** and would be lost with it; Docker's
+  `gcplogs` driver would ship them to Cloud Logging.
