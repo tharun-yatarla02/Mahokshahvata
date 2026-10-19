@@ -1,6 +1,6 @@
 # Project Status
 
-_Last updated: 2026-10-18 (Milestone 4: all state moved off the VM)_
+_Last updated: 2026-10-18 (Milestone 4 done: state off the VM, sign-in on the team's Firebase project, v4 live)_
 
 Picking this up? Read [HANDOFF.md](HANDOFF.md) first (setup, architecture,
 gotchas, and a starting point for each open task).
@@ -14,7 +14,7 @@ Cloud Storage bucket, and keys are in Secret Manager, all reached as the VM's
 own service account; deleting the VM would cost only downtime (see
 [deploy/MILESTONE4.md](deploy/MILESTONE4.md)). It tracks the 3,000 largest US
 stocks (~15 min delayed), reads live news with Claude, and lets each user
-paper-trade stocks and options. The same image (`app:v3`) runs on laptops with
+paper-trade stocks and options. The same image (`app:v4`) runs on laptops with
 `docker compose up` (with a local Postgres) and on the VM. 159 automated tests
 pass, and GitHub Actions runs them against Postgres plus a Docker build on every push.
 
@@ -112,6 +112,12 @@ Behind the scenes:
   tokens with the project id alone.
 - **Dedicated service account** `mahokshahvata-vm` with per-resource roles.
 - `v3` deployed; maintenance page during the move.
+- **Google sign-in moved to the team's own Firebase project `mahokshahvata`** (`v4`);
+  existing Google users land in their same accounts. The old project
+  `mahokshahvata-ae5f9` belongs to another account; its key should be revoked by its owner.
+- **Open:** an old Milestone 2 folder in another member's home directory on the VM
+  still holds an unused copy of the old Firebase key and an Oct 1 SQLite file; left
+  in place for now at the team's request.
 - Still to do for the submission: screenshots, the 2 slides and the video (see MILESTONE4.md).
 
 ## Done Oct 17
