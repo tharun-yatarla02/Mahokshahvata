@@ -93,46 +93,53 @@ transaction. Politician trades had no rows to move (no Quiver key was configured
 
 ## Written analysis: if the VM were deleted right now
 
-**What survives.** Everything a user owns or the app needs to restart:
-- **All account and portfolio data** is in Cloud SQL, which is a separate managed
-  service with daily backups and deletion protection. Deleting the VM doesn't touch it.
-- **Profile photos, the market snapshot and sentiment history** are in the bucket.
-- **The database password and API key** are in Secret Manager.
-- **The images** (`v1` to `v4`) are in Artifact Registry.
-- **The static IP `34.122.164.209`** is a separate reserved address that outlives the
-  VM, so the URL and Firebase's authorized domain for Google sign-in stay valid.
-- **The firewall rules, the service account and its role bindings, and the budget
-  alerts** are project resources, not part of the VM.
-- **Users stay signed in:** sessions are rows in Cloud SQL, not memory.
+We would lose uptime, not data or configuration. Someone running two scripts
+brings the site back in about ten minutes.
 
-**What breaks.**
-- **The website is down until a new VM exists.** Nothing serves traffic in the
-  meantime: there is no load balancer, managed instance group or second VM. Recovery
-  is manual: `ALLOWED_IPS=… ./deploy/gcp.sh` then `TAG=v4 ./deploy/docker_deploy.sh`,
-  about 10 minutes (create the VM, install Docker, pull the image, start). Both scripts
-  copy no state and no keys; the new VM is created as `mahokshahvata-vm` and finds
-  everything through IAM. Someone with `gcloud` access to the project has to run them.
-- **In-memory state is lost and rebuilt automatically:** the login-throttle counters
-  (an attacker would get a fresh 5 attempts per email), and the caches for headlines,
-  stock explanations and price charts. Headlines get re-classified by Claude, a few
-  cents of API use.
-- **The autopilot can miss a day.** Its scheduler runs inside the app. If the outage
-  covers the 10:00–15:30 New York trading window, that day's run doesn't happen, and if
-  it covers the close, that day's closing value isn't recorded, so the next daily-loss
-  check compares against an older value.
-- **Container logs are lost.** Docker keeps them on the VM's disk; they aren't shipped
-  to Cloud Logging (the role is granted, but no logging agent or driver is configured).
-  So the record of what happened just before the deletion would be gone. Switching the
-  Docker log driver to `gcplogs` would fix this.
+### What survives
 
-**Not caused by the VM, but worth saying:** both halves are single-zone. The VM is
-in `us-central1-a` and Cloud SQL in `us-central1-c` (zonal, no standby), so an outage
-of either zone stops the site. The data itself is safe either way: Cloud SQL keeps 7
-daily backups in Google's US multi-region. Cloud SQL's high-availability option (a
-standby in a second zone) would remove the database's zone risk at about twice its cost.
+Account and portfolio data is in Cloud SQL for PostgreSQL, a separate managed
+service on a private IP with daily backups and deletion protection. Profile photos,
+the market snapshot and sentiment history are in a private Cloud Storage bucket, and
+the database password and Anthropic API key are in Secret Manager. The app images
+(`v1` to `v4`) stay in Artifact Registry.
 
-In short: deleting the VM loses no data and no configuration, only uptime, and roughly
-ten minutes of someone running two scripts brings it back.
+The static IP `34.122.164.209` is a separate reserved address, so the URL and Google
+sign-in's authorized domain keep working on a new VM. The firewall rules, the service
+account and its role bindings, and the budget alerts are project resources and survive
+as well. Sessions are rows in Cloud SQL, so users stay signed in.
+
+### What breaks
+
+The website is down until someone builds a new VM. No load balancer, managed instance
+group or second VM can take over. Recovery is manual: someone with `gcloud` access to
+the project runs `ALLOWED_IPS=… ./deploy/gcp.sh` and then
+`TAG=v4 ./deploy/docker_deploy.sh`, which takes about 10 minutes to create the VM,
+install Docker, pull the image and start the app. Neither script copies state or keys;
+the new VM runs as `mahokshahvata-vm` and reaches everything through IAM.
+
+Anything held in memory is lost and then rebuilt on its own. That includes the
+login-throttle counters, so an attacker would get a fresh 5 attempts per email, and the
+caches for headlines, stock explanations and price charts. Re-classifying the headlines
+with Claude costs a few cents.
+
+The autopilot can miss a day, because its scheduler runs inside the app. An outage
+during the 10:00 to 15:30 New York trading window skips that day's run. An outage over
+the close means that day's closing value isn't recorded, so the next daily-loss check
+compares against an older value.
+
+Container logs are lost. Docker keeps them on the VM's disk and doesn't ship them to
+Cloud Logging (the role is granted, but no logging driver is configured), so the record
+of the minutes before the deletion would be gone. Switching Docker's log driver to
+`gcplogs` would fix this.
+
+### Zone risk, separate from the VM
+
+Both halves run in a single zone: the VM in `us-central1-a` and Cloud SQL in
+`us-central1-c`, with no standby. An outage in either zone stops the site, though the
+data stays safe in Cloud SQL's 7 daily backups in Google's US multi-region. Cloud SQL's
+high-availability option, a standby in a second zone, would remove the database's zone
+risk at about twice its cost.
 
 ---
 
