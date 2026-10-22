@@ -24,6 +24,7 @@ Usage as a library:
 """
 
 import functools
+from contextlib import contextmanager
 import secrets
 import threading
 from datetime import datetime, timezone
@@ -31,6 +32,7 @@ from zoneinfo import ZoneInfo
 from dataclasses import dataclass
 from decimal import ROUND_DOWN, ROUND_UP, Decimal
 
+import psycopg
 from psycopg.types.json import Jsonb
 
 from db.connection import connect as db_connect
@@ -164,6 +166,7 @@ class PaperTradingEngine:
         self._lock = threading.RLock()
         self._connect = connect or db_connect
         self._conn = None
+        self._tx_depth = 0  # open transactions; reads inside one are never retried
 
     @property
     def conn(self):
@@ -172,14 +175,33 @@ class PaperTradingEngine:
             self._conn = self._connect()
         return self._conn
 
+    def _read(self, sql, params, fetch):
+        """Runs a read query. If the connection turns out to be dead (Cloud SQL
+        restarted, or an idle link was cut) and no transaction is open, reconnects
+        and tries once more: a read is safe to repeat. Writes are never retried,
+        since a failed write may still have been applied."""
+        try:
+            return fetch(self.conn.execute(sql, params))
+        except psycopg.OperationalError:
+            if self._tx_depth:
+                raise  # inside a transaction: let it fail and roll back as a whole
+            self._conn = None
+            return fetch(self.conn.execute(sql, params))
+
     def _rows(self, sql, params=()):
-        return self.conn.execute(sql, params).fetchall()
+        return self._read(sql, params, lambda cur: cur.fetchall())
 
     def _row(self, sql, params=()):
-        return self.conn.execute(sql, params).fetchone()
+        return self._read(sql, params, lambda cur: cur.fetchone())
 
+    @contextmanager
     def _transaction(self):
-        return self.conn.transaction()
+        self._tx_depth += 1
+        try:
+            with self.conn.transaction():
+                yield
+        finally:
+            self._tx_depth -= 1
 
     def _holdings(self, portfolio_id):
         return self._rows("SELECT * FROM holdings WHERE portfolio_id = %s", (portfolio_id,))

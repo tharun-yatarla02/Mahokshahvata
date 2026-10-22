@@ -256,3 +256,13 @@ def test_daily_snapshot_is_one_row_per_day(make_engine):
     history = engine.get_history(pid, user)
 
     assert [(h["as_of"], h["total_value"]) for h in history] == [("2026-09-22", 1000.0), ("2026-09-23", 1234.0)]
+
+
+def test_a_dropped_connection_is_reopened_for_reads(make_engine):
+    """Cloud SQL can cut an idle connection; the next read reconnects instead of failing."""
+    engine = make_engine()
+    user = engine.get_or_create_user("conn-user", "conn@example.com", "Conn")
+    pid = engine.create_portfolio(user, "P", 1000)
+    engine.conn.pgconn.finish()  # kill the socket under the open connection, as a network drop would
+    assert engine.get_portfolio_summary(pid, user)["cash_balance"] == 1000
+    assert engine.conn.execute("select 1 as one").fetchone()["one"] == 1

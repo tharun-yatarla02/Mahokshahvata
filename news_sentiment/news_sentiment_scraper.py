@@ -61,7 +61,11 @@ from cloud.blobs import default_store
 # ---------------------------------------------------------------------------
 
 RSS_FEEDS = {
-    "Yahoo Finance": "https://finance.yahoo.com/news/rssindex",
+    # Yahoo retired /news/rssindex (404 since Oct 2026); its per-index headline feeds still work.
+    "Yahoo Finance": [
+        "https://feeds.finance.yahoo.com/rss/2.0/headline?s=%5EGSPC&region=US&lang=en-US",  # S&P 500
+        "https://feeds.finance.yahoo.com/rss/2.0/headline?s=%5EDJI&region=US&lang=en-US",   # Dow
+    ],
     "CNBC Markets": [
         "https://www.cnbc.com/id/100003114/device/rss/rss.html",
         "https://www.cnbc.com/id/20910258/device/rss/rss.html",

@@ -35,6 +35,12 @@ def conninfo(**overrides):
         "sslmode": os.environ.get("DB_SSLMODE", "prefer"),
         "connect_timeout": "10",
         "application_name": "mahokshahvata",
+        # TCP keepalives: the app keeps one long-lived connection, and an idle one to
+        # Cloud SQL can otherwise be cut silently (seen as "SSL error: unexpected eof").
+        "keepalives": "1",
+        "keepalives_idle": "60",
+        "keepalives_interval": "10",
+        "keepalives_count": "3",
         **overrides,
     }
     password = os.environ.get("DB_PASSWORD")
