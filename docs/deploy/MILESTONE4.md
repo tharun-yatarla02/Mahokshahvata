@@ -63,7 +63,7 @@ runs as image `app:v4` at **http://34.122.164.209** (firewalled to the team's IP
 |---|---|
 | Managed database, private IP only (11) | `gcloud sql instances describe mahokshahvata-db` shows `ipv4Enabled: false`, one `PRIVATE` address `10.27.48.3`, `sslMode: ENCRYPTED_ONLY`. Created by [deploy/milestone4.sh](../../deploy/milestone4.sh) with `--no-assign-ip`. |
 | Tables from a migration; row counts match (10) | [db/migrations/001_initial.sql](../../db/migrations/001_initial.sql) (`CREATE TABLE` for all 9 tables), applied by [db/migrate.py](../../db/migrate.py) and recorded in `schema_migrations`. Row counts below. |
-| Uploads in a bucket via the VM's service account, no key files (10) | Profile photos: `POST /auth/me/photo` → [cloud/blobs.py](../../cloud/blobs.py) uses `storage.Client()` with Application Default Credentials from the metadata server. The Firebase key file was shredded off the VM; no key file exists anywhere. |
+| Uploads in a bucket via the VM's service account, no key files (10) | Profile photos: `POST /auth/me/photo` → [cloud/blobs.py](../../cloud/blobs.py) uses `storage.Client()` with Application Default Credentials from the metadata server. Both copies of the old Firebase key file were shredded off the VM (the last on Oct 22); a full disk scan finds no key file or `private_key` anywhere on it. |
 | All secrets in Secret Manager; none in code, image or `.env` (8) | [cloud/secrets.py](../../cloud/secrets.py) loads `db-password` and `anthropic-api-key` at startup into the process's memory. [docker-compose.vm.yml](../../docker-compose.vm.yml) has no `env_file`; `.dockerignore` keeps `.env` and key files out of the image. |
 | Written analysis (6) | Below. |
 

@@ -91,11 +91,15 @@ Deliverables produced:
 
 ## Still open
 
-- **Old Milestone 2 folder on the VM:** `/home/siddhardhaanagani/app` still holds a
-  copy of the old Firebase key file and an Oct 1 SQLite file. Unused (its services
-  are disabled), but it contradicts "no key files on the VM". The user chose to
-  leave it for now; say the app and its container have no key files when presenting.
-- **Revoke the old Firebase key** in project `mahokshahvata-ae5f9` (needs its owner).
+- **Old Milestone 2 folder on the VM:** `/home/siddhardhaanagani/app` still holds old
+  code and an Oct 1 SQLite file (unused; its services are disabled). Its copy of the
+  Firebase key file was shredded on Oct 22 at the user's request; a full disk scan
+  now finds no key file on the VM.
+- **Revoke the old Firebase keys** in project `mahokshahvata-ae5f9` (needs its owner;
+  the team's account has no access). On Oct 22 Google still listed two active keys for
+  `firebase-adminsdk-fbsvc@mahokshahvata-ae5f9`: `8a55d36c…` (the one from the VM)
+  and `b663c083…`. Check https://www.googleapis.com/robot/v1/metadata/x509/firebase-adminsdk-fbsvc@mahokshahvata-ae5f9.iam.gserviceaccount.com;
+  an empty list means both are revoked.
   It can read only the old Firestore copy, not live data.
 - **Video:** record, upload to OneDrive, share with the three graders, submit the
   link in Canvas.

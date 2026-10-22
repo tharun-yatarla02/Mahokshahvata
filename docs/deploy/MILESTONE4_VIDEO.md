@@ -43,9 +43,7 @@ SQLite file) and a Firebase Admin key file the app used to reach Firestore. Now 
 VM holds two compose files: data is in Cloud SQL with a private IP only, files in a
 private bucket, secrets in Secret Manager, and the image in Artifact Registry. We
 copied all 39 rows with every table matching, our tables come from 9 CREATE TABLE
-statements, and the app and its container have no key files or .env."
-
-Say "the app and its container", not "anywhere on the VM" (see "Known gap" below).
+statements, and there are no key files or .env on the VM or in the container."
 
 ### 2:00 Slide 2: identity and network
 "Only our team's IPs reach the VM, on ports 80 and 22, through a static IP. The VM is
@@ -146,8 +144,9 @@ Upload the video to OneDrive and share it with sdesini@cougarnet.uh.edu,
 krajan@cougarnet.uh.edu and skolanu@cougarnet.uh.edu. Submit only the OneDrive
 link in Canvas, with the slides and the written-analysis PDF.
 
-## Known gap
+## Old Firebase key
 
-An old Milestone 2 folder in another member's home directory on the VM still holds
-a copy of the unused Firebase key file. Nothing reads it, but avoid claiming there
-are no key files anywhere on the VM until it is removed.
+Both copies of the old Firebase key file are gone from the VM (the last one was
+shredded on Oct 22; a full disk scan finds no key file). The key itself still has
+to be revoked in the old project `mahokshahvata-ae5f9` by its owner; it can reach
+only the old Firestore copy, not the live data in Cloud SQL. If asked, say so.

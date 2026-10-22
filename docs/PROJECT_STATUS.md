@@ -114,10 +114,13 @@ Behind the scenes:
 - `v3` deployed; maintenance page during the move.
 - **Google sign-in moved to the team's own Firebase project `mahokshahvata`** (`v4`);
   existing Google users land in their same accounts. The old project
-  `mahokshahvata-ae5f9` belongs to another account; its key should be revoked by its owner.
-- **Open:** an old Milestone 2 folder in another member's home directory on the VM
-  still holds an unused copy of the old Firebase key and an Oct 1 SQLite file; left
-  in place for now at the team's request.
+  `mahokshahvata-ae5f9` belongs to another account.
+- **Oct 22: the last copy of the old Firebase key file was shredded from the VM**
+  (from an old Milestone 2 folder in another member's home directory); a full disk scan
+  finds no key file. The folder's old code and Oct 1 SQLite file are still there, unused.
+- **Open: revoke the old keys.** Google still lists two active keys for
+  `firebase-adminsdk-fbsvc@mahokshahvata-ae5f9` (`8a55d36c…`, `b663c083…`). Only that
+  project's owner can delete them; they reach only the old Firestore copy, not Cloud SQL.
 - Still to do for the submission: screenshots, the 2 slides and the video (see MILESTONE4.md).
 
 ## Done Oct 17
