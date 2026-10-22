@@ -11,7 +11,7 @@ No real money is traded — every portfolio is simulated.
 > setup from a fresh clone, how the code fits together, gotchas, and where
 > to pick up. Progress and open work: [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md).
 
-**Live:** http://34.122.164.209 (firewalled to the team's IPs), image `v4`. The VM
+**Live:** http://34.122.164.209 (firewalled to the team's IPs), image `v5`. The VM
 keeps no state: data is in Cloud SQL for PostgreSQL on a private IP, files are in a
 private Cloud Storage bucket, and keys are in Secret Manager, all reached as the VM's
 own service account. Google sign-in uses the team's Firebase project `mahokshahvata`
@@ -161,8 +161,8 @@ account. See [docs/deploy/MILESTONE4.md](docs/deploy/MILESTONE4.md).
 
 ```bash
 IMG=us-central1-docker.pkg.dev/project-262a2026-879b-4b49-88e/mahokshahvata/app
-docker buildx build --platform linux/amd64,linux/arm64 -t "${IMG}:v5" --push .
-TAG=v5 ./deploy/docker_deploy.sh  # roll back: TAG=v4 ./deploy/docker_deploy.sh
+docker buildx build --platform linux/amd64,linux/arm64 -t "${IMG}:v6" --push .
+TAG=v6 ./deploy/docker_deploy.sh  # roll back: TAG=v5 ./deploy/docker_deploy.sh
 ```
 
 Images before `v3` used Firestore and a key file, so rolling back past `v3` would

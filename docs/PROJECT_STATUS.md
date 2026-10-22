@@ -14,7 +14,7 @@ Cloud Storage bucket, and keys are in Secret Manager, all reached as the VM's
 own service account; deleting the VM would cost only downtime (see
 [deploy/MILESTONE4.md](deploy/MILESTONE4.md)). It tracks the 3,000 largest US
 stocks (~15 min delayed), reads live news with Claude, and lets each user
-paper-trade stocks and options. The same image (`app:v4`) runs on laptops with
+paper-trade stocks and options. The same image (`app:v5`) runs on laptops with
 `docker compose up` (with a local Postgres) and on the VM. 159 automated tests
 pass, and GitHub Actions runs them against Postgres plus a Docker build on every push.
 
@@ -101,6 +101,16 @@ Behind the scenes:
     live only on the VM's disk and would be lost with it.
 17. **Remove the old default service account's leftover access** (Artifact Registry
     reader) now that the VM runs as `mahokshahvata-vm`.
+
+## Done Oct 22 (health check)
+
+- Full check of the code, live site, cloud resources and every page: 160 tests pass,
+  all 8 pages and 83 buttons work with no errors, 5 of 5 daily database backups
+  succeeded, no user-facing server errors since the last deploy.
+- Fixed: the Yahoo Finance news feed was dead (Yahoo retired the address); now uses
+  its S&P 500 and Dow feeds. An idle database connection was once cut; added TCP
+  keepalives and a safe one-time retry for reads. Deployed as `v5`.
+- The last copy of the old Firebase key file was shredded from the VM.
 
 ## Done Oct 18 (Milestone 4)
 

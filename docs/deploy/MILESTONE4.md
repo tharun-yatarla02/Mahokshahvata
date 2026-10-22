@@ -7,7 +7,7 @@ bucket** reached as the VM's service account, and passwords and API keys are in
 Slides: [Milestone4_State.pptx](Milestone4_State.pptx) (2 slides, speaker notes included).
 Written analysis as one page: [Milestone4_Written_Analysis.pdf](Milestone4_Written_Analysis.pdf).
 Step-by-step video script with every link and command: [MILESTONE4_VIDEO.md](MILESTONE4_VIDEO.md). The app
-runs as image `app:v4` at **http://34.122.164.209** (firewalled to the team's IPs).
+runs as image `app:v5` at **http://34.122.164.209** (firewalled to the team's IPs).
 
 ## Where state lived, before and after
 
