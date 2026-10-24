@@ -1,0 +1,43 @@
+certificate Active at 19:32:39
+
+[exited with code 0]
+== 2026-10-24T19:34:39Z kubectl describe managedcertificate app-cert
+Spec:
+  Domains:
+    34-8-137-93.sslip.io
+Status:
+  Certificate Name:    mcrt-aa64a789-bba2-4b11-9bbf-80b42cdc0908
+  Certificate Status:  Active
+  Domain Status:
+    Domain:     34-8-137-93.sslip.io
+    Status:     Active
+  Expire Time:  2027-01-22T11:18:33.000-08:00
+Events:
+  Type    Reason  Age   From                            Message
+  ----    ------  ----  ----                            -------
+  Normal  Create  16m   managed-certificate-controller  Create SslCertificate mcrt-aa64a789-bba2-4b11-9bbf-80b42cdc0908
+
+== gcloud compute ssl-certificates list
+NAME                                       TYPE     MANAGED_STATUS
+mcrt-aa64a789-bba2-4b11-9bbf-80b42cdc0908  MANAGED  ACTIVE          2027-01-22T11:18:33
+    34-8-137-93.sslip.io: ACTIVE
+
+== The certificate the load balancer serves (openssl s_client)
+subject=CN=34-8-137-93.sslip.io
+issuer=C=US, O=Google Trust Services, CN=WR3
+notBefore=Oct 24 18:29:02 2026 GMT
+notAfter=Jan 22 19:18:33 2027 GMT
+X509v3 Subject Alternative Name: 
+    DNS:34-8-137-93.sslip.io
+
+== curl https://34-8-137-93.sslip.io/ready (TLS verified by curl's CA bundle)
+{"status":"ready"}
+HTTP 200, ssl_verify_result=0
+
+== curl -I http://34-8-137-93.sslip.io/ (http redirects to https)
+HTTP/1.1 301 Moved Permanently
+Cache-Control: private
+Location: https://34-8-137-93.sslip.io:443/
+Content-Length: 0
+== curl -sL http://34-8-137-93.sslip.io/ (GET, following the redirect lands on https)
+final URL https://34-8-137-93.sslip.io:443/ -> HTTP 200

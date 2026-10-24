@@ -1,0 +1,16 @@
+# Stable address for the pods. Container-native load balancing (NEG): the
+# Google load balancer sends traffic straight to pod IPs, health-checked on
+# /ready (k8s/backendconfig.yaml), instead of hopping through node ports.
+apiVersion: v1
+kind: Service
+metadata:
+  name: app
+  labels: { app: mahokshahvata }
+  annotations:
+    cloud.google.com/neg: '{"ingress": true}'
+    cloud.google.com/backend-config: '{"default": "app"}'
+spec:
+  type: ClusterIP
+  selector: { app: mahokshahvata }
+  ports:
+    - { name: http, port: 80, targetPort: http }

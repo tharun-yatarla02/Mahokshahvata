@@ -9,9 +9,8 @@ and portfolio services to a frontend.
 Setup:
     pip install fastapi uvicorn yfinance pandas anthropic feedparser firebase-admin
 
-Run:
-    export GOOGLE_APPLICATION_CREDENTIALS="/path/to/firebase-service-account.json"
-    uvicorn api.main:app --reload
+Run (see docs/DEVELOPMENT.md; needs a local PostgreSQL, no key files):
+    DB_PORT=5433 USE_DEMO_AUTH=true uvicorn api.main:app --reload
 
 Then visit http://localhost:8000/docs for interactive API docs (FastAPI
 generates this automatically).
@@ -36,12 +35,13 @@ import secrets
 import sys
 import threading
 import time
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from datetime import date, datetime, time as clock_time, timedelta, timezone
 from pathlib import Path
 from typing import Annotated
 from zoneinfo import ZoneInfo
 
+import psycopg
 from fastapi import FastAPI, HTTPException, Depends, File, Header, Query, Request, UploadFile, Path as FastAPIPath
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -107,7 +107,7 @@ async def lifespan(app):
 
 app = FastAPI(title="Mahokshahvata API", version="0.1.0", lifespan=lifespan)
 frontend_dir = Path(__file__).parent.parent / "frontend"
-engine = PaperTradingEngine()  # Firestore: GOOGLE_APPLICATION_CREDENTIALS picks the project
+engine = PaperTradingEngine()  # PostgreSQL, configured from DB_* (db/connection.py)
 market_data = MarketData()
 
 # Portfolio builds pick from the largest names only, so a momentum build
@@ -810,6 +810,7 @@ MARKET_TZ = ZoneInfo("America/New_York")
 AUTOPILOT_START = clock_time(10, 0)             # let the open settle first
 AUTOPILOT_STOP_BEFORE_CLOSE = timedelta(minutes=30)
 CLOSE_SNAPSHOT_DELAY = timedelta(minutes=20)    # quotes are ~15 min delayed
+SCHEDULER_LOCK_ID = 7_303_002  # advisory lock: one replica runs the scheduler at a time (db/migrate.py uses its own)
 _autopilot_lock = threading.Lock()  # one run at a time (manual or scheduled)
 
 AutopilotUpdate = create_model(
@@ -917,36 +918,57 @@ def _run_autopilot(portfolio_id, user_id, execute, trigger):
         return plan
 
 
+@contextmanager
+def _only_one_replica(lock_id=SCHEDULER_LOCK_ID):
+    """Yields True in exactly one process at a time across every replica, False
+    in the others: a Postgres advisory lock held on its own connection for the
+    length of the block. A pod that dies drops its connection, which frees the lock."""
+    try:
+        conn = db_connect()
+    except psycopg.OperationalError as e:
+        print(f"[warn] scheduler: no database: {e}", file=sys.stderr)
+        yield False
+        return
+    with conn:
+        yield conn.execute("SELECT pg_try_advisory_lock(%s) AS got", (lock_id,)).fetchone()["got"]
+
+
 def _autopilot_scheduler():
+    while True:
+        time.sleep(AUTOPILOT_CHECK_SECONDS)
+        with _only_one_replica() as mine:
+            if mine:  # the others skip this turn; whoever runs re-checks last_scheduled_date
+                _scheduler_turn()
+
+
+def _scheduler_turn():
     """Runs every enabled autopilot once per trading day, from 10:00 New York
     time until 30 minutes before the close (13:00 on early-close days), never
     on weekends or NYSE holidays. Prices are the same ~15-minute-delayed
     quotes as the rest of the app."""
-    while True:
-        time.sleep(AUTOPILOT_CHECK_SECONDS)
-        now = datetime.now(MARKET_TZ)
-        today = now.date().isoformat()
-        market = market_status(now)  # weekends, NYSE holidays and early closes
-        hours = market_session(now.date())
-        if hours and now >= hours[1] + CLOSE_SNAPSHOT_DELAY:
-            _record_closing_values(today)
-        if not market["open"] or now.time() < AUTOPILOT_START or \
-                now > datetime.fromisoformat(market["closes_at"]) - AUTOPILOT_STOP_BEFORE_CLOSE:
-            continue
+    now = datetime.now(MARKET_TZ)
+    today = now.date().isoformat()
+    market = market_status(now)  # weekends, NYSE holidays and early closes
+    hours = market_session(now.date())
+    if hours and now >= hours[1] + CLOSE_SNAPSHOT_DELAY:
+        _record_closing_values(today)
+    if not market["open"] or now.time() < AUTOPILOT_START or \
+            now > datetime.fromisoformat(market["closes_at"]) - AUTOPILOT_STOP_BEFORE_CLOSE:
+        return
+    try:
+        due = engine.autopilot_portfolios()
+    except Exception as e:
+        print(f"[warn] autopilot: can't list portfolios: {type(e).__name__}: {e}", file=sys.stderr)
+        return
+    for portfolio_id, user_id in due:
         try:
-            due = engine.autopilot_portfolios()
-        except Exception as e:
-            print(f"[warn] autopilot: can't list portfolios: {type(e).__name__}: {e}", file=sys.stderr)
-            continue
-        for portfolio_id, user_id in due:
-            try:
-                if engine.get_autopilot(portfolio_id, user_id).get("last_scheduled_date") == today:
-                    continue
-                plan = _run_autopilot(portfolio_id, user_id, execute=True, trigger="scheduled")
-                if not plan.get("retry"):  # stale prices: try again at the next check
-                    engine.update_autopilot(portfolio_id, user_id, {"last_scheduled_date": today})
-            except Exception as e:  # one bad portfolio mustn't stop the others
-                print(f"[warn] autopilot run failed for portfolio {portfolio_id}: {type(e).__name__}: {e}", file=sys.stderr)
+            if engine.get_autopilot(portfolio_id, user_id).get("last_scheduled_date") == today:
+                continue
+            plan = _run_autopilot(portfolio_id, user_id, execute=True, trigger="scheduled")
+            if not plan.get("retry"):  # stale prices: try again at the next check
+                engine.update_autopilot(portfolio_id, user_id, {"last_scheduled_date": today})
+        except Exception as e:  # one bad portfolio mustn't stop the others
+            print(f"[warn] autopilot run failed for portfolio {portfolio_id}: {type(e).__name__}: {e}", file=sys.stderr)
 
 
 def _record_closing_values(today):
@@ -1132,7 +1154,23 @@ def favicon():
 
 @app.get("/health")
 def health():
+    """Liveness: the process answers HTTP. Deliberately no database check: a
+    Cloud SQL blip would otherwise make Kubernetes restart every pod at once."""
     return {"status": "ok"}
+
+
+@app.get("/ready")
+def ready():
+    """Readiness: this pod can serve real requests, so the database answers
+    too. On its own short-lived connection, so it never waits behind the
+    engine's lock; failing it only takes the pod out of the load balancer."""
+    try:
+        with db_connect(connect_timeout="2") as conn:
+            conn.execute("SET statement_timeout = 2000")
+            conn.execute("SELECT 1")
+    except psycopg.Error as e:
+        return JSONResponse({"status": "database unavailable", "detail": type(e).__name__}, status_code=503)
+    return {"status": "ready"}
 
 
 # Every open sentiment tab polls this endpoint, so without a cache each poll

@@ -1,0 +1,38 @@
+== 2026-10-24T18:56:44Z BEFORE: user-managed keys for firebase-adminsdk-fbsvc@mahokshahvata-ae5f9.iam.gserviceaccount.com
+KEY_ID                                    CREATED_AT            EXPIRES_AT            DISABLED  DISABLE_REASON  EXTENDED_STATUS
+8a55d36c45a65cd6c4f243681552a1d29146febf  2026-10-01T18:55:12Z  9999-12-31T23:59:59Z
+
+== Owner of project mahokshahvata-ae5f9
+user:sidsidsid328@gmail.com
+
+== Google-managed (system) keys, for comparison: Google holds these private keys, they are never downloadable and rotate automatically
+KEY_ID                                    CREATED_AT            EXPIRES_AT            DISABLED  DISABLE_REASON  EXTENDED_STATUS
+b663c083aeec5fe9b8a35a2c92f9aed7b84127ad  2026-10-01T18:53:17Z  2028-09-30T18:53:17Z
+
+== 2026-10-24T18:57:01Z DELETE key 8a55d36c45a65cd6c4f243681552a1d29146febf
+deleted key [8a55d36c45a65cd6c4f243681552a1d29146febf] for service account [firebase-adminsdk-fbsvc@mahokshahvata-ae5f9.iam.gserviceaccount.com]
+
+== 2026-10-24T18:57:02Z AFTER: user-managed keys for firebase-adminsdk-fbsvc@mahokshahvata-ae5f9.iam.gserviceaccount.com (empty = no downloadable key exists)
+Listed 0 items.
+(end of list)
+
+== VM disk scan (gcloud compute ssh mahokshahvata)
+host=mahokshahvata date=2026-10-24T19:04:16Z
+files that contain an actual private key AND a service-account marker (whole disk, all users, incl. container layers):
+/snap/google-cloud-cli/511/platform/gsutil/gslib/tests/test_data/test.json
+/snap/google-cloud-cli/511/platform/gsutil/third_party/google-auth-library-python/tests/transport/test__mtls_helper.py
+/snap/google-cloud-cli/515/platform/gsutil/gslib/tests/test_data/test.json
+/snap/google-cloud-cli/515/platform/gsutil/third_party/google-auth-library-python/tests/transport/test__mtls_helper.py
+/var/log/auth.log
+(end of list)
+files named like key files:
+(end of list)
+
+== What those matches are (project_id / client_email of the two JSON files):
+/snap/google-cloud-cli/511/platform/gsutil/gslib/tests/test_data/test.json: "client_email": "test@developer.gserviceaccount.com" 
+/snap/google-cloud-cli/515/platform/gsutil/gslib/tests/test_data/test.json: "client_email": "test@developer.gserviceaccount.com" 
+The two .json files are dummy fixtures shipped inside the gcloud CLI snap's gsutil test suite; the .py file is a library test; /var/log/auth.log matches only because it logged this scan's own command line. No Firebase or service-account key file is on the VM.
+
+== Cloud Audit Log for the deletion (project mahokshahvata-ae5f9)
+TIMESTAMP                       PRINCIPAL_EMAIL         METHOD_NAME                                  RESOURCE_NAME
+2026-10-24T18:57:01.899525290Z  sidsidsid328@gmail.com  google.iam.admin.v1.DeleteServiceAccountKey  8a55d36c45a65cd6c4f243681552a1d29146febf

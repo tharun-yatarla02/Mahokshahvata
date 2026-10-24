@@ -11,11 +11,13 @@ No real money is traded — every portfolio is simulated.
 > setup from a fresh clone, how the code fits together, gotchas, and where
 > to pick up. Progress and open work: [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md).
 
-**Live:** http://34.122.164.209 (firewalled to the team's IPs), image `v5`. The VM
-keeps no state: data is in Cloud SQL for PostgreSQL on a private IP, files are in a
-private Cloud Storage bucket, and keys are in Secret Manager, all reached as the VM's
-own service account. Google sign-in uses the team's Firebase project `mahokshahvata`
-with no key file. Details: [docs/deploy/MILESTONE4.md](docs/deploy/MILESTONE4.md).
+**Live:** https://34-8-137-93.sslip.io, image `v6` on GKE: 2–4 replicas behind a
+Google HTTPS load balancer with a managed certificate (http redirects to https). The
+pods keep no state: data is in Cloud SQL for PostgreSQL on a private IP, files are in a
+private Cloud Storage bucket, and keys are in Secret Manager, all reached as the
+`mahokshahvata-vm` service account. Google sign-in uses the team's Firebase project
+`mahokshahvata` with no key file. Details: [docs/deploy/MILESTONE5.md](docs/deploy/MILESTONE5.md).
+The old VM (http://34.122.164.209) still exists with its app stopped.
 
 ## Project layout
 
@@ -55,7 +57,9 @@ ai_stock_platform/
 │   └── autopilot.py                 # autopilot decisions: what to buy and sell, and why
 ├── politician_trades/
 │   └── politician_trades.py         # congressional trade disclosures via Quiver Quantitative
+├── k8s/                             # Deployment, Service, Ingress + cert, HPA, PDB (Milestone 5)
 ├── deploy/
+│   ├── gke.sh                       # Milestone 5: the GKE cluster and global IP, then applies k8s/
 │   ├── gcp.sh                       # budget, firewall, static IP, and the VM as the app's service account
 │   ├── docker_deploy.sh             # pulls an image tag and runs it on the VM
 │   ├── milestone4.sh                # Milestone 4: Cloud SQL (private IP), bucket, secrets, service account
@@ -161,21 +165,26 @@ account. See [docs/deploy/MILESTONE4.md](docs/deploy/MILESTONE4.md).
 
 ```bash
 IMG=us-central1-docker.pkg.dev/project-262a2026-879b-4b49-88e/mahokshahvata/app
-docker buildx build --platform linux/amd64,linux/arm64 -t "${IMG}:v6" --push .
-TAG=v6 ./deploy/docker_deploy.sh  # roll back: TAG=v5 ./deploy/docker_deploy.sh
+docker buildx build --platform linux/amd64,linux/arm64 -t "${IMG}:v7" --push .
+kubectl set image deployment/app app="${IMG}:v7"   # GKE: rolling update, never below 2 ready pods
+kubectl rollout undo deployment/app                # roll back
 ```
+
+Keep the tag in `k8s/deployment.yaml` in step. The VM path (`TAG=v6 ./deploy/docker_deploy.sh`)
+still works, but stop GKE first: two deployments would share one database.
 
 Images before `v3` used Firestore and a key file, so rolling back past `v3` would
 need the Milestone 3 setup. Other scripts:
 
 | Script | Does |
 |---|---|
+| `./deploy/gke.sh` | Creates the GKE cluster and global IP, then `kubectl apply -f k8s/`; `--delete` tears both down. See [MILESTONE5.md](docs/deploy/MILESTONE5.md) |
 | `./deploy/milestone4.sh` | Creates or updates Cloud SQL (private IP only), the bucket, the secrets and the `mahokshahvata-vm` service account; `--switch` moves the VM onto it. Safe to re-run |
 | `ALLOWED_IPS=… ./deploy/gcp.sh` | Budget alerts, firewall, static IP, and the VM (as the app's service account). Rebuilding a deleted VM is this plus `docker_deploy.sh`, about 10 minutes |
 | `TAG=… ./deploy/migrate_data.sh` | The one-time Firestore → Cloud SQL copy (done Oct 18; it refuses a database that already has rows) |
 
-The production database has no public IP, so database commands run on the VM, e.g.
-`sudo docker compose -p mahokshahvata exec app python -m db.migrate --status`.
+The production database has no public IP, so database commands run inside a pod, e.g.
+`kubectl exec deploy/app -- python -m db.migrate --status`.
 
 ### Milestone write-ups
 
@@ -183,6 +192,7 @@ The production database has no public IP, so database commands run on the VM, e.
 |---|---|---|
 | 3: containers | [docs/deploy/MILESTONE3.md](docs/deploy/MILESTONE3.md) | [slides](docs/deploy/Milestone3_Containers.pptx), [video runbook](docs/deploy/Milestone3_Video_Runbook.md) |
 | 4: state out of the VM | [docs/deploy/MILESTONE4.md](docs/deploy/MILESTONE4.md) | [slides](docs/deploy/Milestone4_State.pptx), [1-page analysis](docs/deploy/Milestone4_Written_Analysis.pdf), [row counts](docs/deploy/row_counts.txt), [video script](docs/deploy/MILESTONE4_VIDEO.md) |
+| 5: orchestration (GKE) | [docs/deploy/MILESTONE5.md](docs/deploy/MILESTONE5.md) | [slides](docs/deploy/Milestone5_Orchestration.pptx), [evidence](docs/deploy/evidence/) |
 
 ### Market data
 
@@ -508,15 +518,13 @@ See [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) for the full roadmap.
 - **Building a portfolio from momentum** (`POST /portfolio/{id}/build`) buys
   whole shares only; leftover cash stays as cash. Manual orders can be
   fractional.
-- **One server process** — the market-data thread and the autopilot scheduler
-  run inside the app, so run a single uvicorn worker. (Trades themselves are
-  safe across processes: they lock the portfolio row in PostgreSQL.)
+- **One uvicorn worker per pod** — each replica runs its own market-data thread.
+  The autopilot scheduler runs in only one replica at a time (a Postgres advisory
+  lock), and trades lock the portfolio row, so replicas are safe. The sign-in rate
+  limit and the sentiment cache are per pod.
 - **News is refreshed on demand** — market data refreshes in a background
   thread and the autopilot runs on its own schedule, but headlines are only
   fetched when `/news-sentiment` is called (cached 5 minutes).
-- **One VM, one zone each** — no load balancer or second VM, so the site is down
-  until a deleted or failed VM is rebuilt (about 10 minutes with the two scripts).
-  The VM (`us-central1-a`) and Cloud SQL (`us-central1-c`, no standby) are each
-  single-zone; data is protected by 7 daily backups.
-- **Container logs stay on the VM's disk** and would be lost with it; Docker's
-  `gcplogs` driver would ship them to Cloud Logging.
+- **Single zone** — the GKE cluster (`us-central1-a`) and Cloud SQL (`us-central1-c`,
+  no standby) are each zonal; a lost pod or node heals itself, a lost zone does not.
+  Data is protected by 7 daily backups.

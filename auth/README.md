@@ -32,7 +32,7 @@ Swapping the short-lived Firebase token for our session means the page needs no 
 2. **Build → Authentication → Get started → Sign-in method → Google → Enable**, pick a support email, **Save**
 3. **Authentication → Settings → Authorized domains**: add every address the site is served from (the VM's IP `34.122.164.209` is there; `localhost` is by default)
 4. **Project settings → Your apps → Web (`</>`)**: register an app and copy `apiKey`, `authDomain`, `projectId`, `appId` into `FIREBASE_CONFIG` in `frontend/login.html`. These are public by design.
-5. That's all the server needs: checking an ID token uses only the project id (`FIREBASE_PROJECT_ID`) and Google's public signing keys, so there is **no service-account key file**. (Through Milestone 3 a Firebase Admin key was used for Firestore; it was deleted from the VM after the data moved to Cloud SQL.)
+5. That's all the server needs: checking an ID token uses only the project id (`FIREBASE_PROJECT_ID`) and Google's public signing keys, so there is **no service-account key file**. (Through Milestone 3 a Firebase Admin key was used for Firestore; it was deleted from the VM after the data moved to Cloud SQL, and revoked in Google Cloud on Oct 24, 2026.)
 
 ## Checks
 - No `Authorization` header → 401; an invalid token → 401

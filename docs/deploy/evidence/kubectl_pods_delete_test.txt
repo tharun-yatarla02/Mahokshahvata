@@ -1,0 +1,24 @@
+== 2026-10-24T19:20:42Z BEFORE: kubectl get pods -o wide
+NAME                   READY   STATUS    RESTARTS   AGE    IP           NODE                                          NOMINATED NODE   READINESS GATES
+app-77694748d7-474bk   1/1     Running   0          2m5s   10.72.3.11   gke-mahokshahvata-pool-medium-772ba46a-8xm9   <none>           1/1
+app-77694748d7-n54bs   1/1     Running   0          2m5s   10.72.2.7    gke-mahokshahvata-pool-medium-772ba46a-rfdm   <none>           1/1
+
+== 2026-10-24T19:20:42Z kubectl delete pod app-77694748d7-474bk --wait=false
+pod "app-77694748d7-474bk" deleted from default namespace
+
+== 2026-10-24T19:20:43Z right after (the ReplicaSet has already made a replacement)
+NAME                   READY   STATUS        RESTARTS   AGE    IP           NODE                                          NOMINATED NODE   READINESS GATES
+app-77694748d7-474bk   1/1     Terminating   0          2m8s   10.72.3.11   gke-mahokshahvata-pool-medium-772ba46a-8xm9   <none>           1/1
+app-77694748d7-67wtb   0/1     Running       0          2s     10.72.2.8    gke-mahokshahvata-pool-medium-772ba46a-rfdm   <none>           0/1
+app-77694748d7-n54bs   1/1     Running       0          2m8s   10.72.2.7    gke-mahokshahvata-pool-medium-772ba46a-rfdm   <none>           1/1
+
+== 2026-10-24T19:21:02Z AFTER: kubectl get pods -o wide (old pod gone, replacement Running and Ready)
+NAME                   READY   STATUS    RESTARTS   AGE     IP          NODE                                          NOMINATED NODE   READINESS GATES
+app-77694748d7-67wtb   1/1     Running   0          19s     10.72.2.8   gke-mahokshahvata-pool-medium-772ba46a-rfdm   <none>           1/1
+app-77694748d7-n54bs   1/1     Running   0          2m25s   10.72.2.7   gke-mahokshahvata-pool-medium-772ba46a-rfdm   <none>           1/1
+
+== ReplicaSet events
+LAST SEEN   TYPE     REASON             OBJECT                      MESSAGE
+2m25s       Normal   SuccessfulCreate   replicaset/app-77694748d7   Created pod: app-77694748d7-n54bs
+2m25s       Normal   SuccessfulCreate   replicaset/app-77694748d7   Created pod: app-77694748d7-474bk
+19s         Normal   SuccessfulCreate   replicaset/app-77694748d7   Created pod: app-77694748d7-67wtb

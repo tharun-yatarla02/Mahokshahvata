@@ -1,21 +1,22 @@
 # Project Status
 
-_Last updated: 2026-10-18 (Milestone 4 done: state off the VM, sign-in on the team's Firebase project, v4 live)_
+_Last updated: 2026-10-24 (Milestone 5: v6 on GKE behind HTTPS; old Firebase key deleted)_
 
 Picking this up? Read [HANDOFF.md](HANDOFF.md) first (setup, architecture,
 gotchas, and a starting point for each open task).
 
 ## Where we are
 
-**Live website with no state on the VM.** The app runs at
-http://34.122.164.209 on a Google Cloud VM (firewalled to the team's IPs). Its
-data is in Cloud SQL for PostgreSQL on a private IP, files are in a private
-Cloud Storage bucket, and keys are in Secret Manager, all reached as the VM's
-own service account; deleting the VM would cost only downtime (see
-[deploy/MILESTONE4.md](deploy/MILESTONE4.md)). It tracks the 3,000 largest US
+**Live on GKE at https://34-8-137-93.sslip.io.** 2–4 replicas (autoscaled on
+CPU, PodDisruptionBudget, self-healing) run behind a Google HTTPS load balancer
+with a managed certificate; http redirects to https (see
+[deploy/MILESTONE5.md](deploy/MILESTONE5.md)). Data is in Cloud SQL for
+PostgreSQL on a private IP, files are in a private Cloud Storage bucket, and keys
+are in Secret Manager, all reached as the `mahokshahvata-vm` service account with
+no key files. The old VM (http://34.122.164.209) still exists with its app stopped. It tracks the 3,000 largest US
 stocks (~15 min delayed), reads live news with Claude, and lets each user
-paper-trade stocks and options. The same image (`app:v5`) runs on laptops with
-`docker compose up` (with a local Postgres) and on the VM. 159 automated tests
+paper-trade stocks and options. The same image (`app:v6`) runs on laptops with
+`docker compose up` (with a local Postgres) and on GKE. 162 automated tests
 pass, and GitHub Actions runs them against Postgres plus a Docker build on every push.
 
 ## What works today
@@ -97,10 +98,29 @@ Behind the scenes:
     switches quotes and history over; streaming quotes are not built.
 15. **Money as integer cents** instead of decimals rounded to cents, before
     adding fees or tax lots.
-16. **Ship container logs to Cloud Logging** (Docker `gcplogs` driver): today they
-    live only on the VM's disk and would be lost with it.
+16. ~~**Ship container logs to Cloud Logging**~~ ✅ Done Oct 24: GKE sends pod logs
+    to Cloud Logging.
 17. **Remove the old default service account's leftover access** (Artifact Registry
     reader) now that the VM runs as `mahokshahvata-vm`.
+
+## Done Oct 24 (Milestone 5: orchestration)
+
+- **GKE** zonal cluster `mahokshahvata` (2–3 e2-medium nodes running as `mahokshahvata-vm`),
+  manifests in `k8s/`, created by `deploy/gke.sh`. Image `v6`.
+- **HTTPS** at https://34-8-137-93.sslip.io: global static IP, Google-managed certificate,
+  http → 301 → https.
+- **Probes:** liveness `/health` (process only), readiness `/ready` (also `SELECT 1` on
+  Cloud SQL); the load balancer health check uses `/ready`.
+- **Replica safety:** the autopilot scheduler runs in one replica at a time (Postgres
+  advisory lock). HPA 2–4 on CPU; PDB `minAvailable: 1`.
+- Tested: a deleted pod was replaced and Ready in ~19 s; load took the HPA 2 → 4 and back
+  to 2 (`docs/deploy/evidence/`).
+- **VM app stopped** at cutover so it can't run a second scheduler against the same
+  database. **Tear down after grading:** `./deploy/gke.sh --delete` (~$2.2/day).
+- **Old Firebase key deleted** (`8a55d36c…` in `mahokshahvata-ae5f9`), and the VM scanned
+  for key files: none left.
+- Still to do for the submission: the video (cameras on), the certificate screenshot and the
+  OneDrive link (see MILESTONE5.md).
 
 ## Done Oct 22 (health check)
 
@@ -128,9 +148,9 @@ Behind the scenes:
 - **Oct 22: the last copy of the old Firebase key file was shredded from the VM**
   (from an old Milestone 2 folder in another member's home directory); a full disk scan
   finds no key file. The folder's old code and Oct 1 SQLite file are still there, unused.
-- **Open: revoke the old keys.** Google still lists two active keys for
-  `firebase-adminsdk-fbsvc@mahokshahvata-ae5f9` (`8a55d36c…`, `b663c083…`). Only that
-  project's owner can delete them; they reach only the old Firestore copy, not Cloud SQL.
+- ~~**Open: revoke the old keys.**~~ ✅ Done Oct 24: the one downloadable key `8a55d36c…`
+  was deleted by the project's owner; `b663c083…` is a Google-managed key (never
+  downloadable, cannot be deleted). Evidence: [deploy/evidence/firebase_key_revocation.txt](deploy/evidence/firebase_key_revocation.txt).
 - Still to do for the submission: screenshots, the 2 slides and the video (see MILESTONE4.md).
 
 ## Done Oct 17

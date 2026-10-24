@@ -1,0 +1,19 @@
+# How the Google load balancer checks and drains pods. Its health check uses
+# the same /ready as the readiness probe, so a pod that can't reach the
+# database stops getting traffic from the load balancer too.
+apiVersion: cloud.google.com/v1
+kind: BackendConfig
+metadata:
+  name: app
+spec:
+  healthCheck:
+    type: HTTP
+    requestPath: /ready
+    port: 8000
+    checkIntervalSec: 10
+    timeoutSec: 5
+    healthyThreshold: 1
+    unhealthyThreshold: 2
+  connectionDraining:
+    drainingTimeoutSec: 30   # finish in-flight requests to a pod that's leaving
+  timeoutSec: 60             # Explain and sentiment calls to Claude can take a while

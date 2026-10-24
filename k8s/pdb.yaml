@@ -1,0 +1,13 @@
+# Voluntary disruptions (node drains for GKE upgrades, the cluster autoscaler
+# removing a node) may evict pods only while at least one other replica stays
+# up. Without this, a drain can evict both replicas at once and the load
+# balancer has nothing to send requests to: 502s until new pods are ready.
+# A plain `kubectl delete pod` is not an eviction and ignores this.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: app
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: { app: mahokshahvata }

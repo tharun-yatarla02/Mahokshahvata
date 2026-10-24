@@ -1,0 +1,70 @@
+# The app: 2+ replicas of the same image the VM ran. No state in the pods:
+# Cloud SQL (private IP), the storage bucket and Secret Manager, reached as the
+# nodes' service account mahokshahvata-vm (deploy/gke.sh), so no key files.
+#
+# Three probes, three questions:
+#   startup    /health  has the process finished starting? (60-90 s: pandas
+#                       import + market snapshot). Holds the other two off.
+#   liveness   /health  is the process stuck? Failing restarts the container.
+#                       No database check, or a Cloud SQL blip restarts every pod.
+#   readiness  /ready   can it serve right now, database included? Failing only
+#                       takes the pod out of the Service and the load balancer.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app
+  labels: { app: mahokshahvata }
+spec:
+  replicas: 2   # the HPA owns this after the first apply (k8s/hpa.yaml)
+  selector:
+    matchLabels: { app: mahokshahvata }
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }   # never below 2 serving pods during a deploy
+  template:
+    metadata:
+      labels: { app: mahokshahvata }
+    spec:
+      terminationGracePeriodSeconds: 45
+      topologySpreadConstraints:   # one replica per node where possible, so a node drain can't take both
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: { app: mahokshahvata }
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001   # the image's "app" user
+      containers:
+        - name: app
+          image: us-central1-docker.pkg.dev/project-262a2026-879b-4b49-88e/mahokshahvata/app:v6
+          ports:
+            - { name: http, containerPort: 8000 }
+          env:
+            - { name: DB_HOST, value: "10.27.48.3" }   # Cloud SQL private IP (mahokshahvata-db)
+            - { name: DB_SSLMODE, value: require }
+            - { name: DATA_BUCKET, value: project-262a2026-879b-4b49-88e-app-data }
+            - { name: SECRETS_PROJECT, value: project-262a2026-879b-4b49-88e }
+            - { name: FIREBASE_PROJECT_ID, value: mahokshahvata }   # Google sign-in only; no key file
+          resources:
+            requests: { cpu: 250m, memory: 512Mi }   # the HPA's CPU target is a share of this request
+            limits: { memory: 1Gi }
+          startupProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 10
+            failureThreshold: 30   # up to 5 minutes to start
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /ready, port: http }
+            periodSeconds: 10
+            timeoutSeconds: 3   # /ready bounds its own database check to ~2 s
+            failureThreshold: 2
+          lifecycle:
+            preStop:
+              # Keep serving while the load balancer notices the pod is going;
+              # without it, requests still routed here during shutdown get 502s.
+              exec: { command: ["sleep", "15"] }

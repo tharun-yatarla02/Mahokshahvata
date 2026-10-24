@@ -1,0 +1,42 @@
+== 2026-10-24T19:35:25Z Zero-downtime test. A loop sends GET https://34-8-137-93.sslip.io/ and /ready about 3 times a second throughout.
+
+== Part 1: kubectl delete pod
+NAME                   READY   STATUS    RESTARTS   AGE   IP           NODE                                          NOMINATED NODE   READINESS GATES
+app-77694748d7-nxjvm   1/1     Running   0          13m   10.72.3.13   gke-mahokshahvata-pool-medium-772ba46a-8xm9   <none>           1/1
+app-77694748d7-zrm2r   1/1     Running   0          13m   10.72.0.2    gke-mahokshahvata-pool-medium-772ba46a-6wrj   <none>           1/1
+19:35:26 deleting app-77694748d7-nxjvm
+pod "app-77694748d7-nxjvm" deleted from default namespace
+19:35:48 back to 2/2 Ready
+NAME                   READY   STATUS    RESTARTS   AGE   IP          NODE                                          NOMINATED NODE   READINESS GATES
+app-77694748d7-vznzb   1/1     Running   0          22s   10.72.2.9   gke-mahokshahvata-pool-medium-772ba46a-rfdm   <none>           1/1
+app-77694748d7-zrm2r   1/1     Running   0          13m   10.72.0.2   gke-mahokshahvata-pool-medium-772ba46a-6wrj   <none>           1/1
+
+== Part 2: 19:36:09 kubectl drain gke-mahokshahvata-pool-medium-772ba46a-rfdm (what a GKE node upgrade does; goes through the eviction API, so the PDB applies)
+NAME   MIN AVAILABLE   MAX UNAVAILABLE   ALLOWED DISRUPTIONS   AGE
+app    1               N/A               1                     17m
+node/gke-mahokshahvata-pool-medium-772ba46a-rfdm cordoned
+Warning: ignoring DaemonSet-managed Pods: gmp-system/collector-s8jzl, kube-system/filestore-node-96q4j, kube-system/fluentbit-gke-qtx9s, kube-system/gke-metrics-agent-9kr4k, kube-system/node-local-dns-lqkdz, kube-system/pdcsi-node-mfb67
+evicting pod default/app-77694748d7-vznzb
+evicting pod kube-system/konnectivity-agent-autoscaler-6f79966478-sss85
+evicting pod kube-system/konnectivity-agent-fc9fff88b-7ztwl
+evicting pod kube-system/event-exporter-gke-65f695c96d-rmmgl
+evicting pod kube-system/kube-dns-578db59856-44brq
+pod/konnectivity-agent-autoscaler-6f79966478-sss85 evicted
+pod/kube-dns-578db59856-44brq evicted
+pod/app-77694748d7-vznzb evicted
+pod/konnectivity-agent-fc9fff88b-7ztwl evicted
+pod/event-exporter-gke-65f695c96d-rmmgl evicted
+node/gke-mahokshahvata-pool-medium-772ba46a-rfdm drained
+19:38:14 back to 2/2 Ready
+NAME                   READY   STATUS    RESTARTS   AGE    IP           NODE                                          NOMINATED NODE   READINESS GATES
+app-77694748d7-thtzv   1/1     Running   0          2m3s   10.72.3.14   gke-mahokshahvata-pool-medium-772ba46a-8xm9   <none>           1/1
+app-77694748d7-zrm2r   1/1     Running   0          16m    10.72.0.2    gke-mahokshahvata-pool-medium-772ba46a-6wrj   <none>           1/1
+node/gke-mahokshahvata-pool-medium-772ba46a-rfdm uncordoned
+
+== Request loop result, 19:35:08Z to 19:38:44Z: count of status codes
+home page (/):
+ 334 200
+/ready:
+ 334 200
+non-200 responses, if any:
+(end)

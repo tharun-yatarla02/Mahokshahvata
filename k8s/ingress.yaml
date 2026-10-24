@@ -1,0 +1,36 @@
+# Public entry: a global external HTTPS load balancer on the reserved static IP
+# mahokshahvata-gke-ip (34.8.137.93, deploy/gke.sh), with a Google-managed
+# certificate for its sslip.io hostname. sslip.io answers <a-b-c-d>.sslip.io
+# with the IP a.b.c.d, so the hostname needs no DNS setup of our own.
+# http:// gets a 301 to https:// (FrontendConfig below).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: app
+  annotations:
+    kubernetes.io/ingress.class: gce
+    kubernetes.io/ingress.global-static-ip-name: mahokshahvata-gke-ip
+    networking.gke.io/managed-certificates: app-cert
+    networking.gke.io/v1beta1.FrontendConfig: app
+spec:
+  defaultBackend:
+    service:
+      name: app
+      port: { number: 80 }
+---
+apiVersion: networking.gke.io/v1
+kind: ManagedCertificate
+metadata:
+  name: app-cert
+spec:
+  domains:
+    - 34-8-137-93.sslip.io
+---
+apiVersion: networking.gke.io/v1beta1
+kind: FrontendConfig
+metadata:
+  name: app
+spec:
+  redirectToHttps:
+    enabled: true
+    responseCodeName: MOVED_PERMANENTLY_DEFAULT   # 301
