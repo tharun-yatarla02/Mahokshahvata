@@ -95,12 +95,11 @@ Deliverables produced:
   code and an Oct 1 SQLite file (unused; its services are disabled). Its copy of the
   Firebase key file was shredded on Oct 22 at the user's request; a full disk scan
   now finds no key file on the VM.
-- **Revoke the old Firebase keys** in project `mahokshahvata-ae5f9` (needs its owner;
-  the team's account has no access). On Oct 22 Google still listed two active keys for
-  `firebase-adminsdk-fbsvc@mahokshahvata-ae5f9`: `8a55d36c…` (the one from the VM)
-  and `b663c083…`. Check https://www.googleapis.com/robot/v1/metadata/x509/firebase-adminsdk-fbsvc@mahokshahvata-ae5f9.iam.gserviceaccount.com;
-  an empty list means both are revoked.
-  It can read only the old Firestore copy, not live data.
+- ~~**Revoke the old Firebase key**~~ Done Oct 24 by the project's owner: the one
+  downloadable key, `8a55d36c…`, was deleted (evidence in
+  `docs/deploy/evidence/firebase_key_revocation.txt`). Correction to the Oct 22 note:
+  the other key on Google's public list, `b663c083…`, is a Google-managed key whose
+  private half Google holds and never lets anyone download, so it was never a risk.
 - **Video:** record, upload to OneDrive, share with the three graders, submit the
   link in Canvas.
 - **Optional:** ship container logs to Cloud Logging; remove the old default
