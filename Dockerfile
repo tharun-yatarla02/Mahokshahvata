@@ -33,7 +33,7 @@ EXPOSE 8000
 HEALTHCHECK --interval=15s --timeout=5s --start-period=180s --retries=3 \
   CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4)"]
 # One worker: more would each start the market-data thread.
-CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log", "--log-config", "cloud/uvicorn_log.json"]
+CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8001", "--no-access-log", "--log-config", "cloud/uvicorn_log.json"]
 # Last, so a new commit doesn't invalidate the cached layers above. /health reports it.
 ARG GIT_SHA=dev
 ENV GIT_SHA=$GIT_SHA
