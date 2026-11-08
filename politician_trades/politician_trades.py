@@ -31,6 +31,7 @@ import sys
 import requests
 
 from db.connection import connect
+from cloud.log import log
 
 BULK_ENDPOINT = "https://api.quiverquant.com/beta/bulk/congresstrading"
 # Stored in PostgreSQL (table politician_trades, created by db/migrations/001_initial.sql).
@@ -126,7 +127,7 @@ if __name__ == "__main__":
     try:
         refresh_cache()
     except RuntimeError as e:
-        print(f"[error] {e}", file=sys.stderr)
+        log("ERROR", f"{e}")
         sys.exit(1)
 
     if len(sys.argv) > 1:

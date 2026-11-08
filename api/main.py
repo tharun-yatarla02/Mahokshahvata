@@ -32,7 +32,6 @@ Endpoints:
 
 import os
 import secrets
-import sys
 import threading
 import time
 from contextlib import asynccontextmanager, contextmanager
@@ -68,8 +67,9 @@ def _load_dotenv(path=Path(__file__).parent.parent / ".env"):
 # Before the project imports: some modules read their settings at import time.
 # On the VM there is no .env: SECRETS_PROJECT makes the keys come from Secret Manager.
 _load_dotenv()
+from cloud.log import VERSION, log  # noqa: E402
 from cloud.secrets import load_secrets  # noqa: E402
-print(f"[info] secrets from Secret Manager: {', '.join(load_secrets()) or 'none'}", file=sys.stderr)
+log("INFO", f"secrets from Secret Manager: {', '.join(load_secrets()) or 'none'}")
 
 from momentum.momentum_engine import latest_price, fetch_price_history, filter_by_group, search_rows, DEFAULT_SECTOR_LOOKUP
 from momentum.market_data import MarketData
@@ -97,7 +97,7 @@ async def lifespan(app):
     # thread (see momentum/market_data.py).
     with db_connect() as conn:
         applied = migrate(conn)
-    print(f"[info] database migrations applied: {', '.join(applied) or 'none pending'}", file=sys.stderr)
+    log("INFO", f"database migrations applied: {', '.join(applied) or 'none pending'}")
     market_data.start()
     engine.fill_unknown_sectors(lambda ticker: (market_data.lookup(ticker) or {}).get("sector"))
     if os.environ.get("AUTOPILOT_SCHEDULER", "on").lower() != "off":
@@ -135,6 +135,25 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def request_log(request, call_next):
+    """One JSON log line per request (cloud/log.py). The 5xx log-based metric
+    counts the lines with status >= 500. An unhandled exception is logged as a
+    500 here, then re-raised so Starlette still answers with a 500."""
+    start = time.perf_counter()
+    status = 500
+    try:
+        response = await call_next(request)
+        status = response.status_code
+        return response
+    finally:
+        # Probes and load balancer health checks hit these every few seconds; log only their failures.
+        if status >= 500 or request.url.path not in ("/health", "/ready"):
+            log("ERROR" if status >= 500 else "INFO", f"{request.method} {request.url.path} {status}",
+                method=request.method, path=request.url.path, status=status,
+                latency_ms=round((time.perf_counter() - start) * 1000, 1))
 
 
 @app.exception_handler(RequestValidationError)
@@ -862,7 +881,7 @@ def _autopilot_news(rows):
     try:
         data, _ = _sentiment_data(rows)
     except Exception as e:
-        print(f"[warn] news unavailable for autopilot: {type(e).__name__}", file=sys.stderr)
+        log("WARNING", f"news unavailable for autopilot: {type(e).__name__}")
         return None
     return None if data.get("fallback") else news_by_ticker(data["results"], market_data.lookup)
 
@@ -926,7 +945,7 @@ def _only_one_replica(lock_id=SCHEDULER_LOCK_ID):
     try:
         conn = db_connect()
     except psycopg.OperationalError as e:
-        print(f"[warn] scheduler: no database: {e}", file=sys.stderr)
+        log("WARNING", f"scheduler: no database: {e}")
         yield False
         return
     with conn:
@@ -958,7 +977,7 @@ def _scheduler_turn():
     try:
         due = engine.autopilot_portfolios()
     except Exception as e:
-        print(f"[warn] autopilot: can't list portfolios: {type(e).__name__}: {e}", file=sys.stderr)
+        log("WARNING", f"autopilot: can't list portfolios: {type(e).__name__}: {e}")
         return
     for portfolio_id, user_id in due:
         try:
@@ -968,7 +987,7 @@ def _scheduler_turn():
             if not plan.get("retry"):  # stale prices: try again at the next check
                 engine.update_autopilot(portfolio_id, user_id, {"last_scheduled_date": today})
         except Exception as e:  # one bad portfolio mustn't stop the others
-            print(f"[warn] autopilot run failed for portfolio {portfolio_id}: {type(e).__name__}: {e}", file=sys.stderr)
+            log("WARNING", f"autopilot run failed for portfolio {portfolio_id}: {type(e).__name__}: {e}")
 
 
 def _record_closing_values(today):
@@ -980,7 +999,7 @@ def _record_closing_values(today):
     try:
         due = engine.autopilot_portfolios()
     except Exception as e:
-        print(f"[warn] closing values: can't list portfolios: {type(e).__name__}: {e}", file=sys.stderr)
+        log("WARNING", f"closing values: can't list portfolios: {type(e).__name__}: {e}")
         return
     for portfolio_id, user_id in due:
         try:
@@ -990,7 +1009,7 @@ def _record_closing_values(today):
             engine.record_daily_snapshot(portfolio_id, summary, as_of=today)
             engine.update_autopilot(portfolio_id, user_id, {"last_close_recorded": today})
         except Exception as e:
-            print(f"[warn] closing value failed for portfolio {portfolio_id}: {type(e).__name__}: {e}", file=sys.stderr)
+            log("WARNING", f"closing value failed for portfolio {portfolio_id}: {type(e).__name__}: {e}")
 
 
 @app.get("/portfolio/{portfolio_id}/autopilot")
@@ -1155,8 +1174,16 @@ def favicon():
 @app.get("/health")
 def health():
     """Liveness: the process answers HTTP. Deliberately no database check: a
-    Cloud SQL blip would otherwise make Kubernetes restart every pod at once."""
-    return {"status": "ok"}
+    Cloud SQL blip would otherwise make Kubernetes restart every pod at once.
+    "version" is the commit the image was built from: the pipeline checks it."""
+    return {"status": "ok", "version": VERSION}
+
+
+@app.get("/debug/fail")
+def debug_fail():
+    """A controlled HTTP 500 for the monitoring demo: one ERROR log line with
+    status 500, which the 5xx log-based metric and its alert count."""
+    raise RuntimeError("controlled failure for the monitoring demo (/debug/fail)")
 
 
 @app.get("/ready")
@@ -1288,7 +1315,7 @@ def explain_stock(ticker: Annotated[str, FastAPIPath(pattern=TICKER_PATTERN)],
     try:
         news, _ = _sentiment_data(rows)
     except Exception as e:  # feeds down: explain from prices and filings alone
-        print(f"[warn] news unavailable for /explain: {type(e).__name__}", file=sys.stderr)
+        log("WARNING", f"news unavailable for /explain: {type(e).__name__}")
         news = {}
     headlines = [] if news.get("fallback") else news.get("results", [])  # demo headlines aren't real news
     try:
@@ -1307,7 +1334,7 @@ def explain_stock(ticker: Annotated[str, FastAPIPath(pattern=TICKER_PATTERN)],
             explanation = explain_with_claude(Anthropic(api_key=api_key), facts)
             source = "claude" if explanation else source
         except Exception as e:  # rate limit, network, bad key
-            print(f"[warn] Claude explanation failed, using rules: {type(e).__name__}: {e}", file=sys.stderr)
+            log("WARNING", f"Claude explanation failed, using rules: {type(e).__name__}: {e}")
     if explanation is None:
         explanation = explain_with_rules(facts)
 

@@ -1,6 +1,7 @@
-# On every push and pull request: run the test suite against a PostgreSQL
-# service container, and check that the Docker image still builds. A red X on
-# a commit means it broke something before anyone deploys it.
+# On every pull request: tests + a Docker build check.
+# On every push to master (the deployment branch): tests, then build and push
+# the image tagged with the commit SHA, roll it out to GKE, health-check it
+# through the public HTTPS URL, and roll back automatically if any of that fails.
 name: CI
 
 on:
@@ -35,7 +36,8 @@ jobs:
       - run: pip install -r requirements-dev.txt
       - run: pytest -q
 
-  docker-build:
+  docker-build:   # PRs only; on master the deploy job builds the image it ships
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -48,3 +50,74 @@ jobs:
           push: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  deploy:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency: { group: deploy-gke, cancel-in-progress: false }   # one rollout at a time, in push order
+    permissions: { contents: read, id-token: write }   # id-token: GitHub's OIDC token for Workload Identity Federation
+    env:
+      IMAGE: us-central1-docker.pkg.dev/project-262a2026-879b-4b49-88e/mahokshahvata/app:${{ github.sha }}
+      URL: https://34-8-137-93.sslip.io
+    steps:
+      - uses: actions/checkout@v4
+      # No key file: terraform/ci.tf trusts pushes to master of this repo only.
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/388272662758/locations/global/workloadIdentityPools/github/providers/mahokshahvata
+          service_account: github-deployer@project-262a2026-879b-4b49-88e.iam.gserviceaccount.com
+      - uses: google-github-actions/setup-gcloud@v2
+      - uses: google-github-actions/get-gke-credentials@v2
+        with: { cluster_name: mahokshahvata, location: us-central1-a }
+      - run: gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build and push ${{ github.sha }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ env.IMAGE }}
+          build-args: GIT_SHA=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Record the version now serving (the rollback target)
+        run: echo "PREVIOUS=$(curl -sf --max-time 10 $URL/health | jq -r .version)" | tee -a "$GITHUB_ENV"
+
+      - name: Deploy
+        id: deploy
+        run: |
+          kubectl set image deployment/app app=$IMAGE
+          kubectl annotate deployment/app kubernetes.io/change-cause="${GITHUB_SHA::7} (run ${{ github.run_id }})" --overwrite
+          # maxUnavailable 0: old pods keep serving until new ones pass readiness.
+          kubectl rollout status deployment/app --timeout=5m
+
+      - name: Health check through the load balancer
+        run: |
+          # The load balancer takes a few seconds to drain old pods, so retry for up to 2 minutes.
+          for i in $(seq 24); do
+            version=$(curl -sf --max-time 10 $URL/health | jq -r .version || true)
+            ready=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 $URL/ready || true)
+            echo "attempt $i: version=$version /ready=$ready"
+            [ "$version" = "$GITHUB_SHA" ] && [ "$ready" = 200 ] && curl -sf --max-time 10 -o /dev/null $URL/ && exit 0
+            sleep 5
+          done
+          echo "::error::$GITHUB_SHA is not healthy at $URL"; exit 1
+
+      - name: Roll back to the previous version
+        if: failure() && steps.deploy.outcome != 'skipped'
+        run: |
+          echo "::warning::Deploy or health check of ${GITHUB_SHA::7} failed; rolling back"
+          kubectl rollout undo deployment/app
+          kubectl rollout status deployment/app --timeout=5m
+          for i in $(seq 24); do
+            version=$(curl -sf --max-time 10 $URL/health | jq -r .version || true)
+            ready=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 $URL/ready || true)
+            echo "attempt $i: serving version=$version /ready=$ready (expected $PREVIOUS)"
+            [ "$version" = "$PREVIOUS" ] && [ "$ready" = 200 ] && { echo "Rolled back: $PREVIOUS is serving"; kubectl rollout history deployment/app | tail -4; exit 0; }
+            sleep 5
+          done
+          echo "::error::rollback did not restore $PREVIOUS"; exit 1

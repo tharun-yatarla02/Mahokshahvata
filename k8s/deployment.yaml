@@ -37,6 +37,8 @@ spec:
         runAsUser: 10001   # the image's "app" user
       containers:
         - name: app
+          # The pipeline sets the image to the commit SHA on every push to master
+          # (.github/workflows/ci.yml). Re-applying this file by hand pins it back to v6.
           image: us-central1-docker.pkg.dev/project-262a2026-879b-4b49-88e/mahokshahvata/app:v6
           ports:
             - { name: http, containerPort: 8000 }

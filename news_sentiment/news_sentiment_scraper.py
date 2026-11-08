@@ -55,6 +55,7 @@ except ImportError:
     Anthropic = None  # only required when SENTIMENT_BACKEND="claude"
 
 from cloud.blobs import default_store
+from cloud.log import log
 
 # ---------------------------------------------------------------------------
 # Config
@@ -275,7 +276,7 @@ def classify_batch(client, batch):
 
     parsed = response.parsed_output
     if parsed is None:  # refusal or cut off at max_tokens: nothing validated
-        print(f"[warn] no structured output (stop_reason={response.stop_reason}), skipping batch", file=sys.stderr)
+        log("WARNING", f"no structured output (stop_reason={response.stop_reason}), skipping batch")
         parsed = BatchSentiment(results=[])
 
     by_id = {item.id: item for item in parsed.results}
@@ -407,7 +408,7 @@ def fetch_articles():
                 feed = feedparser.parse(response.content)
                 entries = list(getattr(feed, "entries", []))
             except Exception as e:
-                print(f"[warn] could not fetch {source} from {url}: {e}", file=sys.stderr)
+                log("WARNING", f"could not fetch {source} from {url}: {e}")
                 continue
 
             if not entries:
@@ -673,7 +674,7 @@ def collect_sentiment_results(extra_companies=(), known_tickers=None):
         except Exception as e:  # bad key, plan limits, network
             # Not str(e): requests puts the URL, and so the token, in its errors.
             reason = getattr(getattr(e, "response", None), "status_code", None) or type(e).__name__
-            print(f"[warn] Benzinga news unavailable ({reason}), using RSS feeds", file=sys.stderr)
+            log("WARNING", f"Benzinga news unavailable ({reason}), using RSS feeds")
     if not articles:
         articles = fetch_articles()
     matched = match_tickers(articles, company_map, known_tickers)
@@ -701,7 +702,7 @@ def collect_sentiment_results(extra_companies=(), known_tickers=None):
             sentiments = classify_all(client, matched)
             results = [{**article, **sentiment} for article, sentiment in zip(matched, sentiments)]
         except Exception as e:  # API error, rate limit, network, missing local model
-            print(f"[warn] sentiment classification failed, using heuristic: {e}", file=sys.stderr)
+            log("WARNING", f"sentiment classification failed, using heuristic: {e}")
             results = heuristic_sentiment(matched, "Heuristic sentiment fallback (classifier unavailable)")
 
     save_history(results)
@@ -752,7 +753,7 @@ def load_history_store():
         raw = _history_store().read(HISTORY_OBJECT)
         data = json.loads(raw) if raw else []
     except Exception as e:  # unreadable, or the bucket is unreachable
-        print(f"[warn] could not read sentiment history: {type(e).__name__}: {e}", file=sys.stderr)
+        log("WARNING", f"could not read sentiment history: {type(e).__name__}: {e}")
         return []
     if not isinstance(data, list):
         return []
@@ -786,7 +787,7 @@ def save_history(results):
     try:
         _history_store().write(HISTORY_OBJECT, json.dumps(history, indent=2).encode(), "application/json")
     except Exception as e:  # history is a record, not something a page needs; don't fail the request
-        print(f"[warn] could not save sentiment history: {type(e).__name__}: {e}", file=sys.stderr)
+        log("WARNING", f"could not save sentiment history: {type(e).__name__}: {e}")
     return history
 
 
