@@ -1191,6 +1191,7 @@ def ready():
     """Readiness: this pod can serve real requests, so the database answers
     too. On its own short-lived connection, so it never waits behind the
     engine's lock; failing it only takes the pod out of the load balancer."""
+    return JSONResponse({"status": "deliberately broken to test the pipeline's rollback"}, status_code=503)
     try:
         with db_connect(connect_timeout="2") as conn:
             conn.execute("SET statement_timeout = 2000")
