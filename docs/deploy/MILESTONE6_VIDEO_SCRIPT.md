@@ -8,6 +8,8 @@ back to it. The fix you push afterwards is the "push a commit, watch it build, d
 
 - In every terminal: `export CLOUDSDK_ACTIVE_CONFIG_NAME=mahok`, then `cd` to the repo root. Tharun uses his
   own account: `gcloud container clusters get-credentials mahokshahvata --zone us-central1-a --project project-262a2026-879b-4b49-88e`.
+- Whoever runs `terraform plan`: run `gcloud auth application-default login` first (Terraform reads those
+  credentials, not the gcloud config), then run the plan once before recording to check it says "No changes".
 - `git pull` so you're on the latest master, and `curl -s https://34-8-137-93.sslip.io/health` to note the live SHA.
 - Browser tabs, in this order:
   1. The site, signed in with the test account (not "Continue with Google").
@@ -60,6 +62,7 @@ Dashboard "Mahokshahvata app": the 5xx tile (Nov 8's spike of 3, and today's onc
 response class, CPU and memory per pod, and restarts.
 Alerting → the policy: condition "sum over 1 min > 0", notification channel email.
 Gmail: the alert email received on Nov 8 at about 06:36 UTC (incident opened 4 min after the 500s).
+Today's 500s only send a new email if no incident is still open; an incident closes 30 minutes after the last error.
 > "One error fires it because we have little traffic. With real traffic we'd alert on a rate, like over 1% of requests for 5 minutes."
 
 ### 7:00–8:30 · Terraform (slide 4), live plan

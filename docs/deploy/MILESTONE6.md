@@ -107,7 +107,7 @@ they are never in state either.
 | The load balancer, NEGs, health check and Google-managed cert *behind* the Ingress | GKE's Ingress controller creates them from `k8s/ingress.yaml` and deletes them with it. |
 | Secret **values** and the DB password | Kept out of state on purpose (see above). Added with `gcloud secrets versions add`. |
 | Terraform state bucket | It has to exist before `terraform init` (one `gcloud storage buckets create`). |
-| Budget alerts ($10/$25/$50) | Created by `deploy/gcp.sh` on the billing account, which our accounts can't read through the API. Still in place. |
+| Budget alerts ($10/$25/$50) | Created by `deploy/gcp.sh` on the billing account. Only the billing admin (Tharun) can read it, and Terraform runs as Sid. Tharun confirms them in Billing → Budgets & alerts. |
 | Firebase project (Google sign-in) | A separate Firebase project, configured in the Firebase console. |
 | The retired Milestone 3 VM, its IP and firewall rules | No longer runs the app (stopped at the GKE cutover). Scheduled for deletion, not worth adopting. |
 | Project APIs other than STS, the `default` VPC, project IAM for people | Project-level setup that predates the app. |
@@ -165,5 +165,6 @@ Pull requests run the tests and a Docker build check, and never deploy.
 
 - Don't stop Cloud SQL or scale the node pool down. The site would go down, and `terraform plan`
   would stop reporting "No changes". Change things with `terraform apply`.
-- `/debug/fail` is public on purpose (it's the controlled error). Each call sends an alert email.
-- Cost: about $2.2 a day for GKE and the load balancer, plus Cloud SQL (db-f1-micro), until teardown.
+- `/debug/fail` is public on purpose (it's the controlled error). It opens an incident and sends one email. Further 500s
+  send nothing new until the incident auto-closes, 30 minutes after the last error.
+- Cost: about $2.2 a day with 2 nodes, about $3 with the autoscaler's 3rd node, plus Cloud SQL (db-f1-micro), until teardown.
