@@ -12,7 +12,7 @@ FIRESTORE = {
          "created_at": "2026-10-01T10:00:00+00:00"},
     ],
     "sessions": [{"token_hash": "h1", "user_id": 7, "created_at": "2026-10-01T10:00:00+00:00",
-                  "expires_at": "2026-10-31T10:00:00+00:00"}],
+                  "expires_at": "2099-12-31T10:00:00+00:00"}],
     "auth_events": [{"event": "login", "user_id": 7, "method": "google", "email": "grace@example.com", "ip": "1.2.3.4",
                      "user_agent": "x", "at": "2026-10-01T10:00:00+00:00"},
                     {"event": "login_failed", "user_id": 99, "method": "email", "email": "gone@example.com", "ip": None,
