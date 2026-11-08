@@ -159,7 +159,11 @@ Pull requests run the tests and a Docker build check, and never deploy.
 | Failed deploy (8faceed, wrong port) → automatic rollback → 16b8f5f verified serving | [run 42455266061](https://github.com/tharun-yatarla02/Mahokshahvata/actions/runs/42455266061) |
 | Revert deployed normally (7ec2692) | [run 42455772145](https://github.com/tharun-yatarla02/Mahokshahvata/actions/runs/42455772145) |
 | Run summaries, rollback log and `kubectl rollout history` | [`evidence/m6_pipeline_runs.txt`](evidence/m6_pipeline_runs.txt) |
-| Dashboard, alert policy, received alert email, log-based metric | screenshots in `evidence/` (list in [`MILESTONE6_VIDEO_SCRIPT.md`](MILESTONE6_VIDEO_SCRIPT.md)) |
+| Dashboard (5xx count, LB requests, CPU and memory per pod) | [`evidence/m6_dashboard.png`](evidence/m6_dashboard.png) |
+| Alert policy "App is returning HTTP 5xx" | [`evidence/m6_alert_policy.png`](evidence/m6_alert_policy.png) |
+| Alert email actually received (07:45 UTC, during the recording) | [`evidence/m6_alert_email.png`](evidence/m6_alert_email.png) |
+| Recorded demo: failed deploy (ec0b690) → automatic rollback → b6f2e4d verified | [run 42459666561](https://github.com/tharun-yatarla02/Mahokshahvata/actions/runs/42459666561) |
+| Recorded demo: fix pushed (2e30284) → build, deploy, health check | [run 42460858040](https://github.com/tharun-yatarla02/Mahokshahvata/actions/runs/42460858040) |
 | Slides, 1-page written analysis | [`Milestone6_Observability.pptx`](Milestone6_Observability.pptx), [`Milestone6_Written_Analysis.pdf`](Milestone6_Written_Analysis.pdf) |
 
 ## Keeping it up through grading
