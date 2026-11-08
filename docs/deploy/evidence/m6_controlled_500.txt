@@ -1,0 +1,40 @@
+Controlled HTTP 5xx, Nov 8 2026 (UTC). App version 16b8f5f (deployed by pipeline run 42454929244).
+
+$ curl -s -o /dev/null -w '%{http_code}' https://34-8-137-93.sslip.io/debug/fail   # x3 at 06:32:09Z
+500
+500
+500
+
+== JSON log entries in Cloud Logging
+$ gcloud logging read 'resource.type="k8s_container" AND resource.labels.container_name="app" AND jsonPayload.status>=500'
+{"timestamp": "2026-11-08T06:32:09.816835777Z", "severity": "ERROR", "jsonPayload": {"latency_ms": 1, "logger": "app", "message": "GET /debug/fail 500", "method": "GET", "path": "/debug/fail", "status": 500, "version": "16b8f5f84c341acc8e52e93eedb8db77bc6ce894"}}
+{"timestamp": "2026-11-08T06:32:09.681737692Z", "severity": "ERROR", "jsonPayload": {"latency_ms": 1, "logger": "app", "message": "GET /debug/fail 500", "method": "GET", "path": "/debug/fail", "status": 500, "version": "16b8f5f84c341acc8e52e93eedb8db77bc6ce894"}}
+{"timestamp": "2026-11-08T06:32:09.471429895Z", "severity": "ERROR", "jsonPayload": {"latency_ms": 1.6, "logger": "app", "message": "GET /debug/fail 500", "method": "GET", "path": "/debug/fail", "status": 500, "version": "16b8f5f84c341acc8e52e93eedb8db77bc6ce894"}}
+
+== Log-based metric definition
+description: 'HTTP 5xx responses from the app: its JSON request log lines with status
+  >= 500.'
+filter: |
+  resource.type="k8s_container"
+  resource.labels.cluster_name="mahokshahvata"
+  resource.labels.container_name="app"
+  jsonPayload.status>=500
+metricDescriptor:
+  description: 'HTTP 5xx responses from the app: its JSON request log lines with status
+    >= 500.'
+  metricKind: DELTA
+  name: projects/project-262a2026-879b-4b49-88e/metricDescriptors/logging.googleapis.com/user/app_http_5xx
+  type: logging.googleapis.com/user/app_http_5xx
+  unit: '1'
+  valueType: INT64
+name: app_http_5xx
+resourceName: projects/project-262a2026-879b-4b49-88e/metrics/app_http_5xx
+
+== logging.googleapis.com/user/app_http_5xx per minute (Monitoring API timeSeries.list)
+  2026-11-08T06:32:00Z count = 0
+  2026-11-08T06:33:00Z count = 3
+  2026-11-08T06:34:00Z count = 0
+
+== Alert incident
+  App is returning HTTP 5xx | state OPEN | opened 2026-11-08T06:36:19Z | metric logging.googleapis.com/user/app_http_5xx
+  Notification channel: email sidsidsid328@gmail.com (screenshot of the received email: m6_alert_email.png)

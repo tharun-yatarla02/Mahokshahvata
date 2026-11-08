@@ -147,12 +147,23 @@ reporting "No changes" until it is put back. Use `terraform apply` for that inst
 
 Pull requests run the tests and a Docker build check, and never deploy.
 
-## Evidence
+## Evidence (Nov 8, 2026)
 
 | What | Where |
 |---|---|
-| JSON log entry for a controlled 500 + metric increase | `evidence/m6_controlled_500.txt` + screenshots |
-| Dashboard, alert policy, received alert email | screenshots in `evidence/` |
-| `terraform plan`: No changes | `evidence/m6_terraform_plan.txt` |
-| Successful build → deploy → health check | run link in `evidence/m6_pipeline_runs.txt` |
-| Failed deploy → automatic rollback → verified | run link in `evidence/m6_pipeline_runs.txt` |
+| 3 controlled 500s: JSON log entries, metric definition, metric 0 → 3, alert incident opened 06:36:19Z | [`evidence/m6_controlled_500.txt`](evidence/m6_controlled_500.txt) |
+| `terraform plan` against the live project: No changes | [`evidence/m6_terraform_plan.txt`](evidence/m6_terraform_plan.txt) |
+| Successful build → deploy → health check (16b8f5f, 2 min 53 s) | [run 42454929244](https://github.com/tharun-yatarla02/Mahokshahvata/actions/runs/42454929244) |
+| Broken code stopped by the tests, never deployed (fb391d7) | [run 42455180507](https://github.com/tharun-yatarla02/Mahokshahvata/actions/runs/42455180507) |
+| Failed deploy (8faceed, wrong port) → automatic rollback → 16b8f5f verified serving | [run 42455266061](https://github.com/tharun-yatarla02/Mahokshahvata/actions/runs/42455266061) |
+| Revert deployed normally (7ec2692) | [run 42455772145](https://github.com/tharun-yatarla02/Mahokshahvata/actions/runs/42455772145) |
+| Run summaries, rollback log and `kubectl rollout history` | [`evidence/m6_pipeline_runs.txt`](evidence/m6_pipeline_runs.txt) |
+| Dashboard, alert policy, received alert email, log-based metric | screenshots in `evidence/` (list in [`MILESTONE6_VIDEO_SCRIPT.md`](MILESTONE6_VIDEO_SCRIPT.md)) |
+| Slides, 1-page written analysis | [`Milestone6_Observability.pptx`](Milestone6_Observability.pptx), [`Milestone6_Written_Analysis.pdf`](Milestone6_Written_Analysis.pdf) |
+
+## Keeping it up through grading
+
+- Don't stop Cloud SQL or scale the node pool down. The site would go down, and `terraform plan`
+  would stop reporting "No changes". Change things with `terraform apply`.
+- `/debug/fail` is public on purpose (it's the controlled error). Each call sends an alert email.
+- Cost: about $2.2 a day for GKE and the load balancer, plus Cloud SQL (db-f1-micro), until teardown.

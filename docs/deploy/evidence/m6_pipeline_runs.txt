@@ -1,0 +1,35 @@
+Milestone 6 pipeline runs, Nov 8 2026 (UTC). Workflow .github/workflows/ci.yml, branch master.
+
+1. Successful build -> deploy -> health check
+   commit 16b8f5f  run https://github.com/tharun-yatarla02/Mahokshahvata/actions/runs/42454929244
+   06:29:07Z push -> 06:32:00Z done (2 min 53 s). Rollback step skipped. /health then reported 16b8f5f.
+
+2. Broken code stopped by tests (never deployed)
+   commit fb391d7 ("/ready always returns 503")  run https://github.com/tharun-yatarla02/Mahokshahvata/actions/runs/42455180507
+   test job failed (tests/test_replicas.py expects /ready = 200); deploy job skipped.
+
+3. Failed deployment -> automatic rollback -> verified
+   commit 8faceed (image listens on port 8001, so its probes never pass)  run https://github.com/tharun-yatarla02/Mahokshahvata/actions/runs/42455266061
+   Build and push 06:35:30-06:35:48Z
+   Deploy 06:35:48Z -> 06:40:53Z: kubectl rollout status --timeout=5m
+       error: timed out waiting for the condition
+   Roll back to the previous version 06:40:53Z -> 06:40:55Z:
+       ##[warning]Deploy or health check of 8faceed failed; rolling back
+       deployment.apps/app rolled back
+       deployment "app" successfully rolled out
+       attempt 1: serving version=16b8f5f84c341acc8e52e93eedb8db77bc6ce894 /ready=200 (expected 16b8f5f84c341acc8e52e93eedb8db77bc6ce894)
+       Rolled back: 16b8f5f84c341acc8e52e93eedb8db77bc6ce894 is serving
+   The run ends red (failure) on purpose, so the bad commit is visible.
+
+4. Revert of the broken commit, deployed normally
+   commit 7ec2692  run https://github.com/tharun-yatarla02/Mahokshahvata/actions/runs/42455772145
+   06:41:22Z -> 06:43:53Z (2 min 31 s), success.
+
+$ kubectl rollout history deployment/app   (after run 4)
+deployment.apps/app 
+REVISION  CHANGE-CAUSE
+1         <none>
+2         <none>
+4         8faceed (run 42455266061)
+5         16b8f5f (run 42454929244)
+6         7ec2692 (run 42455772145)
