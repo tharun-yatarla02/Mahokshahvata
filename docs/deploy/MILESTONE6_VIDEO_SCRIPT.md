@@ -62,7 +62,8 @@ Dashboard "Mahokshahvata app": the 5xx tile (Nov 8's spike of 3, and today's onc
 response class, CPU and memory per pod, and restarts.
 Alerting → the policy: condition "sum over 1 min > 0", notification channel email.
 Gmail: the alert email received on Nov 8 at about 06:36 UTC (incident opened 4 min after the 500s).
-Today's 500s only send a new email if no incident is still open; an incident closes 30 minutes after the last error.
+Also show the "Alert recovered" email that followed 53 s later. The 500s you sent at 3:30 open a new incident, so a new
+"firing" email should arrive a few minutes after them. Show it live if it's there.
 > "One error fires it because we have little traffic. With real traffic we'd alert on a rate, like over 1% of requests for 5 minutes."
 
 ### 7:00–8:30 · Terraform (slide 4), live plan
@@ -109,7 +110,7 @@ curl -s https://34-8-137-93.sslip.io/health        # the new SHA
 Save these in `docs/deploy/evidence/`:
 1. `m6_dashboard.png`: the dashboard with the 5xx spike and the CPU and memory tiles.
 2. `m6_alert_policy.png`: Alerting → the policy page (condition and notification channel).
-3. `m6_alert_email.png`: the received alert email in Gmail.
+3. `m6_alert_email.png` and `m6_alert_recovered.png`: the received "firing" and "recovered" emails in Gmail.
 4. `m6_log_metric.png`: Logging → Log-based metrics → `app_http_5xx` (its filter).
 5. `m6_log_entry.png`: one expanded 500 entry in Logs Explorer.
 6. `m6_pipeline_success.png` and `m6_pipeline_rollback.png`: the two Actions runs.

@@ -76,7 +76,8 @@ A log-based metric counts only entries written after it exists.
 
 **Alert "App is returning HTTP 5xx"** fires when the metric's sum over 1 minute is above 0,
 so a single 5xx fires it. It emails the notification channel **sidsidsid328@gmail.com** and
-closes itself 30 minutes after the errors stop. That threshold suits a class project with
+closes the incident, with a "recovered" email, once a full minute passes with no 5xx (Nov 8: opened
+06:36:19Z, recovered 53 s later). That threshold suits a class project with
 little traffic; with real traffic it would be a rate (for example, 5xx above 1% of requests for 5 minutes).
 
 ## Terraform coverage
@@ -165,6 +166,6 @@ Pull requests run the tests and a Docker build check, and never deploy.
 
 - Don't stop Cloud SQL or scale the node pool down. The site would go down, and `terraform plan`
   would stop reporting "No changes". Change things with `terraform apply`.
-- `/debug/fail` is public on purpose (it's the controlled error). It opens an incident and sends one email. Further 500s
-  send nothing new until the incident auto-closes, 30 minutes after the last error.
+- `/debug/fail` is public on purpose (it's the controlled error). Each burst of 500s opens an incident
+  and sends a "firing" email, then a "recovered" email about a minute after the last error.
 - Cost: about $2.2 a day with 2 nodes, about $3 with the autoscaler's 3rd node, plus Cloud SQL (db-f1-micro), until teardown.
