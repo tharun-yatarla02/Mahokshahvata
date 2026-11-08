@@ -1,0 +1,37 @@
+$ terraform plan   # 2026-11-08T06:28:42Z, refresh enabled (default), against the live project
+google_project_iam_member.runtime_logging_logwriter: Refreshing state... [id=project-262a2026-879b-4b49-88e/roles/logging.logWriter/serviceAccount:mahokshahvata-vm@project-262a2026-879b-4b49-88e.iam.gserviceaccount.com]
+google_monitoring_notification_channel.email: Refreshing state... [id=projects/project-262a2026-879b-4b49-88e/notificationChannels/6178873261112609957]
+google_service_account.runtime: Refreshing state... [id=projects/project-262a2026-879b-4b49-88e/serviceAccounts/mahokshahvata-vm@project-262a2026-879b-4b49-88e.iam.gserviceaccount.com]
+google_iam_workload_identity_pool.github: Refreshing state... [id=projects/project-262a2026-879b-4b49-88e/locations/global/workloadIdentityPools/github]
+google_project_service.sts: Refreshing state... [id=project-262a2026-879b-4b49-88e/sts.googleapis.com]
+google_logging_metric.http_5xx: Refreshing state... [id=app_http_5xx]
+google_secret_manager_secret.s_db_admin_password: Refreshing state... [id=projects/project-262a2026-879b-4b49-88e/secrets/db-admin-password]
+google_secret_manager_secret.s_db_password: Refreshing state... [id=projects/project-262a2026-879b-4b49-88e/secrets/db-password]
+google_artifact_registry_repository.app: Refreshing state... [id=projects/project-262a2026-879b-4b49-88e/locations/us-central1/repositories/mahokshahvata]
+google_container_cluster.app: Refreshing state... [id=projects/project-262a2026-879b-4b49-88e/locations/us-central1-a/clusters/mahokshahvata]
+google_compute_global_address.lb: Refreshing state... [id=projects/project-262a2026-879b-4b49-88e/global/addresses/mahokshahvata-gke-ip]
+google_project_iam_member.runtime_monitoring_metricwriter: Refreshing state... [id=project-262a2026-879b-4b49-88e/roles/monitoring.metricWriter/serviceAccount:mahokshahvata-vm@project-262a2026-879b-4b49-88e.iam.gserviceaccount.com]
+google_compute_global_address.psa_range: Refreshing state... [id=projects/project-262a2026-879b-4b49-88e/global/addresses/google-managed-services-default]
+google_service_account.deployer: Refreshing state... [id=projects/project-262a2026-879b-4b49-88e/serviceAccounts/github-deployer@project-262a2026-879b-4b49-88e.iam.gserviceaccount.com]
+google_storage_bucket.data: Refreshing state... [id=project-262a2026-879b-4b49-88e-app-data]
+google_secret_manager_secret.s_anthropic_api_key: Refreshing state... [id=projects/project-262a2026-879b-4b49-88e/secrets/anthropic-api-key]
+google_monitoring_alert_policy.http_5xx: Refreshing state... [id=projects/project-262a2026-879b-4b49-88e/alertPolicies/6508372278422227716]
+google_secret_manager_secret_iam_member.runtime_db_password: Refreshing state... [id=projects/project-262a2026-879b-4b49-88e/secrets/db-password/roles/secretmanager.secretAccessor/serviceAccount:mahokshahvata-vm@project-262a2026-879b-4b49-88e.iam.gserviceaccount.com]
+google_artifact_registry_repository_iam_member.runtime_reader: Refreshing state... [id=projects/project-262a2026-879b-4b49-88e/locations/us-central1/repositories/mahokshahvata/roles/artifactregistry.reader/serviceAccount:mahokshahvata-vm@project-262a2026-879b-4b49-88e.iam.gserviceaccount.com]
+google_secret_manager_secret_iam_member.runtime_anthropic_api_key: Refreshing state... [id=projects/project-262a2026-879b-4b49-88e/secrets/anthropic-api-key/roles/secretmanager.secretAccessor/serviceAccount:mahokshahvata-vm@project-262a2026-879b-4b49-88e.iam.gserviceaccount.com]
+google_project_iam_member.deployer_push: Refreshing state... [id=project-262a2026-879b-4b49-88e/roles/artifactregistry.writer/serviceAccount:github-deployer@project-262a2026-879b-4b49-88e.iam.gserviceaccount.com]
+google_project_iam_member.deployer_gke: Refreshing state... [id=project-262a2026-879b-4b49-88e/roles/container.developer/serviceAccount:github-deployer@project-262a2026-879b-4b49-88e.iam.gserviceaccount.com]
+google_iam_workload_identity_pool_provider.github: Refreshing state... [id=projects/project-262a2026-879b-4b49-88e/locations/global/workloadIdentityPools/github/providers/mahokshahvata]
+google_service_account_iam_member.deployer_from_github: Refreshing state... [id=projects/project-262a2026-879b-4b49-88e/serviceAccounts/github-deployer@project-262a2026-879b-4b49-88e.iam.gserviceaccount.com/roles/iam.workloadIdentityUser/principalSet://iam.googleapis.com/projects/388272662758/locations/global/workloadIdentityPools/github/attribute.repository/tharun-yatarla02/Mahokshahvata]
+google_storage_bucket_iam_member.runtime_objects: Refreshing state... [id=b/project-262a2026-879b-4b49-88e-app-data/roles/storage.objectUser/serviceAccount:mahokshahvata-vm@project-262a2026-879b-4b49-88e.iam.gserviceaccount.com]
+google_monitoring_dashboard.app: Refreshing state... [id=projects/388272662758/dashboards/c054226f-68e0-42a9-89f9-073ada8e9aa7]
+google_service_networking_connection.psa: Refreshing state... [id=projects/project-262a2026-879b-4b49-88e/global/networks/default:servicenetworking.googleapis.com]
+google_container_node_pool.app: Refreshing state... [id=projects/project-262a2026-879b-4b49-88e/locations/us-central1-a/clusters/mahokshahvata/nodePools/pool-medium]
+google_sql_database_instance.db: Refreshing state... [id=mahokshahvata-db]
+google_sql_database.app: Refreshing state... [id=projects/project-262a2026-879b-4b49-88e/instances/mahokshahvata-db/databases/mahokshahvata]
+google_sql_user.app: Refreshing state... [id=app//mahokshahvata-db]
+
+No changes. Your infrastructure matches the configuration.
+
+Terraform has compared your real infrastructure against your configuration
+and found no differences, so no changes are needed.

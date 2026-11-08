@@ -37,11 +37,12 @@ resource "google_service_account_iam_member" "deployer_from_github" {
   member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.repository/${local.github}"
 }
 
-resource "google_artifact_registry_repository_iam_member" "deployer_push" {
-  location   = google_artifact_registry_repository.app.location
-  repository = google_artifact_registry_repository.app.name
-  role       = "roles/artifactregistry.writer"
-  member     = google_service_account.deployer.member
+# Project level, not on the repository: our IAM admin role can't set
+# repository-level policies. The project has one repository, so same reach.
+resource "google_project_iam_member" "deployer_push" {
+  project = local.project
+  role    = "roles/artifactregistry.writer"
+  member  = google_service_account.deployer.member
 }
 
 # set image, rollout status, rollout undo on the cluster. No IAM, SQL or secrets.

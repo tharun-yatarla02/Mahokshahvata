@@ -56,37 +56,37 @@ resource "google_monitoring_dashboard" "app" {
     mosaicLayout = {
       columns = 12
       tiles = [
-        { xPos = 0, yPos = 0, width = 6, height = 4, widget = {
+        { width = 6, height = 4, widget = {
           title = "HTTP 5xx errors (log-based metric, per minute)"
-          xyChart = { dataSets = [{ plotType = "STACKED_BARS", timeSeriesQuery = { timeSeriesFilter = {
+          xyChart = { dataSets = [{ targetAxis = "Y1", plotType = "STACKED_BAR", timeSeriesQuery = { timeSeriesFilter = {
             filter      = "metric.type=\"logging.googleapis.com/user/${google_logging_metric.http_5xx.name}\" resource.type=\"k8s_container\""
             aggregation = { alignmentPeriod = "60s", perSeriesAligner = "ALIGN_SUM", crossSeriesReducer = "REDUCE_SUM" }
           } } }] }
         } },
-        { xPos = 6, yPos = 0, width = 6, height = 4, widget = {
+        { xPos = 6, width = 6, height = 4, widget = {
           title = "Load balancer requests by response class"
-          xyChart = { dataSets = [{ plotType = "LINE", timeSeriesQuery = { timeSeriesFilter = {
+          xyChart = { dataSets = [{ targetAxis = "Y1", plotType = "LINE", timeSeriesQuery = { timeSeriesFilter = {
             filter      = "metric.type=\"loadbalancing.googleapis.com/https/request_count\" resource.type=\"https_lb_rule\""
             aggregation = { alignmentPeriod = "60s", perSeriesAligner = "ALIGN_RATE", crossSeriesReducer = "REDUCE_SUM", groupByFields = ["metric.label.response_code_class"] }
           } } }] }
         } },
-        { xPos = 0, yPos = 4, width = 6, height = 4, widget = {
+        { yPos = 4, width = 6, height = 4, widget = {
           title = "CPU per pod (cores)"
-          xyChart = { dataSets = [{ plotType = "LINE", timeSeriesQuery = { timeSeriesFilter = {
+          xyChart = { dataSets = [{ targetAxis = "Y1", plotType = "LINE", timeSeriesQuery = { timeSeriesFilter = {
             filter      = "metric.type=\"kubernetes.io/container/cpu/core_usage_time\" resource.type=\"k8s_container\" resource.label.cluster_name=\"mahokshahvata\" resource.label.container_name=\"app\""
             aggregation = { alignmentPeriod = "60s", perSeriesAligner = "ALIGN_RATE", crossSeriesReducer = "REDUCE_SUM", groupByFields = ["resource.label.pod_name"] }
           } } }] }
         } },
         { xPos = 6, yPos = 4, width = 6, height = 4, widget = {
           title = "Memory per pod (bytes, limit 1 GiB)"
-          xyChart = { dataSets = [{ plotType = "LINE", timeSeriesQuery = { timeSeriesFilter = {
+          xyChart = { dataSets = [{ targetAxis = "Y1", plotType = "LINE", timeSeriesQuery = { timeSeriesFilter = {
             filter      = "metric.type=\"kubernetes.io/container/memory/used_bytes\" resource.type=\"k8s_container\" resource.label.cluster_name=\"mahokshahvata\" resource.label.container_name=\"app\" metric.label.memory_type=\"non-evictable\""
             aggregation = { alignmentPeriod = "60s", perSeriesAligner = "ALIGN_MEAN", crossSeriesReducer = "REDUCE_SUM", groupByFields = ["resource.label.pod_name"] }
           } } }] }
         } },
-        { xPos = 0, yPos = 8, width = 6, height = 4, widget = {
+        { yPos = 8, width = 6, height = 4, widget = {
           title = "Container restarts"
-          xyChart = { dataSets = [{ plotType = "STACKED_BARS", timeSeriesQuery = { timeSeriesFilter = {
+          xyChart = { dataSets = [{ targetAxis = "Y1", plotType = "STACKED_BAR", timeSeriesQuery = { timeSeriesFilter = {
             filter      = "metric.type=\"kubernetes.io/container/restart_count\" resource.type=\"k8s_container\" resource.label.cluster_name=\"mahokshahvata\" resource.label.container_name=\"app\""
             aggregation = { alignmentPeriod = "60s", perSeriesAligner = "ALIGN_DELTA", crossSeriesReducer = "REDUCE_SUM", groupByFields = ["resource.label.pod_name"] }
           } } }] }
