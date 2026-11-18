@@ -1,11 +1,46 @@
 # Project Status
 
-_Last updated: 2026-10-24 (Milestone 5: v6 on GKE behind HTTPS; old Firebase key deleted)_
+_Last updated: 2026-11-18 (Milestone 6 done; everything paused since Nov 9 to save cost)_
 
 Picking this up? Read [HANDOFF.md](HANDOFF.md) first (setup, architecture,
 gotchas, and a starting point for each open task).
 
-## Where we are
+## Current state (Nov 18)
+
+**Paused since Nov 9, 08:16–08:21 UTC** (by Siddhardha, after the Milestone 6 demo):
+Cloud SQL is stopped (`activationPolicy: NEVER`), the GKE node pool is at 0 nodes, the
+HTTPS load balancer's forwarding rules are gone, and the old VM is stopped. The site
+doesn't answer while paused. Data is safe: Cloud SQL keeps its disk and backups.
+Still billed while paused: two reserved static IPs (`34.8.137.93`, `34.122.164.209`),
+Cloud SQL's 10 GB disk, the stopped VM's disk and the image registry: roughly
+$15–20/month.
+
+### Restarting after a pause (in this order)
+
+1. Start Cloud SQL and wait until its state is `RUNNABLE` (10–15 min):
+   `gcloud sql instances patch mahokshahvata-db --activation-policy=ALWAYS --project project-262a2026-879b-4b49-88e`
+   (Nodes that start before the database crash-loop until it is up, as on Nov 8.)
+2. Bring the nodes back with autoscaling on (it was turned off during the pauses):
+   `gcloud container clusters update mahokshahvata --zone us-central1-a --project project-262a2026-879b-4b49-88e --node-pool pool-medium --enable-autoscaling --min-nodes 2 --max-nodes 3`
+3. Re-apply `k8s/` if the Ingress/load balancer was removed (`kubectl apply -f k8s/`);
+   the managed certificate can take 15–60 min to become Active again.
+4. Check `kubectl rollout status deployment/app` and https://34-8-137-93.sslip.io/ready.
+
+To pause again, reverse the order: nodes to 0, then Cloud SQL `--activation-policy=NEVER`.
+
+### Open issues
+
+- **The Anthropic API key is rejected** (`401 invalid x-api-key`, seen Nov 8): headlines
+  fall back to keyword matching. Add a new key as a new version of the
+  `anthropic-api-key` secret, then restart the pods.
+- **`GET /debug/fail` is public.** It returns a 500 on purpose for the Milestone 6 alert
+  demo, so anyone who calls it triggers the alert email. Remove it or put it behind
+  sign-in after grading.
+- **Shutdown after final grading:** `./deploy/gke.sh --delete` (cluster + global IP),
+  then the VM, its IP and Cloud SQL (see the cost notes in this file's history and
+  `terraform/` for the full list of resources).
+
+## Where we were at Milestone 5 (Oct 24)
 
 **Live on GKE at https://34-8-137-93.sslip.io.** 2–4 replicas (autoscaled on
 CPU, PodDisruptionBudget, self-healing) run behind a Google HTTPS load balancer
@@ -102,6 +137,27 @@ Behind the scenes:
     to Cloud Logging.
 17. **Remove the old default service account's leftover access** (Artifact Registry
     reader) now that the VM runs as `mahokshahvata-vm`.
+
+## Done Nov 7–8 (Milestone 6: observability and automated deploys)
+
+- **JSON logs:** one structured line per request (method, path, status, latency, commit
+  SHA) plus every app warning, so Cloud Logging can filter on fields.
+- **Monitoring:** a log-based metric for HTTP 5xx, a dashboard (5xx, load balancer
+  requests by class, CPU, memory, restarts) and an email alert that fires on any 5xx and
+  recovers about a minute after the last one. `GET /debug/fail` triggers it for the demo.
+- **Terraform** (`terraform/`) now describes the cloud infrastructure: Cloud SQL, bucket,
+  secrets, IAM, registry, GKE, IPs, monitoring. The existing resources were imported;
+  `terraform plan` shows no changes.
+- **Deploy pipeline** (`.github/workflows/ci.yml`): every push to `master` runs the tests,
+  builds `app:<commit SHA>`, deploys to GKE, checks `/health` reports the new SHA and
+  `/ready` returns 200, and runs `kubectl rollout undo` if anything fails. GitHub signs in
+  through Workload Identity Federation as `github-deployer`, with no key file.
+- **Rollback demonstrated** with two deliberately broken releases (a `/ready` that always
+  fails; an image on the wrong port), each rolled back automatically, then reverted.
+- Slides, 1-page analysis, video script and evidence in `docs/deploy/`.
+- Tharun granted Siddhardha Project IAM Admin, Service Account Admin and Workload Identity
+  Pool Admin (Nov 8) to set up the pipeline's identity; consider removing them now.
+- Nov 8 fix: a test had a hard-coded Oct 31 session expiry and started failing Nov 1.
 
 ## Done Oct 24 (Milestone 5: orchestration)
 

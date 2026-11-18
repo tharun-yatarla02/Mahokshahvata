@@ -11,8 +11,15 @@ No real money is traded — every portfolio is simulated.
 > setup from a fresh clone, how the code fits together, gotchas, and where
 > to pick up. Progress and open work: [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md).
 
-**Live:** https://34-8-137-93.sslip.io, image `v6` on GKE: 2–4 replicas behind a
-Google HTTPS load balancer with a managed certificate (http redirects to https). The
+**Paused since Nov 9, 2026** to save cost: Cloud SQL is stopped and the GKE cluster has
+0 nodes, so https://34-8-137-93.sslip.io doesn't answer. To bring it back, see
+"Restarting after a pause" in [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md).
+
+**When running:** https://34-8-137-93.sslip.io on GKE, 2–4 replicas behind a
+Google HTTPS load balancer with a managed certificate (http redirects to https). Every
+push to `master` is tested, built, deployed, health-checked and rolled back on failure
+by GitHub Actions; JSON logs feed a 5xx metric, a dashboard and an email alert
+([docs/deploy/MILESTONE6.md](docs/deploy/MILESTONE6.md)). The
 pods keep no state: data is in Cloud SQL for PostgreSQL on a private IP, files are in a
 private Cloud Storage bucket, and keys are in Secret Manager, all reached as the
 `mahokshahvata-vm` service account. Google sign-in uses the team's Firebase project
@@ -193,6 +200,7 @@ The production database has no public IP, so database commands run inside a pod,
 | 3: containers | [docs/deploy/MILESTONE3.md](docs/deploy/MILESTONE3.md) | [slides](docs/deploy/Milestone3_Containers.pptx), [video runbook](docs/deploy/Milestone3_Video_Runbook.md) |
 | 4: state out of the VM | [docs/deploy/MILESTONE4.md](docs/deploy/MILESTONE4.md) | [slides](docs/deploy/Milestone4_State.pptx), [1-page analysis](docs/deploy/Milestone4_Written_Analysis.pdf), [row counts](docs/deploy/row_counts.txt), [video script](docs/deploy/MILESTONE4_VIDEO.md) |
 | 5: orchestration (GKE) | [docs/deploy/MILESTONE5.md](docs/deploy/MILESTONE5.md) | [slides](docs/deploy/Milestone5_Orchestration.pptx), [evidence](docs/deploy/evidence/) |
+| 6: observability and automated deploys | [docs/deploy/MILESTONE6.md](docs/deploy/MILESTONE6.md) | [slides](docs/deploy/Milestone6_Observability.pptx), [1-page analysis](docs/deploy/Milestone6_Written_Analysis.pdf), [video script](docs/deploy/MILESTONE6_VIDEO_SCRIPT.md), [evidence](docs/deploy/evidence/) |
 
 ### Market data
 
