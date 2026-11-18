@@ -17,16 +17,45 @@ $15–20/month.
 
 ### Restarting after a pause (in this order)
 
-1. Start Cloud SQL and wait until its state is `RUNNABLE` (10–15 min):
-   `gcloud sql instances patch mahokshahvata-db --activation-policy=ALWAYS --project project-262a2026-879b-4b49-88e`
-   (Nodes that start before the database crash-loop until it is up, as on Nov 8.)
-2. Bring the nodes back with autoscaling on (it was turned off during the pauses):
-   `gcloud container clusters update mahokshahvata --zone us-central1-a --project project-262a2026-879b-4b49-88e --node-pool pool-medium --enable-autoscaling --min-nodes 2 --max-nodes 3`
-3. Re-apply `k8s/` if the Ingress/load balancer was removed (`kubectl apply -f k8s/`);
-   the managed certificate can take 15–60 min to become Active again.
-4. Check `kubectl rollout status deployment/app` and https://34-8-137-93.sslip.io/ready.
+Checked Nov 18 against the paused cluster: the Deployment is scaled to **0 replicas**, the
+**Ingress (load balancer) was deleted**, node autoscaling is off, and the node pool has 0
+nodes. Kept and still valid: the reserved IP `34.8.137.93`, the managed certificate for
+`34-8-137-93.sslip.io` (Active until Jan 2027), the Service, HPA, PDB and the Deployment
+itself (image `app:9239754…`, the last pipeline deploy).
 
-To pause again, reverse the order: nodes to 0, then Cloud SQL `--activation-policy=NEVER`.
+1. **Start Cloud SQL and wait until `RUNNABLE`** (10–15 min). Pods that start before the
+   database crash-loop until it is up, as on Nov 8.
+   ```bash
+   gcloud sql instances patch mahokshahvata-db --activation-policy=ALWAYS --project project-262a2026-879b-4b49-88e
+   gcloud sql instances describe mahokshahvata-db --project project-262a2026-879b-4b49-88e --format='value(state)'
+   ```
+2. **Bring the nodes back, with autoscaling on:**
+   ```bash
+   gcloud container clusters update mahokshahvata --zone us-central1-a --project project-262a2026-879b-4b49-88e --node-pool pool-medium --enable-autoscaling --min-nodes 2 --max-nodes 3
+   gcloud container clusters resize mahokshahvata --zone us-central1-a --project project-262a2026-879b-4b49-88e --node-pool pool-medium --num-nodes 2
+   ```
+3. **Scale the app back up.** The HPA can't scale up from 0, so set it once; the HPA takes over from 2:
+   ```bash
+   kubectl scale deployment/app --replicas=2
+   kubectl rollout status deployment/app --timeout=10m
+   ```
+4. **Re-create the load balancer by applying only the Ingress file:**
+   ```bash
+   kubectl apply -f k8s/ingress.yaml
+   ```
+   **Don't run `kubectl apply -f k8s/`:** `k8s/deployment.yaml` still names image `app:v6`
+   (Milestone 5), so it would roll the app back to old code. The pipeline sets the image.
+   The load balancer takes about 5–10 minutes to come up; the certificate is already Active.
+5. **Check:** https://34-8-137-93.sslip.io/health shows the deployed commit, and `/ready`
+   returns `{"status":"ready"}`.
+
+Before restarting, add a working Anthropic key as a new version of the `anthropic-api-key`
+secret, or headlines fall back to keyword matching (see Open issues). `kubectl` needs the
+GKE plugin: `gcloud components install gke-gcloud-auth-plugin`.
+
+To pause again, reverse the order: `kubectl scale deployment/app --replicas=0`, nodes to 0,
+then Cloud SQL `--activation-policy=NEVER`. Keep the Ingress if you'll restart soon (it costs
+about $18/month); deleting it is what removed the load balancer this time.
 
 **While paused, every push to `master` still starts the deploy pipeline,** which can't
 deploy to a cluster with no nodes and ends red after trying to roll back. For docs-only
