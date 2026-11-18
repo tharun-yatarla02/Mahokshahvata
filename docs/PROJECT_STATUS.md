@@ -28,6 +28,11 @@ $15–20/month.
 
 To pause again, reverse the order: nodes to 0, then Cloud SQL `--activation-policy=NEVER`.
 
+**While paused, every push to `master` still starts the deploy pipeline,** which can't
+deploy to a cluster with no nodes and ends red after trying to roll back. For docs-only
+commits while paused, put `[skip ci]` in the commit message, or cancel the run
+(`gh run cancel <id>`) before its deploy job starts.
+
 ### Open issues
 
 - **The Anthropic API key is rejected** (`401 invalid x-api-key`, seen Nov 8): headlines
