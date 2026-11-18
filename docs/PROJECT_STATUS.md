@@ -10,7 +10,8 @@ gotchas, and a starting point for each open task).
 **Running again since Nov 18, ~17:50 UTC** (restarted by Tharun with the steps below; verified:
 all pages 200, `/ready` 200, HTTPS certificate valid, Milestone 6 image `9239754…`, 0 error
 log lines, the 5xx alert enabled, Google sign-in domain authorized). Cost while running:
-about $85/month. Headlines still use keyword matching until a new Anthropic key is added.
+about $85/month. A new Anthropic key (Secret Manager version 2) was added the same day; all
+headlines are labelled by Claude again.
 
 **It had been paused Nov 9, 08:16–08:21 UTC** (by Siddhardha, after the Milestone 6 demo):
 Cloud SQL is stopped (`activationPolicy: NEVER`), the GKE node pool is at 0 nodes, the
@@ -69,9 +70,9 @@ commits while paused, put `[skip ci]` in the commit message, or cancel the run
 
 ### Open issues
 
-- **The Anthropic API key is rejected** (`401 invalid x-api-key`, seen Nov 8): headlines
-  fall back to keyword matching. Add a new key as a new version of the
-  `anthropic-api-key` secret, then restart the pods.
+- ~~**The Anthropic API key is rejected**~~ Fixed Nov 18: a new key was added as version 2
+  of `anthropic-api-key` and the pods were restarted; 36 of 36 headlines labelled by Claude,
+  no 401s. To rotate it again: add a new version, then `kubectl rollout restart deployment/app`.
 - **`GET /debug/fail` is public.** It returns a 500 on purpose for the Milestone 6 alert
   demo, so anyone who calls it triggers the alert email. Remove it or put it behind
   sign-in after grading.
