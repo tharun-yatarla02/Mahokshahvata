@@ -1,13 +1,18 @@
 # Project Status
 
-_Last updated: 2026-11-18 (Milestone 6 done; everything paused since Nov 9 to save cost)_
+_Last updated: 2026-11-18 (Milestone 6 done; restarted Nov 18 after a pause since Nov 9)_
 
 Picking this up? Read [HANDOFF.md](HANDOFF.md) first (setup, architecture,
 gotchas, and a starting point for each open task).
 
 ## Current state (Nov 18)
 
-**Paused since Nov 9, 08:16–08:21 UTC** (by Siddhardha, after the Milestone 6 demo):
+**Running again since Nov 18, ~17:50 UTC** (restarted by Tharun with the steps below; verified:
+all pages 200, `/ready` 200, HTTPS certificate valid, Milestone 6 image `9239754…`, 0 error
+log lines, the 5xx alert enabled, Google sign-in domain authorized). Cost while running:
+about $85/month. Headlines still use keyword matching until a new Anthropic key is added.
+
+**It had been paused Nov 9, 08:16–08:21 UTC** (by Siddhardha, after the Milestone 6 demo):
 Cloud SQL is stopped (`activationPolicy: NEVER`), the GKE node pool is at 0 nodes, the
 HTTPS load balancer's forwarding rules are gone, and the old VM is stopped. The site
 doesn't answer while paused. Data is safe: Cloud SQL keeps its disk and backups.

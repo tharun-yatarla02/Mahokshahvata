@@ -11,11 +11,7 @@ No real money is traded — every portfolio is simulated.
 > setup from a fresh clone, how the code fits together, gotchas, and where
 > to pick up. Progress and open work: [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md).
 
-**Paused since Nov 9, 2026** to save cost: Cloud SQL is stopped and the GKE cluster has
-0 nodes, so https://34-8-137-93.sslip.io doesn't answer. To bring it back, see
-"Restarting after a pause" in [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md).
-
-**When running:** https://34-8-137-93.sslip.io on GKE, 2–4 replicas behind a
+**Live again (restarted Nov 18, 2026 after a pause since Nov 9):** https://34-8-137-93.sslip.io on GKE, 2–4 replicas behind a
 Google HTTPS load balancer with a managed certificate (http redirects to https). Every
 push to `master` is tested, built, deployed, health-checked and rolled back on failure
 by GitHub Actions; JSON logs feed a 5xx metric, a dashboard and an email alert
