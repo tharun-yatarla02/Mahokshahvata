@@ -200,8 +200,8 @@ The production database has no public IP, so database commands run inside a pod,
 
 ### Market data
 
-The server tracks the ~3000 largest US-listed common stocks by market cap
-(roughly the Russell 3000) in a background thread started with the app:
+The server tracks the largest US-listed common stocks by market cap (3000 by
+default, roughly the Russell 3000; the live site uses 4000) in a background thread started with the app:
 
 - **Stock list and prices** come from Nasdaq's stock screener, refreshed
   every 5 minutes (prices are delayed ~15 minutes).

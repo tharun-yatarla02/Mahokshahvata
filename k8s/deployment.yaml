@@ -48,6 +48,7 @@ spec:
             - { name: DATA_BUCKET, value: project-262a2026-879b-4b49-88e-app-data }
             - { name: SECRETS_PROJECT, value: project-262a2026-879b-4b49-88e }
             - { name: FIREBASE_PROJECT_ID, value: mahokshahvata }   # Google sign-in only; no key file
+            - { name: MARKET_UNIVERSE_SIZE, value: "4000" }   # largest 4,000 US stocks (raised from 3,000 on Nov 19)
           resources:
             requests: { cpu: 250m, memory: 512Mi }   # the HPA's CPU target is a share of this request
             limits: { memory: 1Gi }

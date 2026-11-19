@@ -5,6 +5,14 @@ _Last updated: 2026-11-18 (Milestone 6 done; restarted Nov 18 after a pause sinc
 Picking this up? Read [HANDOFF.md](HANDOFF.md) first (setup, architecture,
 gotchas, and a starting point for each open task).
 
+## Nov 19: stock list raised to 4,000
+
+`MARKET_UNIVERSE_SIZE=4000` was set on the live Deployment (`kubectl set env`,
+rolling restart, no downtime) and added to `k8s/deployment.yaml`. The list now
+reaches down to about $94M market value (5,355 US stocks pass the filter in all).
+The autopilot is unchanged: it still picks only from the largest stocks. To undo:
+`kubectl set env deployment/app MARKET_UNIVERSE_SIZE=3000`.
+
 ## Current state (Nov 18)
 
 **Running again since Nov 18, ~17:50 UTC** (restarted by Tharun with the steps below; verified:
@@ -88,8 +96,8 @@ with a managed certificate; http redirects to https (see
 [deploy/MILESTONE5.md](deploy/MILESTONE5.md)). Data is in Cloud SQL for
 PostgreSQL on a private IP, files are in a private Cloud Storage bucket, and keys
 are in Secret Manager, all reached as the `mahokshahvata-vm` service account with
-no key files. The old VM (http://34.122.164.209) still exists with its app stopped. It tracks the 3,000 largest US
-stocks (~15 min delayed), reads live news with Claude, and lets each user
+no key files. The old VM (http://34.122.164.209) still exists with its app stopped. The app tracks the 4,000 largest US
+stocks (3,000 until Nov 19) (~15 min delayed), reads live news with Claude, and lets each user
 paper-trade stocks and options. The same image (`app:v6`) runs on laptops with
 `docker compose up` (with a local Postgres) and on GKE. 162 automated tests
 pass, and GitHub Actions runs them against Postgres plus a Docker build on every push.
@@ -101,7 +109,7 @@ pass, and GitHub Actions runs them against Postgres plus a Docker build on every
 | **Sign-in** | Create an account with email and password, or Continue with Google. One account per email; 30-day sessions; clear messages for a taken email or a wrong password |
 | **Profile** | Change name; email and password for email accounts (changing the password signs out other devices); upload a profile photo (stored in the bucket, shown in the account menu) |
 | **Overview** | Account value, P/L, risk level, holdings; live Top Movers per sector (AI / Tech / Health / Energy) |
-| **Market** | Search, sort and filter the 3,000 largest US stocks; stock detail with a real 90-day price chart, SEC fundamentals, related news, and **Explain this stock** (a plain-English summary by Claude, or by rules without a key) |
+| **Market** | Search, sort and filter the 4,000 largest US stocks; stock detail with a real 90-day price chart, SEC fundamentals, related news, and **Explain this stock** (a plain-English summary by Claude, or by rules without a key) |
 | **Portfolio** | Holdings at live prices; P/L against money deposited; sector breakdown; daily value chart; market-order trading by shares or dollars (fractional, $1 minimum, cash checks); trade history |
 | **Sentiment** | Headlines from 4 RSS sources (or Benzinga), labelled by Claude Haiku 4.5; each headline tagged with the stocks it names (48 of 49 found on a live test, no wrong tags); Good / Bad / Wait verdicts; "Good to invest in right now" picks |
 | **Options** | Buy and close calls and puts with a cost preview; open positions; options history |
