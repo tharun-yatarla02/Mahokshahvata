@@ -121,3 +121,40 @@ def test_failed_history_refresh_keeps_existing_data(tmp_path, monkeypatch):
     assert data.lookup("B")["momentum_pct"] == 120.0
     assert data.lookup("C")["momentum_pct"] == 10.0
     assert data.last_error is None
+
+
+def test_new_listing_added_from_yahoo_until_screener_lists_it(tmp_path, monkeypatch):
+    monkeypatch.setenv("MARKET_EXTRA_TICKERS", "ANT")
+    screener = [{"ticker": "AAPL", "name": "Apple", "sector": "Technology", "industry": "",
+                 "market_cap": 4e12, "current_price": 300.0, "day_change_pct": 1.0, "volume": 1}]
+    monkeypatch.setattr(market_data, "fetch_universe", lambda limit: list(screener))
+    looked_up = []
+
+    def fake_extra(tickers):
+        looked_up.append(tickers)
+        return [{"ticker": "ANT", "name": "Anthropic, PBC", "sector": "Technology", "industry": "Software - Application",
+                 "market_cap": 1.27e12, "current_price": 97.17, "day_change_pct": 17.1, "volume": 1}]
+    monkeypatch.setattr(market_data, "fetch_extra_listings", fake_extra)
+
+    data = MarketData(cache_path=tmp_path / "cache.json")
+    data.refresh_quotes()
+    assert [s["ticker"] for s in data._universe] == ["AAPL", "ANT"]   # sorted by market cap
+    assert looked_up == [["ANT"]]
+
+    # Once the screener lists it, Yahoo isn't asked and there's no duplicate.
+    screener.append({**screener[0], "ticker": "ANT", "market_cap": 1.3e12})
+    data.refresh_quotes()
+    assert [s["ticker"] for s in data._universe] == ["AAPL", "ANT"]
+    assert looked_up == [["ANT"]]
+
+
+def test_first_trading_day_measured_from_open(monkeypatch):
+    import pandas as pd
+    index = pd.to_datetime(["2026-11-19"])
+    columns = pd.MultiIndex.from_product([["Close", "Open"], ["ANT", "OLD"]])
+    frame = pd.DataFrame([[97.17, None, 111.5, None]], index=index, columns=columns)
+    monkeypatch.setattr(market_data.yf, "download", lambda *a, **k: frame)
+
+    prices = market_data.fetch_lookback_prices(["ANT", "OLD"], 90)
+
+    assert prices == {"ANT": {"start": 111.5, "last": 97.17}}

@@ -28,6 +28,9 @@ sectors and market caps. If Massive fails, the free sources are used.
 
 Config (env vars):
     MARKET_UNIVERSE_SIZE   number of stocks to track (default 3000)
+    MARKET_EXTRA_TICKERS   comma-separated new listings to add from Yahoo
+                           until Nasdaq's screener lists them (default "ANT",
+                           Anthropic, listed Nov 19, 2026); "" for none
     MASSIVE_API_KEY        optional; use Massive for quotes and history
 """
 
@@ -88,6 +91,49 @@ _NAME_SUFFIX_RE = re.compile(
 )
 
 
+# New listings Nasdaq's screener hasn't picked up yet. Each is looked up on
+# Yahoo and added to the universe until the screener lists it, then the
+# screener's row wins and this does nothing for it.
+DEFAULT_EXTRA_TICKERS = "ANT"  # Anthropic, Nasdaq IPO on Nov 19, 2026
+# Yahoo's sector names, mapped onto the names the rest of the app uses.
+YAHOO_SECTOR_NAMES = {"Healthcare": "Healthcare", "Financial Services": "Financials",
+                      "Consumer Cyclical": "Consumer Discretionary", "Consumer Defensive": "Consumer Staples",
+                      "Communication Services": "Telecommunications", "Basic Materials": "Basic Materials"}
+
+
+def extra_tickers():
+    raw = os.environ.get("MARKET_EXTRA_TICKERS", DEFAULT_EXTRA_TICKERS)
+    return [t.strip().upper() for t in raw.split(",") if t.strip()]
+
+
+def fetch_extra_listings(tickers):
+    """Universe rows from Yahoo for listings the screener doesn't have yet.
+    A ticker Yahoo can't price is skipped."""
+    rows = []
+    for ticker in tickers:
+        try:
+            info = yf.Ticker(ticker).info or {}
+        except Exception as e:  # network errors, rate limits, unknown ticker
+            log.warning("Could not look up new listing %s: %s", ticker, e)
+            continue
+        price = _to_float(info.get("regularMarketPrice") or info.get("currentPrice"))
+        market_cap = _to_float(info.get("marketCap"))
+        if not price or not market_cap:
+            continue
+        sector = (info.get("sector") or "").strip()
+        rows.append({
+            "ticker": ticker,
+            "name": _NAME_SUFFIX_RE.sub("", (info.get("longName") or info.get("shortName") or ticker).strip()) or ticker,
+            "sector": YAHOO_SECTOR_NAMES.get(sector, sector or "Unknown"),
+            "industry": (info.get("industry") or "").strip(),
+            "market_cap": market_cap,
+            "current_price": price,
+            "day_change_pct": _to_float(info.get("regularMarketChangePercent")),
+            "volume": int(_to_float(info.get("regularMarketVolume")) or 0),
+        })
+    return rows
+
+
 def _to_float(value):
     try:
         return float(str(value).replace("$", "").replace(",", "").replace("%", ""))
@@ -143,12 +189,21 @@ def fetch_lookback_prices(tickers, lookback_days):
             continue
         if data.empty:
             continue
-        closes = data["Close"] if isinstance(data.columns, pd.MultiIndex) else data[["Close"]].set_axis(chunk, axis=1)
+        multi = isinstance(data.columns, pd.MultiIndex)
+        closes = data["Close"] if multi else data[["Close"]].set_axis(chunk, axis=1)
+        opens = data["Open"] if multi else data[["Open"]].set_axis(chunk, axis=1)
         for ticker in closes.columns:
             series = closes[ticker].dropna()
-            if len(series) < 2:
+            if series.empty:
                 continue
-            start = float(series.iloc[max(0, len(series) - lookback_days)])
+            if len(series) == 1:
+                # A stock on its first trading day: measure from its first trade.
+                first_open = opens[ticker].dropna()
+                if first_open.empty:
+                    continue
+                start = float(first_open.iloc[0])
+            else:
+                start = float(series.iloc[max(0, len(series) - lookback_days)])
             if start > 0:
                 prices[ticker] = {"start": round(start, 4), "last": round(float(series.iloc[-1]), 4)}
     return prices
@@ -286,6 +341,11 @@ class MarketData:
                          "day_change_pct": None, "volume": 0} for t in DEFAULT_UNIVERSE]
         else:
             self.last_error = None
+            listed = {s["ticker"] for s in universe}
+            missing = [t for t in extra_tickers() if t not in listed]
+            if missing:
+                universe = sorted(universe + fetch_extra_listings(missing),
+                                  key=lambda s: s.get("market_cap") or 0, reverse=True)
             universe = self._overlay_massive_quotes(universe)
         with self._lock:
             self._universe = universe

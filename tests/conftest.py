@@ -51,6 +51,13 @@ def make_engine(_database):
 
 
 @pytest.fixture(autouse=True)
+def _no_extra_listings(monkeypatch):
+    """No test should look up new listings on Yahoo over the network; the
+    tests for that feature set MARKET_EXTRA_TICKERS themselves."""
+    monkeypatch.setenv("MARKET_EXTRA_TICKERS", "")
+
+
+@pytest.fixture(autouse=True)
 def _fresh_login_limiter():
     """Every test client signs in from the same address, so failed logins in
     one test mustn't throttle the next."""

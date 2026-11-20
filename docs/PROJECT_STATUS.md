@@ -13,6 +13,12 @@ reaches down to about $94M market value (5,355 US stocks pass the filter in all)
 The autopilot is unchanged: it still picks only from the largest stocks. To undo:
 `kubectl set env deployment/app MARKET_UNIVERSE_SIZE=3000`.
 
+**Anthropic (ANT) added the same night.** Anthropic listed on Nasdaq on Nov 19,
+before Nasdaq's screener (our stock list) included it. New listings named in
+`MARKET_EXTRA_TICKERS` (default `ANT`) are now looked up on Yahoo and added until
+the screener lists them, and a stock on its first trading day is measured from
+its first trade instead of being skipped. ANT is also in the AI theme.
+
 ## Current state (Nov 18)
 
 **Running again since Nov 18, ~17:50 UTC** (restarted by Tharun with the steps below; verified:

@@ -78,7 +78,7 @@ AI_INDUSTRIES = {
     "Computer Communications Equipment",
 }
 AI_MIN_MARKET_CAP = 20e9
-AI_ANCHORS = {"NVDA", "MSFT", "GOOGL", "META", "AVGO", "PLTR", "AMZN"}
+AI_ANCHORS = {"NVDA", "MSFT", "GOOGL", "META", "AVGO", "PLTR", "AMZN", "ANT"}
 
 # Growth: established companies ($10B+) up at least 20% over the lookback
 # window and beating the S&P 500. Recomputed on every refresh.
