@@ -682,7 +682,7 @@ def _market_price(ticker):
     shows, or for untracked tickers a yfinance lookup, cached briefly so a
     live order preview doesn't download on every keystroke."""
     tracked = market_data.lookup(ticker)
-    if tracked:
+    if tracked and (tracked.get("current_price") or 0) > 0:
         return tracked["current_price"], "live quote (~15 min delayed)"
     cached = _fallback_prices.get(ticker)
     if cached and time.monotonic() - cached[0] < FALLBACK_PRICE_TTL_SECONDS:
@@ -690,7 +690,9 @@ def _market_price(ticker):
     else:
         price = latest_price(ticker)
         _fallback_prices[ticker] = (time.monotonic(), price)
-    return (round(price, 2), "latest close") if price else (None, None)
+    # A sub-cent price rounds to $0.00, which can't size an order.
+    price = round(price, 2) if price else None
+    return (price, "latest close") if price else (None, None)
 
 
 def _plan_order(portfolio_id, user_id, req):

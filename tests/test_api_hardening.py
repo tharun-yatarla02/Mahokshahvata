@@ -246,6 +246,18 @@ def test_a_small_leftover_position_can_always_be_sold(client, portfolio_id, mark
     assert client.get(f"/portfolio/{portfolio_id}", headers=AUTH).json()["holdings"] == []
 
 
+@pytest.mark.parametrize("tracked_price, fallback_price", [(None, 0.001), (0.0, 0.0), (0.0, None)])
+def test_zero_price_is_a_clear_404_not_a_crash(client, portfolio_id, monkeypatch, tracked_price, fallback_price):
+    tracked = {"ticker": "ZZZZ", "current_price": tracked_price} if tracked_price is not None else None
+    monkeypatch.setattr(api_main.market_data, "lookup", lambda ticker: tracked)
+    monkeypatch.setattr(api_main, "latest_price", lambda ticker: fallback_price)
+    api_main._fallback_prices.clear()
+    res = client.post(f"/portfolio/{portfolio_id}/trade-preview", json={"ticker": "ZZZZ", "amount": 100}, headers=AUTH)
+
+    assert res.status_code == 404
+    assert "Check the ticker" in res.json()["detail"]
+
+
 def test_unknown_ticker_is_a_clear_404(client, portfolio_id, monkeypatch):
     monkeypatch.setattr(api_main, "latest_price", lambda ticker: None)
     res = client.post(f"/portfolio/{portfolio_id}/trade-preview", json={"ticker": "ZZZZ", "quantity": 1}, headers=AUTH)
