@@ -3,11 +3,17 @@
 # up. Without this, a drain can evict both replicas at once and the load
 # balancer has nothing to send requests to: 502s until new pods are ready.
 # A plain `kubectl delete pod` is not an eviction and ignores this.
+#
+# Since Nov 20, 2026 the app runs 1 replica, and "keep at least 1" would block every
+# eviction: GKE node upgrades would stall and the autoscaler could never remove a node.
+# So it now allows 1 pod to be evicted at a time, which means a short outage (about a
+# minute while the new pod starts) during a node upgrade. Back on 2+ replicas, set
+# minAvailable: 1 again.
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
   name: app
 spec:
-  minAvailable: 1
+  maxUnavailable: 1
   selector:
     matchLabels: { app: mahokshahvata }

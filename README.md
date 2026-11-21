@@ -11,7 +11,7 @@ No real money is traded — every portfolio is simulated.
 > setup from a fresh clone, how the code fits together, gotchas, and where
 > to pick up. Progress and open work: [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md).
 
-**Live again (restarted Nov 18, 2026 after a pause since Nov 9):** https://34-8-137-93.sslip.io on GKE, 2–4 replicas behind a
+**Live (low-cost mode since Nov 20, 2026):** https://34-8-137-93.sslip.io on GKE, 1–2 replicas on 1–2 nodes behind a
 Google HTTPS load balancer with a managed certificate (http redirects to https). Every
 push to `master` is tested, built, deployed, health-checked and rolled back on failure
 by GitHub Actions; JSON logs feed a 5xx metric, a dashboard and an email alert
@@ -21,6 +21,77 @@ private Cloud Storage bucket, and keys are in Secret Manager, all reached as the
 `mahokshahvata-vm` service account. Google sign-in uses the team's Firebase project
 `mahokshahvata` with no key file. Details: [docs/deploy/MILESTONE5.md](docs/deploy/MILESTONE5.md).
 The old VM (http://34.122.164.209) still exists with its app stopped.
+
+## Turning it up, down or off
+
+After the course presentation (Nov 20, 2026) the site was shrunk to fit 1–10 users. It
+stays online with the same link, and every push to `master` still deploys. There are
+three settings. Switch between them with the commands below, from the repo root. Each
+`gcloud` line needs `--project project-262a2026-879b-4b49-88e` (or that project set as
+your default), and `kubectl` needs `gcloud components install gke-gcloud-auth-plugin`.
+
+| Mode | Pods | Nodes (e2-medium) | Online? | About $/month |
+|---|---|---|---|---|
+| **Low-cost (current)** | 1, up to 2 under load | 1, up to 2 | Yes | ~$55–60 |
+| Full (as presented) | 2–4 | 2–3 | Yes, and survives a pod or node failure | ~$85 |
+| Off | 0 | 0 | No | ~$15–20 |
+
+Where the low-cost money goes: 1 node ~$25, the HTTPS load balancer ~$18, Cloud SQL
+(`db-f1-micro`, 10 GB) ~$10, the stopped old VM's disk and IP ~$8, image registry under
+$1. The GKE cluster fee is covered by Google's free tier for one zonal cluster.
+
+**What low-cost gives up:** with a single pod there is no spare, so the site is down for
+about a minute whenever that pod is replaced: a deploy (the new pod starts before the old
+one stops, so normally no gap), a crash, or a GKE node upgrade. Under load, the HPA still
+adds a second pod and the autoscaler a second node.
+
+### Low-cost mode (current)
+
+```bash
+# k8s/hpa.yaml: minReplicas 1, maxReplicas 2.  k8s/pdb.yaml: maxUnavailable 1.
+kubectl apply -f k8s/hpa.yaml -f k8s/pdb.yaml
+gcloud container clusters update mahokshahvata --zone us-central1-a \
+  --node-pool pool-medium --enable-autoscaling --min-nodes 1 --max-nodes 2
+```
+The extra pod goes after about 2 minutes, and the autoscaler removes the spare node in
+10–20 minutes.
+
+### Full mode (for a demo, grading or real traffic)
+
+1. In `k8s/hpa.yaml` set `minReplicas: 2` and `maxReplicas: 4`. In `k8s/pdb.yaml`
+   replace `maxUnavailable: 1` with `minAvailable: 1`. In `terraform/infra.tf` set
+   `min_node_count = 2` and `max_node_count = 3`.
+2. Apply:
+   ```bash
+   gcloud container clusters update mahokshahvata --zone us-central1-a \
+     --node-pool pool-medium --enable-autoscaling --min-nodes 2 --max-nodes 3
+   kubectl apply -f k8s/hpa.yaml -f k8s/pdb.yaml
+   kubectl get pods -w        # 2 pods Running and 1/1 Ready within ~2 minutes
+   ```
+3. Commit the three files with `[skip ci]`; nothing needs redeploying.
+
+**Only ever apply these single files.** Don't run `kubectl apply -f k8s/`:
+`k8s/deployment.yaml` still names the old image `app:v6` and would roll the site back to
+old code. The pipeline sets the image.
+
+### Off (site down, data kept)
+
+Full stop and restart steps, tested on Nov 9 and Nov 18, are in
+[docs/PROJECT_STATUS.md, "Restarting after a pause"](docs/PROJECT_STATUS.md#restarting-after-a-pause-in-this-order).
+In short, to stop: `kubectl scale deployment/app --replicas=0`, then nodes to 0
+(`gcloud container clusters update mahokshahvata --zone us-central1-a --node-pool pool-medium --no-enable-autoscaling`
+and `gcloud container clusters resize mahokshahvata --zone us-central1-a --node-pool pool-medium --num-nodes 0`),
+then `gcloud sql instances patch mahokshahvata-db --activation-policy=NEVER`. To start
+again, follow the restart steps in that order: database first, then nodes, then pods.
+Restarting takes about 20 minutes. While it's off, use `[skip ci]` on pushes, or the
+pipeline fails because it has nowhere to deploy.
+
+### Checking it
+
+```bash
+kubectl get hpa,pods,nodes
+curl -s https://34-8-137-93.sslip.io/health    # shows the deployed commit
+```
 
 ## Project layout
 

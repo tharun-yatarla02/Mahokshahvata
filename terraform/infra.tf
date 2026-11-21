@@ -193,8 +193,8 @@ resource "google_container_node_pool" "app" {
   cluster  = google_container_cluster.app.name
   location = local.zone
   autoscaling {
-    min_node_count = 2
-    max_node_count = 3
+    min_node_count = 1 # was 2-3 until Nov 20, 2026 (1 app replica now)
+    max_node_count = 2
   }
   management {
     auto_repair  = true

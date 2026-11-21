@@ -1,6 +1,7 @@
-# 2 to 4 replicas on CPU. The ceiling is low on purpose: every replica keeps a
-# connection to the small Cloud SQL instance (db-f1-micro) and runs its own
-# market-data thread, and 4 fit on the cluster's 2-3 e2-medium nodes.
+# 1 to 2 replicas on CPU (was 2 to 4 until Nov 20, 2026; cut to save money after the
+# course presentation, with 1-10 users). Every replica keeps a connection to the small
+# Cloud SQL instance (db-f1-micro) and runs its own market-data thread; 2 fit on the
+# cluster's 1-2 e2-medium nodes. For the old setup: minReplicas 2, maxReplicas 4.
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
@@ -10,8 +11,8 @@ spec:
     apiVersion: apps/v1
     kind: Deployment
     name: app
-  minReplicas: 2
-  maxReplicas: 4
+  minReplicas: 1
+  maxReplicas: 2
   metrics:
     - type: Resource
       resource:
