@@ -8,7 +8,8 @@ gotchas, and a starting point for each open task).
 **Nov 20: low-cost mode.** After the course presentation the site was shrunk for 1–10
 users. It stays online at the same link: HPA 1–2 replicas (was 2–4), node pool autoscaling
 1–2 nodes (was 2–3), PDB `maxUnavailable: 1` (was `minAvailable: 1`, which would block
-every eviction with only 1 pod). This cuts the cost from about $85 to $55–60 a month.
+every eviction with only 1 pod), app CPU request 100m with an HPA target of 300% (250m and
+60% didn't fit next to GKE's system pods on one node). This cuts the cost from about $85 to $55–60 a month.
 The trade-off is about a minute of downtime when the single pod is replaced. How to switch
 between low-cost, full and off is in the README section
 ["Turning it up, down or off"](../README.md#turning-it-up-down-or-off).

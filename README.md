@@ -56,27 +56,32 @@ adds a second pod and the autoscaler a second node.
 ### Low-cost mode (current)
 
 ```bash
-# k8s/hpa.yaml: minReplicas 1, maxReplicas 2.  k8s/pdb.yaml: maxUnavailable 1.
+# k8s/hpa.yaml: minReplicas 1, maxReplicas 2, target 300%.  k8s/pdb.yaml: maxUnavailable 1.
 kubectl apply -f k8s/hpa.yaml -f k8s/pdb.yaml
+# CPU request 100m so the app and GKE's system pods fit on one node (250m did not):
+kubectl set resources deployment/app -c app --requests=cpu=100m,memory=512Mi
 gcloud container clusters update mahokshahvata --zone us-central1-a \
   --node-pool pool-medium --enable-autoscaling --min-nodes 1 --max-nodes 2
 ```
-The extra pod goes after about 2 minutes, and the autoscaler removes the spare node in
-10–20 minutes.
+The extra pod goes after about 2 minutes. The autoscaler removes the spare node once
+everything fits on one; to hurry it, `kubectl drain <spare node> --ignore-daemonsets
+--delete-emptydir-data` and it goes within about 10 minutes.
 
 ### Full mode (for a demo, grading or real traffic)
 
-1. In `k8s/hpa.yaml` set `minReplicas: 2` and `maxReplicas: 4`. In `k8s/pdb.yaml`
+1. In `k8s/hpa.yaml` set `minReplicas: 2`, `maxReplicas: 4` and `averageUtilization: 60`. In `k8s/pdb.yaml`
    replace `maxUnavailable: 1` with `minAvailable: 1`. In `terraform/infra.tf` set
    `min_node_count = 2` and `max_node_count = 3`.
 2. Apply:
    ```bash
    gcloud container clusters update mahokshahvata --zone us-central1-a \
      --node-pool pool-medium --enable-autoscaling --min-nodes 2 --max-nodes 3
+   kubectl set resources deployment/app -c app --requests=cpu=250m,memory=512Mi
    kubectl apply -f k8s/hpa.yaml -f k8s/pdb.yaml
    kubectl get pods -w        # 2 pods Running and 1/1 Ready within ~2 minutes
    ```
-3. Commit the three files with `[skip ci]`; nothing needs redeploying.
+3. Set `cpu: 250m` in `k8s/deployment.yaml` too (for the record; it is never applied
+   whole). Commit the four files with `[skip ci]`.
 
 **Only ever apply these single files.** Don't run `kubectl apply -f k8s/`:
 `k8s/deployment.yaml` still names the old image `app:v6` and would roll the site back to

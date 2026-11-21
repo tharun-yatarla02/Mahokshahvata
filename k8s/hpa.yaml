@@ -17,7 +17,10 @@ spec:
     - type: Resource
       resource:
         name: cpu
-        target: { type: Utilization, averageUtilization: 60 }   # of the 250m request
+        # 300% of the 100m request = 300m per pod. The 6-hourly history download of 4,000 stocks
+        # peaks near that on its own, so a second pod only starts for real traffic.
+        # (Full mode used 60% of a 250m request.)
+        target: { type: Utilization, averageUtilization: 300 }
   behavior:
     scaleDown:
       stabilizationWindowSeconds: 120   # default is 5 min; shorter so a demo sees it come back down
