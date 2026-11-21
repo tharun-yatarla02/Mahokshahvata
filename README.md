@@ -11,6 +11,14 @@ No real money is traded — every portfolio is simulated.
 > setup from a fresh clone, how the code fits together, gotchas, and where
 > to pick up. Progress and open work: [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md).
 
+> **Final presentation (Nov 20, 2026):** [presentation/index.html](presentation/index.html),
+> 20 slides in one self-contained HTML file covering the problem, features, market data,
+> autopilot, architecture, database, security, reliability, pipeline, monitoring, the
+> milestone journey, problems we fixed, cost and next steps. Open it in a browser (← → to
+> move, F for full screen, `#7` in the URL jumps to slide 7). With GitHub Pages on (Settings →
+> Pages → branch `master`, folder `/ (root)`) it is at
+> https://tharun-yatarla02.github.io/Mahokshahvata/presentation/
+
 **Live (low-cost mode since Nov 20, 2026):** https://34-8-137-93.sslip.io on GKE, 1–2 replicas on 1–2 nodes behind a
 Google HTTPS load balancer with a managed certificate (http redirects to https). Every
 push to `master` is tested, built, deployed, health-checked and rolled back on failure

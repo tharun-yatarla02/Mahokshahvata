@@ -1,0 +1,551 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mahokshahvata: Final Presentation</title>
+<meta name="description" content="Mahokshahvata: an AI-assisted paper-trading website on Google Cloud. EDS 6348 Intro to Cloud Computing, Group 1.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0b1020; --panel:#121a30; --panel2:#18223d; --line:#26324f;
+  --text:#e8ecf5; --muted:#9aa6c2; --dim:#6b7796;
+  --accent:#3ddc97; --accent2:#5aa9ff; --warn:#ffb547; --bad:#ff6b6b;
+  --mono:'JetBrains Mono',ui-monospace,monospace; --sans:'Inter',system-ui,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--sans);overflow:hidden}
+#stage{position:fixed;inset:0;display:flex;align-items:center;justify-content:center}
+#deck{width:1280px;height:720px;position:relative;transform-origin:center center}
+.slide{position:absolute;inset:0;padding:56px 72px 64px;display:none;flex-direction:column;
+  background:radial-gradient(1200px 600px at 100% 0%,rgba(90,169,255,.08),transparent 60%),
+             radial-gradient(900px 500px at 0% 100%,rgba(61,220,151,.06),transparent 60%),var(--bg)}
+.slide.active{display:flex;animation:in .35s ease}
+@keyframes in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.kicker{font-family:var(--mono);font-size:14px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);margin-bottom:10px}
+h1{font-size:64px;font-weight:800;letter-spacing:-.02em;line-height:1.05}
+h2{font-size:40px;font-weight:800;letter-spacing:-.015em;line-height:1.1;margin-bottom:22px}
+h3{font-size:18px;font-weight:700;margin-bottom:6px}
+p,li{font-size:17px;line-height:1.5;color:var(--muted)}
+b,strong{color:var(--text);font-weight:600}
+code,.mono{font-family:var(--mono);font-size:13px;color:var(--accent2)}
+ul{list-style:none}
+ul.dots li{position:relative;padding-left:20px;margin:6px 0}
+ul.dots li:before{content:"";position:absolute;left:2px;top:10px;width:7px;height:7px;border-radius:2px;background:var(--accent)}
+.grid{display:grid;gap:16px}
+.g2{grid-template-columns:1fr 1fr}.g3{grid-template-columns:repeat(3,1fr)}.g4{grid-template-columns:repeat(4,1fr)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px 20px}
+.card p{font-size:15px}.card li{font-size:15px}
+.card .mono{display:block;margin-top:8px;font-size:12px}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px 20px}
+.stat .n{font-size:40px;font-weight:800;color:var(--text);letter-spacing:-.02em}
+.stat .n.a{color:var(--accent)}.stat .n.b{color:var(--accent2)}.stat .n.w{color:var(--warn)}
+.stat .l{font-size:14px;color:var(--muted);margin-top:2px}
+.pill{display:inline-block;font-family:var(--mono);font-size:12px;padding:3px 9px;border-radius:999px;border:1px solid var(--line);color:var(--muted);margin:2px 4px 2px 0}
+.pill.a{border-color:rgba(61,220,151,.45);color:var(--accent)}
+.pill.b{border-color:rgba(90,169,255,.45);color:var(--accent2)}
+.pill.w{border-color:rgba(255,181,71,.45);color:var(--warn)}
+table{width:100%;border-collapse:collapse;font-size:15px}
+th{text-align:left;font-weight:600;color:var(--dim);font-size:12px;letter-spacing:.08em;text-transform:uppercase;padding:8px 10px;border-bottom:1px solid var(--line)}
+td{padding:8px 10px;border-bottom:1px solid var(--line);color:var(--muted);vertical-align:top}
+td b{color:var(--text)}
+.foot{position:absolute;left:72px;right:200px;bottom:22px;display:flex;justify-content:space-between;font-family:var(--mono);font-size:12px;color:var(--dim)}
+.logo{display:inline-flex;align-items:center;gap:8px;color:var(--text);font-weight:700}
+.logo i{width:14px;height:14px;background:linear-gradient(135deg,var(--accent),var(--accent2));clip-path:polygon(50% 0,100% 100%,0 100%)}
+.spacer{flex:1}
+.lead{font-size:20px;color:var(--muted);max-width:900px;line-height:1.5}
+/* architecture */
+.arch{display:grid;grid-template-columns:150px 30px 190px 30px 1fr;align-items:center;gap:0;margin-top:6px}
+.node{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px;font-size:14px;color:var(--muted)}
+.node b{display:block;font-size:15px;margin-bottom:2px}
+.node.hl{border-color:rgba(61,220,151,.5);box-shadow:0 0 0 1px rgba(61,220,151,.15) inset}
+.node.hl2{border-color:rgba(90,169,255,.5)}
+.arrow{text-align:center;color:var(--dim);font-size:20px}
+.gke{background:var(--panel2);border:1px dashed rgba(90,169,255,.5);border-radius:14px;padding:14px}
+.pods{display:flex;gap:8px;margin-top:8px}
+.pod{flex:1;border:1px solid rgba(61,220,151,.5);border-radius:8px;padding:6px 8px;font-family:var(--mono);font-size:12px;color:var(--accent);text-align:center}
+.pod.off{border-style:dashed;border-color:var(--line);color:var(--dim)}
+/* pipeline */
+.pipe{display:flex;align-items:stretch;gap:10px;margin:8px 0 18px}
+.step{flex:1;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;position:relative}
+.step .t{font-family:var(--mono);font-size:12px;color:var(--accent);margin-bottom:4px}
+.step p{font-size:14px}
+.step.bad{border-color:rgba(255,107,107,.45)}.step.bad .t{color:var(--bad)}
+/* timeline */
+.tl{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-top:6px}
+.tl .card{padding:14px 16px}
+.tl .d{font-family:var(--mono);font-size:12px;color:var(--accent2)}
+.tl h3{font-size:16px;margin:4px 0}
+.tl p{font-size:13.5px}
+/* bars */
+.bar{display:flex;align-items:center;gap:12px;margin:9px 0}
+.bar .k{width:210px;font-size:15px;color:var(--muted)}
+.bar .v{height:22px;border-radius:6px;background:linear-gradient(90deg,var(--accent2),var(--accent))}
+.bar .v.dim{background:var(--line)}
+.bar .x{font-family:var(--mono);font-size:13px;color:var(--text)}
+/* nav ui */
+#ui{position:absolute;right:24px;bottom:12px;display:flex;gap:8px;align-items:center;font-family:var(--mono);font-size:12px;color:var(--dim);z-index:5}
+#ui button{background:var(--panel);border:1px solid var(--line);color:var(--muted);border-radius:8px;width:34px;height:30px;cursor:pointer;font-size:14px}
+#ui button:hover{color:var(--text);border-color:var(--accent2)}
+#progress{position:fixed;left:0;top:0;height:3px;background:linear-gradient(90deg,var(--accent2),var(--accent));z-index:5;transition:width .3s}
+a{color:var(--accent2);text-decoration:none}a:hover{text-decoration:underline}
+.big-q{font-size:96px;font-weight:800;letter-spacing:-.03em;line-height:1}
+</style>
+</head>
+<body>
+<div id="progress"></div>
+<div id="stage"><div id="deck">
+
+<!-- 1 -->
+<section class="slide" data-title="Title">
+  <div class="kicker">EDS 6348 · Intro to Cloud Computing · Group 1</div>
+  <div class="spacer" style="flex:.6"></div>
+  <h1>MAHOKSHAHVATA</h1>
+  <p class="lead" style="margin-top:16px">An AI-assisted <b>paper-trading website</b> for US stocks and options, running on <b>Google Cloud</b> with Kubernetes, Cloud SQL and an automated deploy pipeline.</p>
+  <div style="margin-top:28px">
+    <span class="pill a">GKE</span><span class="pill a">Cloud SQL · PostgreSQL 16</span><span class="pill a">Cloud Storage</span><span class="pill a">Secret Manager</span><span class="pill b">FastAPI · Python</span><span class="pill b">Claude AI</span><span class="pill w">Terraform</span><span class="pill w">GitHub Actions</span>
+  </div>
+  <div class="spacer"></div>
+  <div class="grid g2" style="max-width:760px">
+    <div><h3>Tharun Reddy Yatarla</h3><h3>Siddhardha Anagani</h3></div>
+    <div><p>Presented <b>Nov 20, 2026</b></p><p>Live: <a href="https://34-8-137-93.sslip.io" target="_blank" rel="noopener">34-8-137-93.sslip.io</a></p></div>
+  </div>
+</section>
+
+<!-- 2 -->
+<section class="slide" data-title="Agenda">
+  <div class="kicker">Agenda</div>
+  <h2>What this deck covers</h2>
+  <div class="grid g2" style="gap:12px 40px">
+    <table><tbody>
+      <tr><td class="mono">01</td><td><b>The problem and our answer</b></td></tr>
+      <tr><td class="mono">02</td><td><b>The website:</b> six things you can do</td></tr>
+      <tr><td class="mono">03</td><td><b>Market data:</b> where 4,000 stocks come from</td></tr>
+      <tr><td class="mono">04</td><td><b>The autopilot:</b> rules and guardrails</td></tr>
+      <tr><td class="mono">05</td><td><b>Architecture</b> on Google Cloud</td></tr>
+      <tr><td class="mono">06</td><td><b>Every click</b> changes something in the cloud</td></tr>
+      <tr><td class="mono">07</td><td><b>The database:</b> nine tables</td></tr>
+      <tr><td class="mono">08</td><td><b>Security,</b> layer by layer</td></tr>
+    </tbody></table>
+    <table><tbody>
+      <tr><td class="mono">09</td><td><b>Reliability:</b> built to stay up</td></tr>
+      <tr><td class="mono">10</td><td><b>The pipeline:</b> push to live in under 3 minutes</td></tr>
+      <tr><td class="mono">11</td><td><b>Monitoring</b> and alerts</td></tr>
+      <tr><td class="mono">12</td><td><b>The journey:</b> laptop → VM → Kubernetes</td></tr>
+      <tr><td class="mono">13</td><td><b>Problems we hit</b> and how we fixed them</td></tr>
+      <tr><td class="mono">14</td><td><b>Cost:</b> $85 → $55–60 a month</td></tr>
+      <tr><td class="mono">15</td><td><b>By the numbers,</b> next steps, live demo</td></tr>
+    </tbody></table>
+  </div>
+</section>
+
+<!-- 3 -->
+<section class="slide" data-title="Problem">
+  <div class="kicker">01 · Problem and solution</div>
+  <h2>Practice investing, without risking a dollar</h2>
+  <div class="grid g2" style="gap:24px">
+    <div class="card">
+      <h3 style="color:var(--bad)">Where we started</h3>
+      <ul class="dots">
+        <li>The app ran on <b>one laptop</b>: data in a local file, API keys in a <code>.env</code> file.</li>
+        <li>Nobody else could use it, and if that laptop broke, everything was gone.</li>
+        <li>No tests ran automatically and no record of who changed what.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3 style="color:var(--accent)">What we built</h3>
+      <ul class="dots">
+        <li>A public website where anyone signs up and gets <b>$100,000 of simulated cash</b>.</li>
+        <li>Real US stock prices, AI-labelled news, paper trades in stocks and options.</li>
+        <li>Runs on <b>Google Cloud</b>: always on, self-healing, deployed on every push.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="grid g4" style="margin-top:20px">
+    <div class="stat"><div class="n a">$100,000</div><div class="l">simulated cash per account</div></div>
+    <div class="stat"><div class="n">4,000</div><div class="l">largest US stocks tracked</div></div>
+    <div class="stat"><div class="n b">5 min</div><div class="l">price refresh</div></div>
+    <div class="stat"><div class="n w">$0</div><div class="l">real money ever traded</div></div>
+  </div>
+</section>
+
+<!-- 4 -->
+<section class="slide" data-title="Features">
+  <div class="kicker">02 · The website</div>
+  <h2>One website, six things you can do</h2>
+  <div class="grid g3">
+    <div class="card"><h3>📈 Market</h3><p>Search 4,000 US stocks, 90-day charts, a momentum rank and a plain-English explanation of each score.</p><span class="mono">GET /momentum</span></div>
+    <div class="card"><h3>💼 Portfolio</h3><p>Buy and sell by shares (fractions to 6 decimals) or by dollars ("$100 of AAPL"), with a live preview and profit/loss.</p><span class="mono">POST /portfolio/{id}/trade-stock</span></div>
+    <div class="card"><h3>📰 Sentiment</h3><p>Live market headlines, each labelled positive, negative or neutral by Claude and tagged with the stocks it mentions.</p><span class="mono">GET /news-sentiment</span></div>
+    <div class="card"><h3>📊 Options</h3><p>Calls and puts with a cost preview. Premiums are bounded by intrinsic value, so no one can sell an option for free money.</p><span class="mono">POST /portfolio/{id}/trade-option</span></div>
+    <div class="card"><h3>🤖 Autopilot</h3><p>Buys and sells by momentum rules, on a schedule during market hours or on demand, inside the user's risk limits.</p><span class="mono">POST /portfolio/{id}/autopilot/run</span></div>
+    <div class="card"><h3>👤 Sign-in and profile</h3><p>Email and password or Google sign-in, a profile photo, password change. Failed sign-ins are rate-limited.</p><span class="mono">POST /auth/login</span></div>
+  </div>
+  <p style="margin-top:14px;font-size:14px">Plus a <b>Politicians</b> view of stock trades disclosed by members of Congress (Quiver Quantitative). 9 pages and 51 API endpoints in total.</p>
+</section>
+
+<!-- 5 -->
+<section class="slide" data-title="Market data">
+  <div class="kicker">03 · Market data</div>
+  <h2>Where the prices and headlines come from</h2>
+  <table>
+    <thead><tr><th>Data</th><th>Source</th><th>How often</th><th>Why this way</th></tr></thead>
+    <tbody>
+      <tr><td><b>Stock list + live quotes</b></td><td>Nasdaq stock screener (top 4,000 US stocks by market value)</td><td><b>Every 5 min</b></td><td>One request returns every stock's price; free, about 15 minutes behind the market</td></tr>
+      <tr><td><b>Price history</b></td><td>Yahoo Finance (yfinance)</td><td><b>Every 6 h</b></td><td>Momentum looks at weeks and months, so minute-level history isn't needed</td></tr>
+      <tr><td><b>New listings</b></td><td>Yahoo Finance, for tickers Nasdaq hasn't listed yet</td><td>With quotes</td><td>Anthropic (<b>ANT</b>) was added on its IPO day, Nov 19, at rank 13 by market value</td></tr>
+      <tr><td><b>News tone</b></td><td>Yahoo Finance headline feeds → <b>Claude Haiku 4.5</b></td><td>On page load, at most once a minute</td><td>An AI model reads tone better than keyword matching (still the fallback)</td></tr>
+      <tr><td><b>Congress trades</b></td><td>Quiver Quantitative disclosures</td><td>On refresh</td><td>Stored in Cloud SQL, not a file on a server</td></tr>
+    </tbody>
+  </table>
+  <div class="grid g3" style="margin-top:18px">
+    <div class="stat"><div class="n">3,000 → 4,000</div><div class="l">stocks tracked (raised Nov 19)</div></div>
+    <div class="stat"><div class="n b">~7 min</div><div class="l">to download history for all 4,000</div></div>
+    <div class="stat"><div class="n a">Shared cache</div><div class="l">in Cloud Storage, so a new pod starts with data</div></div>
+  </div>
+</section>
+
+<!-- 6 -->
+<section class="slide" data-title="Autopilot">
+  <div class="kicker">04 · The autopilot</div>
+  <h2>Rules-based automation, with guardrails</h2>
+  <div class="grid g2" style="gap:24px">
+    <div>
+      <div class="pipe" style="flex-direction:column;gap:8px;margin:0">
+        <div class="step"><div class="t">1 · Universe</div><p>The <b>500 largest</b> US stocks by market value.</p></div>
+        <div class="step"><div class="t">2 · Momentum</div><p>Keep only stocks rising and beating the <b>S&amp;P 500</b> (relative strength).</p></div>
+        <div class="step"><div class="t">3 · News filter</div><p>Skip stocks whose recent headlines Claude labelled negative.</p></div>
+        <div class="step"><div class="t">4 · Size and trade</div><p>Spread the cash over the top picks, inside the limits on the right.</p></div>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Default limits (each user can change them)</h3>
+      <table><tbody>
+        <tr><td>Stocks held at once</td><td><b>8</b> (1–20)</td></tr>
+        <tr><td>Most in one stock</td><td><b>15%</b> of the portfolio</td></tr>
+        <tr><td>Cash it never spends</td><td><b>5%</b></td></tr>
+        <tr><td>Stop-loss: sell a position down</td><td><b>12%</b> from cost</td></tr>
+        <tr><td>Daily-loss kill switch</td><td><b>5%</b> below last close → pauses itself</td></tr>
+        <tr><td>Trades per run</td><td><b>10</b> max</td></tr>
+      </tbody></table>
+      <p style="margin-top:10px;font-size:14px">It stops trading <b>30 minutes before the close</b>. With 2+ pods, only one runs it at a time (a PostgreSQL advisory lock).</p>
+    </div>
+  </div>
+</section>
+
+<!-- 7 -->
+<section class="slide" data-title="Architecture">
+  <div class="kicker">05 · Architecture</div>
+  <h2>How the website connects to Google Cloud</h2>
+  <div class="arch">
+    <div class="node"><b>Browser</b>Customer on any device</div>
+    <div class="arrow">→</div>
+    <div class="node hl2"><b>HTTPS load balancer</b>Static IP 34.8.137.93 · Google-managed certificate · HTTP → HTTPS</div>
+    <div class="arrow">→</div>
+    <div class="gke">
+      <b style="font-size:15px">GKE cluster · us-central1-a</b>
+      <p style="font-size:13px">e2-medium nodes · autoscaled pods · each pod = the same container image</p>
+      <div class="pods"><div class="pod">pod 1</div><div class="pod off">pod 2 (load)</div><div class="pod off">pod 3–4 (full mode)</div></div>
+    </div>
+  </div>
+  <div class="grid g4" style="margin-top:22px">
+    <div class="node hl"><b>Cloud SQL</b>PostgreSQL 16, private IP 10.27.48.3 only, TLS, 7 daily backups</div>
+    <div class="node hl"><b>Cloud Storage</b>Private bucket: profile photos, market cache, sentiment history</div>
+    <div class="node hl"><b>Secret Manager</b>DB password, Anthropic key; read into memory at startup</div>
+    <div class="node hl"><b>Artifact Registry</b>One image per commit: <code>app:&lt;SHA&gt;</code></div>
+    <div class="node"><b>Cloud Logging</b>One JSON line per request</div>
+    <div class="node"><b>Cloud Monitoring</b>5xx metric, dashboard, email alert</div>
+    <div class="node"><b>GitHub Actions</b>Test → build → deploy → check → rollback</div>
+    <div class="node"><b>Firebase Auth</b>Google sign-in, no key file</div>
+  </div>
+  <p style="margin-top:14px;font-size:14px">The pods keep <b>no state</b>: kill one and nothing is lost. Everything is described in <b>Terraform</b> (31 resources).</p>
+</section>
+
+<!-- 8 -->
+<section class="slide" data-title="Every click">
+  <div class="kicker">06 · Every click changes something in the cloud</div>
+  <h2>What each action writes, and where</h2>
+  <table>
+    <thead><tr><th>When a customer…</th><th>What changes</th><th>Where</th></tr></thead>
+    <tbody>
+      <tr><td><b>Signs up</b></td><td>User row, session, sign-in event, a portfolio with $100,000</td><td>Cloud SQL (4 rows)</td></tr>
+      <tr><td><b>Signs in</b></td><td>New session + a <code>login</code> event (IP, browser, time)</td><td>Cloud SQL (2 rows)</td></tr>
+      <tr><td><b>Buys a stock</b></td><td>Transaction + holding + cash balance, <b>all three or none</b>, with the portfolio row locked</td><td>Cloud SQL (1 transaction)</td></tr>
+      <tr><td><b>Uploads a photo</b></td><td><code>avatars/&lt;user id&gt;/&lt;random&gt;.jpg</code>; the old photo is deleted</td><td>Cloud Storage</td></tr>
+      <tr><td><b>Opens any page</b></td><td>One JSON log line: path, status, time taken</td><td>Cloud Logging</td></tr>
+      <tr><td><b>Brings heavy traffic</b></td><td>CPU over 60% → the HPA adds pods; full nodes → GKE adds a node</td><td>GKE</td></tr>
+      <tr><td><b>Gets a server error</b></td><td>The 5xx metric goes up → an alert email within a minute</td><td>Cloud Monitoring</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- 9 -->
+<section class="slide" data-title="Database">
+  <div class="kicker">07 · The database</div>
+  <h2>What the database keeps: nine tables</h2>
+  <div class="grid g3" style="gap:12px">
+    <div class="card"><h3>users</h3><p>Email, name, password <b>hash</b> (scrypt), photo path</p></div>
+    <div class="card"><h3>sessions</h3><p>Only the <b>SHA-256</b> of each sign-in token; 30-day expiry</p></div>
+    <div class="card"><h3>auth_events</h3><p>Sign-up, sign-in, failed, throttled, sign-out; with IP and browser</p></div>
+    <div class="card"><h3>portfolios</h3><p>Cash (a CHECK keeps it <b>never below $0</b>), autopilot settings</p></div>
+    <div class="card"><h3>holdings</h3><p>Stocks and options held, average buy price</p></div>
+    <div class="card"><h3>transactions</h3><p>Every order: BUY/SELL, quantity, price, time, customer or autopilot</p></div>
+    <div class="card"><h3>snapshots</h3><p>One portfolio value per trading day (feeds the kill switch)</p></div>
+    <div class="card"><h3>autopilot_runs</h3><p>Each run: trigger, status, trades made, notes</p></div>
+    <div class="card"><h3>politician_trades</h3><p>Congressional stock-trade disclosures</p></div>
+  </div>
+  <div class="grid g4" style="margin-top:14px">
+    <div class="stat"><div class="n a">39 / 39</div><div class="l">rows moved from Firestore, one transaction</div></div>
+    <div class="stat"><div class="n">7</div><div class="l">daily backups kept</div></div>
+    <div class="stat"><div class="n b">0</div><div class="l">public IPs on the database</div></div>
+    <div class="stat"><div class="n w">0</div><div class="l">passwords or tokens stored in plain text</div></div>
+  </div>
+</section>
+
+<!-- 10 -->
+<section class="slide" data-title="Security">
+  <div class="kicker">08 · Security</div>
+  <h2>Security, layer by layer</h2>
+  <div class="grid g2">
+    <div class="card"><h3>🔒 In transit</h3><ul class="dots"><li>HTTPS only; plain HTTP gets a <b>301</b> redirect</li><li>Database connections require <b>TLS</b></li><li>Google-managed certificate, renewed automatically</li></ul></div>
+    <div class="card"><h3>🔑 Sign-in</h3><ul class="dots"><li>Passwords hashed with <b>scrypt</b> and a random salt</li><li>One generic error message, so emails can't be guessed</li><li><b>5</b> failures per email or <b>20</b> per IP in 15 min → 429</li></ul></div>
+    <div class="card"><h3>🗝️ Secrets and identity</h3><ul class="dots"><li>Keys in <b>Secret Manager</b>; nobody has seen the DB passwords</li><li>GitHub deploys through <b>Workload Identity</b>: no key files anywhere</li><li>Each service account gets only the roles it needs; container runs as non-root</li></ul></div>
+    <div class="card"><h3>🗄️ Data</h3><ul class="dots"><li>Cloud SQL has <b>no public IP</b></li><li>Private bucket; a photo is only served to its owner</li><li>Photo type checked from the file's bytes, max 2 MB; prices from the server, never the browser</li></ul></div>
+  </div>
+</section>
+
+<!-- 11 -->
+<section class="slide" data-title="Reliability">
+  <div class="kicker">09 · Reliability</div>
+  <h2>Built to stay up</h2>
+  <div class="grid g3">
+    <div class="stat"><div class="n a">19 s</div><div class="l">a deleted pod was replaced and Ready</div></div>
+    <div class="stat"><div class="n">2 → 4 → 2</div><div class="l">pods under load, then back down (HPA, 60% CPU)</div></div>
+    <div class="stat"><div class="n a">668 / 668</div><div class="l">requests OK while a node was drained</div></div>
+  </div>
+  <div class="grid g2" style="margin-top:18px">
+    <div class="card"><h3>Why it heals itself</h3><ul class="dots">
+      <li><b>Readiness check</b> (<code>/ready</code>) includes the database: a pod gets traffic only when it can serve.</li>
+      <li><b>Rolling updates</b> with <code>maxUnavailable: 0</code>: old pods serve until new ones are ready.</li>
+      <li><b>Disruption budget</b> kept 1 pod up during node drains.</li>
+    </ul></div>
+    <div class="card"><h3>Real incident: Nov 19, 4,000 stocks</h3><ul class="dots">
+      <li>The first 4,000-stock history download pushed CPU to <b>125%</b>.</li>
+      <li>The HPA went to <b>4 pods</b> and GKE added a <b>3rd node</b>, with no errors.</li>
+      <li>CPU settled to <b>3%</b>, and it scaled back down by itself.</li>
+    </ul></div>
+  </div>
+</section>
+
+<!-- 12 -->
+<section class="slide" data-title="Pipeline">
+  <div class="kicker">10 · The pipeline</div>
+  <h2>Every push to master goes live, or rolls back</h2>
+  <div class="pipe">
+    <div class="step"><div class="t">1 · test</div><p>168 automated tests against a real PostgreSQL</p></div>
+    <div class="step"><div class="t">2 · build</div><p>Docker image tagged with the commit SHA → Artifact Registry</p></div>
+    <div class="step"><div class="t">3 · deploy</div><p><code>kubectl set image</code>, wait for the rollout</p></div>
+    <div class="step"><div class="t">4 · check</div><p>Public URL: <code>/health</code> shows the new SHA, <code>/ready</code> is 200</p></div>
+    <div class="step bad"><div class="t">5 · rollback</div><p>If 3 or 4 fails: <code>rollout undo</code>, verify the old version</p></div>
+  </div>
+  <div class="grid g4">
+    <div class="stat"><div class="n a">2:53</div><div class="l">push to live (minutes)</div></div>
+    <div class="stat"><div class="n">0</div><div class="l">key files: GitHub signs in with OIDC</div></div>
+    <div class="stat"><div class="n b">31</div><div class="l">Terraform resources, plan: "No changes"</div></div>
+    <div class="stat"><div class="n w">3</div><div class="l">failure paths tested (bad code, bad deploy, revert)</div></div>
+  </div>
+  <p style="margin-top:14px;font-size:14px">Tested Nov 8: broken code was stopped by the tests; a deploy on the wrong port was <b>rolled back automatically</b>. Docs-only commits use <code>[skip ci]</code>.</p>
+</section>
+
+<!-- 13 -->
+<section class="slide" data-title="Monitoring">
+  <div class="kicker">11 · Monitoring</div>
+  <h2>We know when something breaks</h2>
+  <div class="grid g3">
+    <div class="card"><h3>Logs</h3><p>Every request writes one <b>JSON line</b> (path, status, duration) to Cloud Logging. No passwords or tokens in logs.</p></div>
+    <div class="card"><h3>Metric and alert</h3><p>Log-based metric <code>app_http_5xx</code> counts server errors. Above 0 in a minute → <b>email alert</b>; a "recovered" email when it clears.</p></div>
+    <div class="card"><h3>Dashboard</h3><p>5xx per minute, load-balancer requests by response class, CPU and memory per pod, container restarts, the alert's state.</p></div>
+  </div>
+  <div class="grid g2" style="margin-top:18px">
+    <div class="card"><h3>Proof (Nov 8)</h3><p>3 controlled 500 errors → the metric went 0 → 3 → incident opened → email arrived → closed after a quiet minute.</p></div>
+    <div class="card"><h3>Budget alerts</h3><p>Billing alerts at <b>$10 / $25 / $50</b>, so a runaway cost shows up early.</p></div>
+  </div>
+</section>
+
+<!-- 14 -->
+<section class="slide" data-title="Journey">
+  <div class="kicker">12 · The journey</div>
+  <h2>From a laptop to Kubernetes in six milestones</h2>
+  <div class="tl">
+    <div class="card"><div class="d">Sep 21</div><h3>Local app</h3><p>FastAPI, momentum engine, paper trading, SQLite and a <code>.env</code> file.</p></div>
+    <div class="card"><div class="d">Milestone 2</div><h3>First VM</h3><p>An e2-micro on Compute Engine, reachable by IP.</p></div>
+    <div class="card"><div class="d">Milestone 3</div><h3>Containers</h3><p>Docker Compose + Caddy on the VM; images in Artifact Registry.</p></div>
+    <div class="card"><div class="d">Milestone 4 · Oct 18</div><h3>State off the VM</h3><p>Cloud SQL, Cloud Storage, Secret Manager; Firestore → Postgres, 39/39 rows.</p></div>
+    <div class="card"><div class="d">Milestone 5 · Oct 24</div><h3>Kubernetes</h3><p>GKE, HTTPS load balancer, autoscaling, self-healing, zero-downtime tests.</p></div>
+    <div class="card"><div class="d">Milestone 6 · Nov 8</div><h3>Automation</h3><p>CI/CD with rollback, Terraform, logs, metric, dashboard, alert.</p></div>
+  </div>
+  <div class="grid g3" style="margin-top:18px">
+    <div class="card"><h3>Nov 18</h3><p>Restarted after a pause since Nov 9; new Anthropic key; headlines labelled by Claude again.</p></div>
+    <div class="card"><h3>Nov 19</h3><p>Stock list 3,000 → 4,000; Anthropic (ANT) added on its IPO day; a $0-price bug fixed.</p></div>
+    <div class="card"><h3>Nov 20</h3><p>Final presentation, then <b>low-cost mode</b>: 1 pod, 1 node, same link.</p></div>
+  </div>
+</section>
+
+<!-- 15 -->
+<section class="slide" data-title="Problems">
+  <div class="kicker">13 · Problems we hit</div>
+  <h2>What went wrong, and what we changed</h2>
+  <table>
+    <thead><tr><th>Problem</th><th>Cause</th><th>Fix</th></tr></thead>
+    <tbody>
+      <tr><td><b>Option sales could create unlimited cash</b></td><td>Any typed premium was accepted</td><td>Premium bounded by intrinsic value, stock price and strike</td></tr>
+      <tr><td><b>Browser could set its own prices</b></td><td><code>mark-to-market</code> trusted client prices</td><td>Server uses only tracked prices</td></tr>
+      <tr><td><b>Pods crash-looped on restart</b></td><td>Pods started before Cloud SQL was up</td><td>Restart order: database → nodes → pods; <code>/ready</code> checks the DB</td></tr>
+      <tr><td><b>Idle DB connection dropped</b></td><td>Cloud SQL cut silent connections ("SSL EOF")</td><td>TCP keepalives on the connection</td></tr>
+      <tr><td><b>New IPO missing (ANT)</b></td><td>Nasdaq's screener lists IPOs days late</td><td>Extra-tickers list filled from Yahoo until Nasdaq has it</td></tr>
+      <tr><td><b>Trade preview returned 500</b></td><td>A $0.00 price → divide by zero</td><td>$0 means "no price found" → clear 404; 3 new tests</td></tr>
+      <tr><td><b>Headlines fell back to keywords</b></td><td>Anthropic API key rejected</td><td>New key as Secret Manager version 2, pods restarted</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- 16 -->
+<section class="slide" data-title="Cost">
+  <div class="kicker">14 · Cost</div>
+  <h2>From $85 to $55–60 a month, same link</h2>
+  <div class="grid g2" style="gap:28px">
+    <div>
+      <h3 style="margin-bottom:8px">Low-cost mode, per month (since Nov 20)</h3>
+      <div class="bar"><div class="k">1 GKE node (e2-medium)</div><div class="v" style="width:250px"></div><div class="x">~$25</div></div>
+      <div class="bar"><div class="k">HTTPS load balancer</div><div class="v" style="width:180px"></div><div class="x">~$18</div></div>
+      <div class="bar"><div class="k">Cloud SQL (db-f1-micro)</div><div class="v" style="width:100px"></div><div class="x">~$10</div></div>
+      <div class="bar"><div class="k">Old VM disk + IP</div><div class="v dim" style="width:80px"></div><div class="x">~$8</div></div>
+      <div class="bar"><div class="k">Registry, storage</div><div class="v dim" style="width:10px"></div><div class="x">&lt;$1</div></div>
+      <div class="bar"><div class="k">GKE cluster fee</div><div class="v dim" style="width:2px"></div><div class="x">$0 (free tier)</div></div>
+    </div>
+    <div>
+      <table>
+        <thead><tr><th>Mode</th><th>Pods</th><th>Nodes</th><th>$/month</th></tr></thead>
+        <tbody>
+          <tr><td><b>Full</b> (presented)</td><td>2–4</td><td>2–3</td><td>~$85</td></tr>
+          <tr><td><b>Low-cost</b> (now)</td><td>1–2</td><td>1–2</td><td>~$55–60</td></tr>
+          <tr><td><b>Off</b></td><td>0</td><td>0</td><td>~$15–20</td></tr>
+        </tbody>
+      </table>
+      <p style="margin-top:12px;font-size:14px">Switching takes one command per piece; the steps are in the README ("Turning it up, down or off"). Trade-off of 1 pod: about a minute of downtime if it is replaced.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 17 -->
+<section class="slide" data-title="Numbers">
+  <div class="kicker">15 · By the numbers</div>
+  <h2>The project in numbers</h2>
+  <div class="grid g4">
+    <div class="stat"><div class="n a">100</div><div class="l">commits, Sep 21 → Nov 20</div></div>
+    <div class="stat"><div class="n">168</div><div class="l">automated tests on every push</div></div>
+    <div class="stat"><div class="n b">51</div><div class="l">API endpoints</div></div>
+    <div class="stat"><div class="n">9</div><div class="l">web pages</div></div>
+    <div class="stat"><div class="n">~8,600</div><div class="l">lines of Python</div></div>
+    <div class="stat"><div class="n a">4,000</div><div class="l">US stocks tracked</div></div>
+    <div class="stat"><div class="n b">9</div><div class="l">database tables</div></div>
+    <div class="stat"><div class="n w">31</div><div class="l">cloud resources in Terraform</div></div>
+  </div>
+</section>
+
+<!-- 18 -->
+<section class="slide" data-title="Next steps">
+  <div class="kicker">What we'd change before real users</div>
+  <h2>From class project to production</h2>
+  <table>
+    <thead><tr><th>Today</th><th>For real users</th></tr></thead>
+    <tbody>
+      <tr><td>One zone, one database</td><td>Regional GKE cluster and high-availability Cloud SQL</td></tr>
+      <tr><td>Sign-in limit kept in each pod's memory</td><td>A shared store (Redis) or Cloud Armor rate limits</td></tr>
+      <tr><td>Public test endpoint <code>/debug/fail</code></td><td>Removed</td></tr>
+      <tr><td>Alert on any single 5xx</td><td>Alert on ~1% errors for 5 minutes, with an on-call rota</td></tr>
+      <tr><td>Prices ~15 min delayed</td><td>A licensed real-time feed, streamed instead of polled</td></tr>
+      <tr><td>sslip.io address</td><td>A custom domain</td></tr>
+      <tr><td>Rules-based autopilot</td><td>A trained ranking model (e.g. LightGBM) with a walk-forward backtest</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- 19 -->
+<section class="slide" data-title="Demo">
+  <div class="kicker">Live demo</div>
+  <h2>Try it yourself</h2>
+  <div class="grid g4">
+    <div class="card"><div class="mono" style="margin:0 0 6px">step 1</div><h3>Sign up and buy</h3><p>Create an account, get $100,000, buy "$100 of AAPL".</p></div>
+    <div class="card"><div class="mono" style="margin:0 0 6px">step 2</div><h3>See it in Cloud SQL</h3><p>The order appears as the newest row in <code>transactions</code>.</p></div>
+    <div class="card"><div class="mono" style="margin:0 0 6px">step 3</div><h3>Find it in the logs</h3><p>The request's JSON line in Cloud Logging.</p></div>
+    <div class="card"><div class="mono" style="margin:0 0 6px">step 4</div><h3>Break a pod</h3><p><code>kubectl delete pod</code> and watch a new one become Ready.</p></div>
+  </div>
+  <div class="spacer"></div>
+  <p class="lead">Live at <a href="https://34-8-137-93.sslip.io" target="_blank" rel="noopener"><b>https://34-8-137-93.sslip.io</b></a></p>
+  <p style="margin-top:6px">Code: <a href="https://github.com/tharun-yatarla02/Mahokshahvata" target="_blank" rel="noopener">github.com/tharun-yatarla02/Mahokshahvata</a></p>
+  <div class="spacer"></div>
+</section>
+
+<!-- 20 -->
+<section class="slide" data-title="Thank you">
+  <div class="spacer"></div>
+  <div class="big-q">Thank you</div>
+  <p class="lead" style="margin-top:18px">Questions?</p>
+  <p style="margin-top:28px">Tharun Reddy Yatarla · Siddhardha Anagani · EDS 6348 Group 1</p>
+  <p style="margin-top:6px"><a href="https://34-8-137-93.sslip.io" target="_blank" rel="noopener">34-8-137-93.sslip.io</a> · <a href="https://github.com/tharun-yatarla02/Mahokshahvata" target="_blank" rel="noopener">GitHub</a></p>
+  <div class="spacer"></div>
+  <p style="font-size:13px;color:var(--dim)">No real money is traded. Every portfolio is simulated. Prices are about 15 minutes delayed.</p>
+</section>
+
+
+<div id="ui">
+  <button id="prev" aria-label="Previous slide">←</button>
+  <button id="next" aria-label="Next slide">→</button>
+  <button id="fs" aria-label="Full screen">⛶</button>
+</div>
+</div></div>
+
+<script>
+(function(){
+  var slides=[].slice.call(document.querySelectorAll('.slide'));
+  var deck=document.getElementById('deck'), bar=document.getElementById('progress');
+  slides.forEach(function(s,i){
+    var f=document.createElement('div'); f.className='foot';
+    f.innerHTML='<span class="logo"><i></i>MHKV · Mahokshahvata</span><span>'+(i+1)+' / '+slides.length+' · ← → to move · F full screen</span>';
+    s.appendChild(f);
+  });
+  var cur=0;
+  function fromHash(){var n=parseInt((location.hash||'').replace('#',''),10);return (n>=1&&n<=slides.length)?n-1:0}
+  function show(i,push){
+    cur=Math.max(0,Math.min(slides.length-1,i));
+    slides.forEach(function(s,j){s.classList.toggle('active',j===cur)});
+    bar.style.width=((cur+1)/slides.length*100)+'%';
+    document.title='Mahokshahvata · '+slides[cur].dataset.title;
+    var h='#'+(cur+1); if(location.hash!==h){history[push?'pushState':'replaceState'](null,'',h)}
+  }
+  function fit(){var s=Math.min(window.innerWidth/1280,window.innerHeight/720);deck.style.transform='scale('+s+')'}
+  function fs(){if(!document.fullscreenElement){document.documentElement.requestFullscreen&&document.documentElement.requestFullscreen()}else{document.exitFullscreen()}}
+  document.addEventListener('keydown',function(e){
+    if(e.metaKey||e.ctrlKey||e.altKey)return;
+    var k=e.key;
+    if(k==='ArrowRight'||k==='PageDown'||k===' '){e.preventDefault();show(cur+1,true)}
+    else if(k==='ArrowLeft'||k==='PageUp'){e.preventDefault();show(cur-1,true)}
+    else if(k==='Home'){show(0,true)}else if(k==='End'){show(slides.length-1,true)}
+    else if(k==='f'||k==='F'){fs()}
+  });
+  document.getElementById('prev').onclick=function(){show(cur-1,true)};
+  document.getElementById('next').onclick=function(){show(cur+1,true)};
+  document.getElementById('fs').onclick=fs;
+  var tx=null;
+  document.addEventListener('touchstart',function(e){tx=e.touches[0].clientX},{passive:true});
+  document.addEventListener('touchend',function(e){if(tx===null)return;var dx=e.changedTouches[0].clientX-tx;if(Math.abs(dx)>40)show(cur+(dx<0?1:-1),true);tx=null});
+  window.addEventListener('hashchange',function(){show(fromHash(),false)});
+  window.addEventListener('resize',fit);
+  fit(); show(fromHash(),false);
+})();
+</script>
+</body>
+</html>
